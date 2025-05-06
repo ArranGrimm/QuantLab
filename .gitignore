@@ -9,5 +9,6 @@ wheels/
 # Virtual environments
 .venv
 # 结果文件
+results/
 .log
 .html
