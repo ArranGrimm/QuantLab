@@ -11,5 +11,6 @@ dependencies = [
     "loguru>=0.7.3",
     "numpy>=2.2.5",
     "pandas>=2.2.3",
+    "python-okx>=0.3.8",
     "ta-lib>=0.6.3",
 ]

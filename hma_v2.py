@@ -7,7 +7,7 @@ import sys
 import os
 from backtesting import Backtest, Strategy
 from backtesting.lib import crossover, FractionalBacktest # backtesting.py提供的有用工具，虽然此策略未使用
-# from bokeh.plotting import save, output_file # 如果保存绘图需要特定的 Bokeh 配置，请取消注释
+from bokeh.plotting import save, output_file # 如果保存绘图需要特定的 Bokeh 配置，请取消注释
 
 # --- 全局配置 ---
 target_name = "BTC"  # 例如: "CSI300", "AAPL", "BTC" 等
@@ -32,7 +32,7 @@ HULL_LEN = 55                 # Hull MA 周期
 SMA_LEN = 130                 # SMA 周期
 TRAIL_PCT = 0.05              # 追踪止损百分比 (例如 0.05 代表 5%)
 EQUITY_FRACTION_PER_TRADE = 0.95 # 每笔交易使用的权益比例 (例如 0.95 代表 95%)
-COMMISSION_PCT = 0.001        # 每笔交易的手续费率 (backtesting.py 会在进出场时应用)
+COMMISSION_PCT = 0.0015        # 每笔交易的手续费率 (backtesting.py 会在进出场时应用)
 # SLIPPAGE_PCT = 0.0005       # 滑点百分比 - backtesting.py 没有直接的滑点参数，可通过手续费模拟或假设成交价
 INITIAL_EQUITY = 100000       # 初始资金
 
