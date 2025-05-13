@@ -15,7 +15,7 @@ etf_symbols_original = ['518880.SH', '513100.SH', '513130.SH', '159915.SZ'] # �
 # ETF代码给akshare使用 (不带后缀)
 etf_codes_for_akshare = [s.split('.')[0] for s in etf_symbols_original]
 
-start_date = '2025-01-01'
+start_date = '2020-01-01'
 end_date = '2025-05-12'
 
 data_directory = "Data_Akshare" # 如果需要本地缓存akshare数据 (本脚本直接在线获取)
@@ -189,6 +189,30 @@ if __name__ == "__main__":
         logger.error(f"生成目标权重时出错: {e}")
         sys.exit(1)
 
+    # 以黄金ETF (518880.SH) 为基准
+    if '518880.SH' in price_df.columns:
+        gold_etf_prices = price_df['518880.SH'].copy()
+        # 确保基准价格序列与投资组合的索引对齐 (通常在price_df层面已经对齐)
+        # gold_etf_prices = gold_etf_prices.reindex(portfolio.wrapper.index, method='ffill').fillna(method='bfill') # 对齐索引并填充
+        benchmark_gold_returns = gold_etf_prices.vbt.to_returns()
+        logger.info("已准备黄金ETF (518880.SH) 作为基准的收益率数据。")
+    else:
+        logger.warning("ETF池中未找到黄金ETF (518880.SH)，无法将其设为基准。")
+        benchmark_gold_returns = None
+
+    # 以纳指ETF (513100.SH) 为基准
+    if '513100.SH' in price_df.columns:
+        nasdaq_etf_prices = price_df['513100.SH'].copy()
+        # nasdaq_etf_prices = nasdaq_etf_prices.reindex(portfolio.wrapper.index, method='ffill').fillna(method='bfill') # 对齐索引并填充
+        benchmark_nasdaq_returns = nasdaq_etf_prices.vbt.to_returns()
+        logger.info("已准备纳指ETF (513100.SH) 作为基准的收益率数据。")
+    else:
+        logger.warning("ETF池中未找到纳指ETF (513100.SH)，无法将其设为基准。")
+        benchmark_nasdaq_returns = None
+
+
+    vbt.settings['portfolio']['stats']['settings']['benchmark_rets'] = benchmark_nasdaq_returns
+    
     # --- 4. 执行组合回测 ---
     logger.info(f"开始执行VectorBT组合回测，初始资金: {initial_cash:.2f}...")
     try:
@@ -202,27 +226,6 @@ if __name__ == "__main__":
         logger.error(f"执行组合回测时出错: {e}")
         sys.exit(1)
     # 在 portfolio 回测完成之后，生成统计和绘图之前
-
-    # 以黄金ETF (518880.SH) 为基准
-    if '518880.SH' in price_df.columns:
-        gold_etf_prices = price_df['518880.SH'].copy()
-        # 确保基准价格序列与投资组合的索引对齐 (通常在price_df层面已经对齐)
-        gold_etf_prices = gold_etf_prices.reindex(portfolio.wrapper.index, method='ffill').fillna(method='bfill') # 对齐索引并填充
-        benchmark_gold_returns = gold_etf_prices.vbt.to_returns()
-        logger.info("已准备黄金ETF (518880.SH) 作为基准的收益率数据。")
-    else:
-        logger.warning("ETF池中未找到黄金ETF (518880.SH)，无法将其设为基准。")
-        benchmark_gold_returns = None
-
-    # 以纳指ETF (513100.SH) 为基准
-    if '513100.SH' in price_df.columns:
-        nasdaq_etf_prices = price_df['513100.SH'].copy()
-        nasdaq_etf_prices = nasdaq_etf_prices.reindex(portfolio.wrapper.index, method='ffill').fillna(method='bfill') # 对齐索引并填充
-        benchmark_nasdaq_returns = nasdaq_etf_prices.vbt.to_returns()
-        logger.info("已准备纳指ETF (513100.SH) 作为基准的收益率数据。")
-    else:
-        logger.warning("ETF池中未找到纳指ETF (513100.SH)，无法将其设为基准。")
-        benchmark_nasdaq_returns = None
 
     # --- 5. 显示与保存结果 ---
     logger.info("------ 回测结果 ------")
@@ -259,31 +262,3 @@ if __name__ == "__main__":
         logger.error(f"生成HTML报告时出错: {e}")
 
     logger.info(f"------ {strategy_name} 回测结束 ------")
-
-    if benchmark_gold_returns is not None:
-        logger.info("\n------ 回测结果 (对比 黄金ETF 518880.SH) ------")
-        stats_vs_gold = portfolio.stats(settings=dict(benchmark_rets=benchmark_gold_returns))
-        print(stats_vs_gold)
-        stats_gold_path = os.path.join(output_dir, f"{strategy_name}_stats_vs_Gold.txt")
-        with open(stats_gold_path, 'w', encoding='utf-8') as f:
-            f.write(stats_vs_gold.to_string())
-        logger.info(f"对比黄金ETF的统计数据已保存到: {stats_gold_path}")
-
-        # plot_vs_gold_path = os.path.join(output_dir, f"{strategy_name}_plot_vs_Gold.html")
-        # fig_vs_gold = portfolio.plot(settings=dict(benchmark_rets=benchmark_gold_returns))
-        # fig_vs_gold.write_html(plot_vs_gold_path)
-        # logger.info(f"对比黄金ETF的交互式报告已生成: {plot_vs_gold_path}")
-
-    if benchmark_nasdaq_returns is not None:
-        logger.info("\n------ 回测结果 (对比 纳指ETF 513100.SH) ------")
-        stats_vs_nasdaq = portfolio.stats(settings=dict(benchmark_rets=benchmark_nasdaq_returns))
-        print(stats_vs_nasdaq)
-        stats_nasdaq_path = os.path.join(output_dir, f"{strategy_name}_stats_vs_Nasdaq.txt")
-        with open(stats_nasdaq_path, 'w', encoding='utf-8') as f:
-            f.write(stats_vs_nasdaq.to_string())
-        logger.info(f"对比纳指ETF的统计数据已保存到: {stats_nasdaq_path}")
-
-        # plot_vs_nasdaq_path = os.path.join(output_dir, f"{strategy_name}_plot_vs_Nasdaq.html")
-        # fig_vs_nasdaq = portfolio.plot(settings=dict(benchmark_rets=benchmark_nasdaq_returns))
-        # fig_vs_nasdaq.write_html(plot_vs_nasdaq_path)
-        # logger.info(f"对比纳指ETF的交互式报告已生成: {plot_vs_nasdaq_path}")
