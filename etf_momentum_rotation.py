@@ -6,7 +6,6 @@ import numba
 from loguru import logger
 import sys
 import os
-from datetime import datetime
 import akshare as ak # <--- 新增akshare导入
 
 # --- 全局配置 ---
@@ -45,31 +44,65 @@ lookback_period = 25
 annual_trading_days = 250
 initial_cash = 100000
 commission_rate = 0.0002
-slippage_rate = 0.000
+slippage_rate = 0.0005
 
 # --- 辅助函数：动量计算 (Numba优化) ---
 @numba.njit
-def nb_calc_momentum_score(i, col, y_arr, annual_days):
+def nb_calc_momentum_score(i, col, y_arr, annual_days): # 签名保持不变，接收vectorbt传入的参数
     n = len(y_arr)
     if np.isnan(y_arr).any() or n < 2: return np.nan
+    
     log_y = np.log(y_arr)
     x = np.arange(n)
-    sum_x, sum_y, sum_x2, sum_xy = np.sum(x), np.sum(log_y), np.sum(x**2), np.sum(x * log_y)
-    denominator = (n * sum_x2 - sum_x**2)
+    
+    # --- 开始修改：引入线性递增权重 ---
+    weights = np.linspace(1.0, 2.0, n) # 权重从1线性增加到2
+    
+    # 加权线性回归计算 (参考Numpy的polyfit对于加权w的实现思路，或直接实现加权最小二乘法)
+    # Numba环境下直接用np.polyfit(x, y, 1, w=weights)可能不支持或效率不高
+    # 我们需要手动实现加权最小二乘法的斜率和截距计算
+    
+    w_sum = np.sum(weights)
+    w_x_sum = np.sum(weights * x)
+    w_y_sum = np.sum(weights * log_y)
+    w_x2_sum = np.sum(weights * x**2)
+    w_xy_sum = np.sum(weights * x * log_y)
+    
+    denominator = w_sum * w_x2_sum - w_x_sum**2
     if denominator == 0: return np.nan
-    slope = (n * sum_xy - sum_x * sum_y) / denominator
-    mean_y = np.mean(log_y)
-    ss_tot = np.sum((log_y - mean_y)**2)
-    if ss_tot == 0: r_squared = 0.0
+    
+    slope = (w_sum * w_xy_sum - w_x_sum * w_y_sum) / denominator
+    intercept = (w_y_sum - slope * w_x_sum) / w_sum # 也可以是 (w_x2_sum * w_y_sum - w_x_sum * w_xy_sum) / denominator
+    
+    # 计算加权R²
+    y_pred = slope * x + intercept
+    weighted_residuals_sq = weights * (log_y - y_pred)**2
+    
+    # 加权均值
+    weighted_mean_y = np.sum(weights * log_y) / w_sum
+    weighted_ss_tot = np.sum(weights * (log_y - weighted_mean_y)**2)
+    
+    if weighted_ss_tot == 0: # 如果加权总平方和为0 (例如加权后的y值恒定)
+        r_squared = 0.0 # 或1.0，取决于定义。如果预测完美，残差为0，R^2应为1。若y本身无波动，R^2通常无意义或为0。
+                        # MarioC代码中是 np.sum(weights * (y - np.mean(y))**2)，这里用加权均值更一致。
+                        # 如果 y 值本身恒定（即使加权后），weighted_ss_tot 会是0，导致除零。
+                        # 如果 y 值恒定，log_y也恒定，那么slope会是0，y_pred也是恒定等于log_y。
+                        # 此时 weighted_residuals_sq 会是0。如果 weighted_ss_tot 也是0，R^2可以定义为1（完美拟合常数）或0（无趋势）。
+                        # 我们参考MarioC的实现，如果 y - np.mean(y) 部分加权后为0，则R^2可能出问题。
+                        # 安全起见，如果 weighted_ss_tot 为0，且 weighted_residuals_sq 也为0，说明完美拟合常数，R^2=1。
+                        # 如果 weighted_ss_tot 为0，但 weighted_residuals_sq 不为0（理论上不太可能），则R^2未定义或为0。
+                        # 简单处理：若 weighted_ss_tot 为0，则 r_squared 为0 (表示没有可解释的方差，或趋势不明显)
+        r_squared = 0.0
     else:
-        intercept = (sum_y - slope * sum_x) / n
-        y_pred = slope * x + intercept
-        ss_res = np.sum((log_y - y_pred)**2)
-        r_squared = 1.0 - (ss_res / ss_tot)
-        r_squared = max(0.0, r_squared)
+        r_squared = 1.0 - (np.sum(weighted_residuals_sq) / weighted_ss_tot)
+        r_squared = max(0.0, r_squared) # 确保R²不为负
+
+    # --- 修改结束 ---
+        
     daily_factor = np.exp(slope)
     annualized_returns = daily_factor**annual_days - 1.0
     score = annualized_returns * r_squared
+    
     if not np.isfinite(score): return np.nan
     return score
 
@@ -152,7 +185,7 @@ if __name__ == "__main__":
         price_df = price_df.dropna(axis=0, how='all') # 删除所有列都为NaN的行（通常不会发生在此处）
         price_df = price_df.dropna(axis=1, how='all') # 删除数据加载后完全是NaN的ETF列
         # 进一步确保开始阶段没有NaN（动量计算对NaN敏感）
-        price_df = price_df.dropna(axis=0, how='any', subset=price_df.columns[:1]) # 基于第一个ETF确保起始数据完整
+        # price_df = price_df.dropna(axis=0, how='any', subset=price_df.columns[:1]) # 基于第一个ETF确保起始数据完整
 
     if price_df.empty or price_df.shape[1] < 2: # 需要至少两个ETF才能轮动
         logger.error(f"数据加载或处理后，有效的ETF数量 ({price_df.shape[1]}) 少于2个，无法进行轮动。")
@@ -177,13 +210,41 @@ if __name__ == "__main__":
         logger.error(f"计算动量得分时出错: {e}")
         sys.exit(1)
 
-    # --- 3. 生成交易信号 (目标权重) ---
-    logger.info("根据动量得分生成目标权重 (持有Top 1)...")
+    # --- 3. 生成交易信号
+    logger.info("根据动量得分生成目标权重 (安全摸狗逻辑)...")
     try:
-        ranks = momentum_scores.rank(axis=1, ascending=False, method='first')
+        # --- 开始修改：加入安全区间过滤 ---
+        # 1. 复制一份动量得分用于操作，避免修改原始的 momentum_scores
+        filtered_momentum_scores = momentum_scores.copy()
+
+        # 2. 应用安全区间过滤条件: (0, 5]
+        # 将不符合条件的得分设为负无穷小或NaN，这样它们在后续排名中会排在最后或被忽略
+        # MarioC的逻辑是直接筛选DataFrame，我们这里通过修改得分来实现类似效果，以便后续排名
+        condition = (filtered_momentum_scores > 0) & (filtered_momentum_scores <= 5)
+        # 对于不满足条件的，我们给一个非常低的值，确保它们不会被选中
+        # 或者，可以直接将它们设为NaN，rank函数会处理NaN
+        filtered_momentum_scores[~condition] = np.nan 
+        
+        logger.info(f"应用安全区间 (0, 5] 过滤后的动量得分 (部分显示NaN为不合格):\n{filtered_momentum_scores.tail()}")
+
+        # 3. 对过滤后的得分进行排名
+        #   如果所有ETF都被过滤掉（即filtered_momentum_scores该行全是NaN），则ranks对应行也会是NaN
+        ranks = filtered_momentum_scores.rank(axis=1, ascending=False, method='first')
+        
+        # 4. 生成目标权重：选择排名第一的（如果存在）
+        #   如果某行ranks全是NaN，那么np.where(ranks == 1,...) 的结果在该行仍将是False(0.0)
         target_weights = pd.DataFrame(np.where(ranks == 1, 1.0, 0.0),
-                                      index=price_df.index,
-                                      columns=price_df.columns) # 列名应与price_df一致
+                                      index=price_df.index, 
+                                      columns=price_df.columns)
+        
+        # 检查是否有任何一天选出了ETF (即是否有权重为1的情况)
+        # 如果某天 target_weights.sum(axis=1) == 0，则表示当天无ETF可选，即空仓
+        days_with_selection = target_weights.sum(axis=1) > 0
+        logger.info(f"在 {days_with_selection.sum()} 天中选出了ETF进行持有 (共 {len(days_with_selection)} 个交易日)。")
+        if days_with_selection.sum() == 0:
+            logger.warning("警告：在整个回测期间，根据安全摸狗逻辑，没有选出任何ETF持有！请检查过滤条件或市场状况。")
+
+        # --- 修改结束 ---
         logger.success("目标权重生成完成。")
     except Exception as e:
         logger.error(f"生成目标权重时出错: {e}")
