@@ -12,3 +12,6 @@ wheels/
 results/
 *.log
 *.html
+Data/
+
+.DS_Store
