@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-混合频率ETF动量轮动策略
+混合频率ETF动量轮动策略（纯 polars 实现）
 结合日线数据（历史动量）+ 5分钟数据（实时价格）
 在11:00和14:30两个时点触发交易信号
+输出列：date | signal | price | symbol
 """
 import polars as pl
 import numpy as np
 from loguru import logger
 import sys
 import os
-from datetime import time, datetime, timedelta
+from datetime import time, datetime
 from typing import Dict, List, Tuple, Optional
 import warnings
 warnings.filterwarnings('ignore')
@@ -63,49 +64,47 @@ def weighted_linear_regression(y_values: np.ndarray) -> Tuple[float, float]:
     n = len(y_values)
     if n < 2 or np.isnan(y_values).any():
         return np.nan, np.nan
-    
+
     # 对数变换
     log_y = np.log(y_values)
     x = np.arange(n)
-    
-    # 线性递增权重
+
+    # 线性递增权重 1.0 -> 2.0
     weights = np.linspace(1.0, 2.0, n)
-    
-    # 加权最小二乘法计算
+
+    # 加权最小二乘
     w_sum = np.sum(weights)
     w_x_sum = np.sum(weights * x)
     w_y_sum = np.sum(weights * log_y)
     w_x2_sum = np.sum(weights * x**2)
     w_xy_sum = np.sum(weights * x * log_y)
-    
-    denominator = w_sum * w_x2_sum - w_x_sum**2
+
+    denominator = w_sum * w_x2_sum - (w_x_sum * w_x_sum)
     if denominator == 0:
         return np.nan, np.nan
-    
-    # 计算斜率和截距
+
     slope = (w_sum * w_xy_sum - w_x_sum * w_y_sum) / denominator
     intercept = (w_y_sum - slope * w_x_sum) / w_sum
-    
-    # 计算加权R²
+
+    # 加权R²
     y_pred = slope * x + intercept
-    weighted_residuals_sq = weights * (log_y - y_pred)**2
-    
-    weighted_mean_y = np.sum(weights * log_y) / w_sum
-    weighted_ss_tot = np.sum(weights * (log_y - weighted_mean_y)**2)
-    
+    weighted_residuals_sq = weights * (log_y - y_pred) ** 2
+    weighted_mean_y = w_y_sum / w_sum
+    weighted_ss_tot = np.sum(weights * (log_y - weighted_mean_y) ** 2)
+
     if weighted_ss_tot == 0:
         r_squared = 0.0
     else:
         r_squared = 1.0 - (np.sum(weighted_residuals_sq) / weighted_ss_tot)
         r_squared = max(0.0, r_squared)
-    
-    # 计算年化收益率
+
+    # 年化收益率
     daily_factor = np.exp(slope)
     annualized_return = daily_factor**ANNUAL_TRADING_DAYS - 1.0
-    
+
     return annualized_return, r_squared
 
-def calculate_momentum_score(historical_prices: np.ndarray, current_price: float) -> float:
+def calculate_momentum_score(historical_prices: List[float], current_price: float) -> float:
     """
     计算动量得分 - 混合历史日线数据和当前分钟级价格
     
@@ -118,19 +117,17 @@ def calculate_momentum_score(historical_prices: np.ndarray, current_price: float
     """
     if len(historical_prices) < LOOKBACK_PERIOD:
         return np.nan
-    
-    # 将当前价格与历史价格组合
-    combined_prices = np.append(historical_prices[-(LOOKBACK_PERIOD-1):], current_price)
-    
-    # 计算加权线性回归
+
+    # 组合历史+当前价格
+    tail_hist = np.array(historical_prices[-(LOOKBACK_PERIOD - 1):], dtype=float)
+    combined_prices = np.concatenate([tail_hist, np.array([current_price], dtype=float)])
+
     annualized_return, r_squared = weighted_linear_regression(combined_prices)
-    
+
     if np.isnan(annualized_return) or np.isnan(r_squared):
         return np.nan
-    
-    # 最终得分
+
     score = annualized_return * r_squared
-    
     return score if np.isfinite(score) else np.nan
 
 class IntradayMomentumStrategy:
@@ -143,13 +140,29 @@ class IntradayMomentumStrategy:
         self.traded_dates = set() # 已交易日期
         
     def load_daily_data(self) -> Dict[str, pl.DataFrame]:
-        """加载日线数据（用于历史动量计算）"""
+        """加载日线数据（用于历史动量计算），来自 Data/{symbol}.csv"""
         logger.info("开始加载日线数据...")
-        
-        # 这里使用模拟数据，实际应该加载真实的日线数据
-        # 由于用户没有提供日线数据文件，我们暂时跳过
-        logger.warning("日线数据加载功能需要补充实现")
-        return {}
+
+        daily_data: Dict[str, pl.DataFrame] = {}
+        for symbol in ETF_SYMBOLS:
+            file_path = os.path.join(DATA_DIR, f"{symbol}.csv")
+            if not os.path.exists(file_path):
+                logger.warning(f"缺少日线数据文件: {file_path}")
+                continue
+            try:
+                df = pl.read_csv(file_path)
+                if "Date" not in df.columns or "Close" not in df.columns:
+                    logger.error(f"日线数据文件格式不正确: {file_path}")
+                    continue
+                df = df.with_columns([
+                    pl.col("Date").str.strptime(pl.Date, format="%Y-%m-%d", strict=False).alias("date"),
+                    pl.col("Close").cast(pl.Float64).alias("close")
+                ]).select(["date", "close"]).sort("date")
+                daily_data[symbol] = df
+                logger.info(f"加载日线数据: {symbol} 共 {df.height} 行")
+            except Exception as e:
+                logger.error(f"加载日线数据失败 {symbol}: {e}")
+        return daily_data
     
     def load_intraday_data(self) -> Dict[str, pl.DataFrame]:
         """加载5分钟级数据"""
@@ -204,30 +217,20 @@ class IntradayMomentumStrategy:
         
         return sorted(list(all_dates))
     
-    def get_historical_prices(self, symbol: str, end_date, lookback_days: int) -> Optional[np.ndarray]:
-        """获取历史日线价格（模拟实现）"""
-        # 这里需要从日线数据中获取历史价格
-        # 由于没有日线数据，我们使用5分钟数据的收盘价来模拟
-        # 实际实现中应该使用真实的日线数据
-        
-        if symbol not in self.intraday_data:
+    def get_historical_prices(self, symbol: str, end_date, lookback_days: int) -> Optional[List[float]]:
+        """获取历史日线价格（从CSV日线数据）"""
+        if symbol not in self.daily_data:
             return None
-        
-        df = self.intraday_data[symbol]
-        
-        # 获取该日期之前的数据，按日分组取最后一个价格作为当日收盘价
+
+        df = self.daily_data[symbol]
         historical_df = (
             df.filter(pl.col("date") < end_date)
-            .group_by("date")
-            .agg(pl.col("close").last().alias("daily_close"))
-            .sort("date")
-            .tail(lookback_days)
+              .sort("date")
+              .tail(lookback_days)
         )
-        
-        if len(historical_df) < lookback_days:
+        if historical_df.height < lookback_days:
             return None
-        
-        return historical_df.select("daily_close").to_numpy().flatten()
+        return historical_df.select("close").to_series().to_list()
     
     def calculate_signals_for_datetime(self, target_datetime) -> Optional[Dict]:
         """计算指定时间点的交易信号"""
@@ -275,7 +278,7 @@ class IntradayMomentumStrategy:
             # 计算动量得分
             score = calculate_momentum_score(historical_prices, current_price)
             
-            if not np.isnan(score):
+            if not (isinstance(score, float) and np.isnan(score)):
                 momentum_scores[symbol] = score
                 logger.debug(f"{symbol} 动量得分: {score:.4f}")
         
@@ -319,7 +322,8 @@ class IntradayMomentumStrategy:
         """生成所有交易信号"""
         logger.info("开始生成交易信号...")
         
-        # 加载数据
+        # 加载数据（先日线，再分钟线）
+        self.daily_data = self.load_daily_data()
         self.intraday_data = self.load_intraday_data()
         
         if not self.intraday_data:
@@ -392,12 +396,16 @@ class IntradayMomentumStrategy:
             logger.warning("未生成任何交易记录")
             return pl.DataFrame()
         
-        # 转换为DataFrame
+        # 转换为DataFrame并输出期望列
         trades_df = pl.DataFrame(trades)
-        
-        logger.info(f"生成 {len(trades_df)} 条交易记录")
-        
-        return trades_df
+        result_df = trades_df.select([
+            pl.col("date").alias("date"),
+            pl.col("action").alias("signal"),
+            pl.col("price").alias("price"),
+            pl.col("symbol").alias("symbol")
+        ])
+        logger.info(f"生成 {result_df.height} 条交易记录")
+        return result_df
 
 def main():
     """主函数"""
@@ -420,12 +428,12 @@ def main():
             trades_df.write_csv(output_file)
             logger.info(f"交易信号已保存到: {output_file}")
             
-            # 统计信息
-            buy_count = trades_df.filter(pl.col("action") == "BUY").height
-            sell_count = trades_df.filter(pl.col("action") == "SELL").height
+            # 统计信息（基于 signal 列）
+            buy_count = trades_df.filter(pl.col("signal") == "BUY").height
+            sell_count = trades_df.filter(pl.col("signal") == "SELL").height
             unique_dates = trades_df.select("date").unique().height
             
-            logger.info(f"统计信息:")
+            logger.info("统计信息:")
             logger.info(f"  买入次数: {buy_count}")
             logger.info(f"  卖出次数: {sell_count}")
             logger.info(f"  交易日数: {unique_dates}")
