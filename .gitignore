@@ -1,17 +1,67 @@
-# Python-generated files
+# --- Python ---
 __pycache__/
-*.py[oc]
+*.py[cod]
+*$py.class
+*.so
+.Python
 build/
+develop-eggs/
 dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
 wheels/
-*.egg-info
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Virtual environments
+# --- Jupyter Notebooks ---
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+profile_default/
+ipython_config.py
+
+# --- Environments ---
+.env
 .venv
-# 结果文件
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# --- IDEs ---
+.idea/
+.vscode/
+*.swp
+*.swo
+.cursor/
+
+# --- Quant Data & Results (Important) ---
+# Ignore large data files
+data/
+*.csv
+*.h5
+*.hdf5
+*.parquet
+*.pkl
+*.pickle
+*.db
+*.sqlite
+
+# Ignore backtest logs and reports
 results/
+logs/
 *.log
 *.html
-Data/
+!README.md
 
+# --- OS Generated ---
 .DS_Store
+Thumbs.db
