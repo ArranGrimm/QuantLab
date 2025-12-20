@@ -15,9 +15,10 @@ dependencies = [
     "numba>=0.61.2",
     "numpy>=2.2.5",
     "pandas>=2.2.3",
-    "polars[all]>=1.32.0",
+    "polars[all]>=1.32.3",
     "python-okx>=0.3.8",
     "ta-lib>=0.6.3",
     "vectorbt>=0.27.3",
+    "watchdog>=6.0.0",
     "yfinance>=0.2.61",
 ]
