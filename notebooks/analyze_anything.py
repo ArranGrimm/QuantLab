@@ -202,8 +202,8 @@ def _(df_bal, df_cap, df_daily, df_div, df_inc, pl):
 
 
 @app.cell
-def _(df_final):
-    df_final
+def _(df_daily):
+    df_daily
     return
 
 
