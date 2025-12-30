@@ -8,6 +8,7 @@ dependencies = [
     "akshare>=1.16.90",
     "backtesting>=0.6.4",
     "bokeh>=3.7.2",
+    "catboost>=1.2.8",
     "ipykernel>=6.29.5",
     "loguru>=0.7.3",
     "marimo>=0.14.17",
