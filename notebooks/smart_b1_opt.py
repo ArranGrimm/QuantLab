@@ -77,13 +77,40 @@ def _(DATA_ROOT, os, pl):
 @app.cell
 def _(CatBoostClassifier, pd, pl):
     # ==============================================================================
-    # 2. 特征工程：回归初心 (专注回踩结构)
+    # 1. 配置：Ztalk 体系核心“天道” (活跃市值多头区域)
+    # ==============================================================================
+    MANUAL_LOOSE_PERIODS = [
+        ("2019-02-11", "2019-04-10"),  # 春季躁动
+        ("2019-12-16", "2020-03-02"),  # 疫情反弹
+        ("2020-06-19", "2020-07-15"),  # 证券疯牛
+        ("2020-12-24", "2021-01-25"),  # 新能源抱团
+        ("2021-04-16", "2021-09-14"),  # 锂电光伏
+        ("2022-04-27", "2022-07-05"),  # 427大反弹
+        ("2023-01-15", "2023-04-15"),  # ChatGPT/CPO
+        ("2024-02-06", "2024-03-20"),  # 救市AI反弹
+        ("2024-09-24", "2024-10-15"),  # 924 史诗暴涨
+        ("2025-06-24", "2025-09-04"),  # 2025年慢牛
+    ]
+
+    # ==============================================================================
+    # 2. 特征工程：全能工厂 (形态 + 天道 + 目标)
     # ==============================================================================
     def prepare_morphology_dataset(df: pl.LazyFrame) -> pl.DataFrame:
-        print("🛠️ [Feature] 正在构建特征 (收紧过滤，强制聚焦形态)...")
+        print("🛠️ [Feature] 正在构建全量特征 (形态学 + 天道注入)...")
+
+        # --- 辅助函数：构建天道表达式 ---
+        # 在 Polars 中高效匹配日期区间
+        regime_expr = pl.lit(False)
+        for start, end in MANUAL_LOOSE_PERIODS:
+            # 逻辑：只要落在任意一个区间内，就是 True
+            regime_expr = regime_expr | (
+                (pl.col("date") >= pl.lit(start).str.strptime(pl.Date, "%Y-%m-%d")) & 
+                (pl.col("date") <= pl.lit(end).str.strptime(pl.Date, "%Y-%m-%d"))
+            )
 
         return (
             df.sort(["code", "date"])
+            # 1. 基础数据准备
             .with_columns([
                 pl.col("close_adj").shift(1).over("code").alias("prev_close"),
                 pl.col("high_adj").rolling_max(9).over("code").alias("high_9d"),
@@ -94,6 +121,7 @@ def _(CatBoostClassifier, pd, pl):
                   pl.col("close_adj").rolling_mean(57).over("code") + 
                   pl.col("close_adj").rolling_mean(114).over("code")) / 4).alias("YL"),
             ])
+            # 2. KDJ 计算
             .with_columns([
                 (pl.col("high_9d") - pl.col("low_9d")).alias("kdj_den"),
             ])
@@ -110,33 +138,28 @@ def _(CatBoostClassifier, pd, pl):
             .with_columns([
                 (3 * pl.col("K") - 2 * pl.col("D")).alias("J"),
             ])
-            # --- 🔥 形态学特征 (只保留描述 K 线本身长相的特征) ---
+            # 3. 🔥 核心特征构建 (Micro & Macro)
             .with_columns([
-                # 1. 下影线比例 (越高越好)
+                # --- Macro: 天道 (直接在此处注入) ---
+                regime_expr.cast(pl.Int32).alias("feat_market_regime"),
+
+                # --- Micro: 形态 ---
+                # 下影线比例
                 ((pl.min_horizontal("open_adj", "close_adj") - pl.col("low_adj")) / (pl.col("high_adj") - pl.col("low_adj") + 0.0001)).alias("feat_shadow_ratio"),
-
-                # 2. 急跌系数 (越高说明是洗盘)
+                # 急跌系数
                 ((pl.col("close_adj") / pl.col("close_adj").shift(3).over("code") - 1) / (pl.col("close_adj") / pl.col("close_adj").shift(10).over("code") - 1 + 0.0001)).alias("feat_drop_violence"),
-
-                # 3. 极速缩量 (越高越好)
+                # 极速缩量
                 (pl.col("volume").rolling_max(5).over("code").shift(1) / pl.col("volume")).alias("feat_vol_shrink_fast"),
-
-                # 4. 余温 (妖股记忆，这个可以留，因为它不是位置特征)
+                # 妖股余温
                 ((pl.col("close_adj") / pl.col("prev_close") - 1) > 0.095).cast(pl.Int32).rolling_max(10).over("code").alias("feat_limit_up_recent"),
-
-                # 5. 黄线粘合度 (越低越好，B1核心)
+                # 黄线粘合度
                 ((pl.col("low_adj") - pl.col("YL")).abs() / pl.col("YL")).alias("feat_yl_stickiness"),
-            
-                # 6. J值 (越低越好)
+                # J值
                 pl.col("J").alias("feat_J"),
-            
-                # 7. 实体位置 (Close相对于High/Low的位置)
-                # 既然是回踩，收盘价最好不要是光头阳线(那是突破)，也不要是光脚阴线
-                # 我们引入一个特征：收盘价在当日振幅的什么位置
+                # 实体位置
                 ((pl.col("close_adj") - pl.col("low_adj")) / (pl.col("high_adj") - pl.col("low_adj") + 0.0001)).alias("feat_close_pos_in_candle"),
             ])
-        
-            # --- 🎯 目标构建 (保持不变) ---
+            # 4. 🎯 目标构建 (Tier 0/1/2)
             .with_columns([
                 ((pl.col("high_adj").shift(-3).rolling_max(3).over("code") / pl.col("close_adj") - 1) * 100).alias("fwd_max_rise"),
                 ((pl.col("close_adj").shift(-3) / pl.col("close_adj") - 1) * 100).alias("fwd_close_ret"),
@@ -156,10 +179,7 @@ def _(CatBoostClassifier, pd, pl):
                 .otherwise(0)
                 .alias("label_tier")
             ])
-        
-            # --- 🚪 过滤器修正 (关键！) ---
-            # 1. J <= 25: 稍微比 13 放宽一点点，包含华纳药厂那种15左右的，但绝不要 50 的垃圾
-            # 2. Close > YL * 0.96: 允许跌破 4%，防止漏掉深洗盘，但不能太离谱
+            # 5. 🚪 过滤器
             .filter(
                 (pl.col("J") <= 25) & 
                 (pl.col("close_adj") > pl.col("YL") * 0.96)
@@ -168,20 +188,31 @@ def _(CatBoostClassifier, pd, pl):
             .collect()
         )
 
+    # ==============================================================================
+    # 3. 训练：一致性训练
+    # ==============================================================================
     def train_morphology_model(df_ml: pl.DataFrame):
         data = df_ml.to_pandas()
         data['date'] = pd.to_datetime(data['date'])
+    
+        # 打印一下天道覆盖率，确保注入成功
+        regime_ratio = data['feat_market_regime'].mean()
+        print(f"📅 [Check] 训练集‘手松’日子占比: {regime_ratio:.2%}")
 
-        # 🚨 剔除 feat_left_height, feat_price_pos, feat_yl_slope
-        # 强迫模型看“微观结构”
+        # 🚨 完整特征列表 (包含天道 + 形态)
         features = [
-            "feat_shadow_ratio", "feat_drop_violence", "feat_vol_shrink_fast", 
-            "feat_limit_up_recent", "feat_yl_stickiness", 
-            "feat_J", "feat_close_pos_in_candle"
+            "feat_market_regime",       # 【天】手松/手紧
+            "feat_shadow_ratio",        # 【地】下影线
+            "feat_yl_stickiness",       # 【地】回踩
+            "feat_close_pos_in_candle", # 【地】K线位置
+            "feat_vol_shrink_fast",     # 【地】缩量
+            "feat_drop_violence",       # 【地】急跌
+            "feat_J",                   # 【地】超跌
+            "feat_limit_up_recent"      # 【地】妖股基因
         ]
         target = "label_tier"
 
-        # 切分时间
+        # 切分
         split_date = pd.Timestamp("2024-01-01")
         train_data = data[data['date'] < split_date]
         test_data = data[data['date'] >= split_date]
@@ -191,13 +222,13 @@ def _(CatBoostClassifier, pd, pl):
         X_test = test_data[features]
         y_test = test_data[target]
     
-        metadata_test = test_data[['code', 'date', 'close_raw']].copy()
-    
-        print(f"📊 训练集分布 (过滤器 J<=25): \n{y_train.value_counts(normalize=True)}")
+        metadata_test = test_data[['code', 'date']].copy()
+
+        print(f"⚡ CatBoost (One-Stop版) 启动...")
 
         model = CatBoostClassifier(
             iterations=1000,
-            learning_rate=0.03, # 降低学习率，让它慢慢学细节
+            learning_rate=0.03,
             depth=6,
             loss_function='MultiClass',
             eval_metric='MultiClass',
@@ -210,20 +241,17 @@ def _(CatBoostClassifier, pd, pl):
 
         model.fit(X_train, y_train, eval_set=(X_test, y_test), early_stopping_rounds=100)
 
-        # 预测
-        probs = model.predict_proba(X_test)
-        metadata_test['score_tier2'] = probs[:, 2]
-    
         # 特征重要性
-        feature_importances = model.get_feature_importance()
-        fi_dict = dict(zip(features, feature_importances))
+        fi = model.get_feature_importance()
+        fi_dict = dict(zip(features, fi))
         sorted_fi = sorted(fi_dict.items(), key=lambda x: x[1], reverse=True)
 
-        print(f"\n====== 🧠 AI 眼中的‘B1微观结构’权重 (去除干扰项) ======")
+        print(f"\n====== ⚖️ 终极权重：天道 vs 形态 ======")
         for name, score in sorted_fi:
-            print(f"{name:<25} | {score:>8.2f}%")
+            role = "【天条】" if "regime" in name else "【形态】"
+            print(f"{name:<25} | {score:>8.2f}%   | {role}")
 
-        return metadata_test, model
+        return metadata_test, model 
     return prepare_morphology_dataset, train_morphology_model
 
 
@@ -250,9 +278,14 @@ def audit_model_confidence(model, df_features, case_list):
 
     # 🚨 必须与训练时的特征列表完全一致，加入了 feat_price_pos
     features = [
-        "feat_shadow_ratio", "feat_drop_violence", "feat_vol_shrink_fast", 
-        "feat_limit_up_recent", "feat_yl_stickiness", 
-        "feat_J", "feat_close_pos_in_candle"
+        "feat_market_regime",       # 【天】手松/手紧
+        "feat_shadow_ratio",        # 【地】下影线
+        "feat_yl_stickiness",       # 【地】回踩
+        "feat_close_pos_in_candle", # 【地】K线位置
+        "feat_vol_shrink_fast",     # 【地】缩量
+        "feat_drop_violence",       # 【地】急跌
+        "feat_J",                   # 【地】超跌
+        "feat_limit_up_recent"      # 【地】妖股基因
     ]
 
     scores = []
@@ -265,13 +298,13 @@ def audit_model_confidence(model, df_features, case_list):
         if len(row) > 0:
             # 提取特征并让模型打分
             X_input = row[features]
-            
+
             # predict_proba 返回形状 [N, 3] -> [[P(0), P(1), P(2)]]
             all_probs = model.predict_proba(X_input)[0] 
-            
+
             p1 = all_probs[1] # Tier 1 (普通涨) 的概率
             p2 = all_probs[2] # Tier 2 (大肉/妖股) 的概率
-            
+
             # 我们主要看 p2，以此作为核心信心分
             print(f"{item['code']:<10} | {item['name']:<8} | {item['date']:<10} | {p2:.4f}       | {p1:.4f}       | {item['result']}")
             scores.append(p2)
@@ -343,21 +376,27 @@ def _(df_morph, model):
 
 @app.cell
 def _(df_res):
+    df_res
+    return
+
+
+@app.cell
+def _(df_res):
     # ==============================================================================
     # 🕵️‍♂️ 揭秘：AI 眼中的 Top 10 “妖股候选”
     # ==============================================================================
     def show_model_top_picks(df_result, top_n=10):
         # 1. 按 Tier 2 (妖股概率) 倒序排列
         top_picks = df_result.sort_values(by="score_tier2", ascending=False).head(top_n).copy()
-    
+
         print(f"\n====== 🌟 AI 模型自选 Top {top_n} (基于 Tier 2 概率) ======")
         print(f"{'代码':<10} | {'日期':<10} | {'妖股概率(P2)':<12} | {'位置(Pos)':<10} | {'缩量(Shrink)':<10}")
         print("-" * 80)
-    
+
         # 辅助显示一些关键特征，方便我们人工判断它为什么选这些
         # Pos: 0=山底, 1=山顶
         # Shrink: 数值越大，缩量越狠
-    
+
         for index, row in top_picks.iterrows():
             # 格式化输出
             code = row['code']
@@ -365,7 +404,7 @@ def _(df_res):
             p2 = row['score_tier2']
             pos = row.get('feat_price_pos', -1) # 防报错
             shrink = row.get('feat_vol_shrink_fast', -1)
-        
+
             print(f"{code:<10} | {date:<10} | {p2:.4f}       | {pos:.2f}       | {shrink:.2f}")
 
         print("-" * 80)
@@ -373,6 +412,11 @@ def _(df_res):
 
     # 运行揭秘
     show_model_top_picks(df_res)
+    return
+
+
+@app.cell
+def _():
     return
 
 
