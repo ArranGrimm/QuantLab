@@ -279,6 +279,8 @@ def _(
             .filter(
                 (pl.col("market_regime") == 1) & # 只训练活跃市值多头区域的数据
                 (pl.col("has_violent_k") == 1) &         # 没有暴力K的直接去除
+                (pl.col("feat_dist_ma20") > -0.1) &     # 不能跌的太狠
+                (pl.col("feat_dist_to_yellow") > -0.1) & # 不能跌的太狠
                 (pl.col("feat_J_val") < 14) &           # J值处于潜伏区
                 (pl.col("feat_trend_gap") > -0.05) &    # 趋势不能坏得太离谱
                 (pl.col("volume") > 0)                  # 排除停牌
@@ -311,22 +313,22 @@ def _(
         unique_dates = df_train_pool['date'].sort_values().unique()
         split_date_idx = int(len(unique_dates) * 0.7)
         split_date = unique_dates[split_date_idx]
-    
+
         print(f"⏳ [Time Split] 切分日期锚点: {split_date}")
-    
+
         # 训练集：日期 < split_date
         train_mask = df_train_pool['date'] < split_date
         # 测试集：日期 >= split_date
         test_mask = df_train_pool['date'] >= split_date
-    
+
         X_train = df_train_pool.loc[train_mask, feature_cols]
         y_train = df_train_pool.loc[train_mask, target_col]
-    
+
         X_test = df_train_pool.loc[test_mask, feature_cols]
         y_test = df_train_pool.loc[test_mask, target_col]
 
         df_test = df_train_pool.loc[test_mask, df_train_pool.columns]
-    
+
         # 验证一下切分结果
         print(f"✅ [Train Set] {X_train.shape[0]} 样本 | 区间: {df_train_pool.loc[train_mask, 'date'].min().date()} -> {df_train_pool.loc[train_mask, 'date'].max().date()}")
         print(f"✅ [Test Set ] {X_test.shape[0]} 样本 | 区间: {df_train_pool.loc[test_mask, 'date'].min().date()} -> {df_train_pool.loc[test_mask, 'date'].max().date()}")
@@ -336,9 +338,9 @@ def _(
         # 这里的参数是为了捕捉“形态”特意调整的
         model = CatBoostClassifier(
             iterations=1000,
-            learning_rate=0.01,
-            depth=6,
-            l2_leaf_reg=5,            # 正则化，防止过拟合
+            learning_rate=0.001,
+            depth=8,
+            l2_leaf_reg=8,            # 正则化，防止过拟合
             loss_function='Logloss',
             eval_metric='Logloss',
             auto_class_weights='Balanced', # 当前是类别不平衡的
@@ -357,7 +359,6 @@ def _(
         model.fit(
             train_pool,
             eval_set=test_pool,
-            early_stopping_rounds=50,
             use_best_model=True
         )
 
@@ -702,7 +703,7 @@ def _(df_features, feature_cols, model, np):
             (df_pool["code"] == target_case_code) & 
             (df_pool["date"].astype(str) == target_case_date)
         ]
-    
+
         if len(case_row) == 0:
             print("❌ 找不到该案例的数据行，请检查日期是否完全匹配！")
             return
@@ -711,13 +712,13 @@ def _(df_features, feature_cols, model, np):
         # 获取所有样本的打分
         y_proba = model.predict_proba(df_pool[feature_cols])[:, 1]
         high_score_indices = np.where(y_proba > 0.8)[0]
-    
+
         if len(high_score_indices) < 10:
             print("⚠️ 高分样本太少，降低标准到 0.7...")
             high_score_indices = np.where(y_proba > 0.7)[0]
-        
+
         high_score_samples = df_pool.iloc[high_score_indices]
-    
+
         # 3. 对比核心特征
         # 我们取出 Feature Importance 前 10 的特征进行对比
         top_features = [
@@ -725,26 +726,26 @@ def _(df_features, feature_cols, model, np):
             "feat_dist_to_yellow", "feat_upper_shadow", "feat_lower_shadow",
             "feat_vol_rel_ma5", "feat_position_in_range", "feat_retrace_ratio", "feat_J_val"
         ]
-    
+
         print(f"\n📊 特征对比表 (为什么只给了 {case_row.iloc[0].get('AI_Score', 'N/A')} 分？)")
         print(f"{'Feature (特征)':<25} | {'Case Value (案例值)':<18} | {'Avg High Score (高分均值)':<22} | {'Diff (差距)'}")
         print("-" * 80)
-    
+
         rec = case_row.iloc[0]
         avg_stats = high_score_samples[top_features].mean()
-    
+
         for feat in top_features:
             val_case = rec.get(feat, 0)
             val_ideal = avg_stats[feat]
             diff = val_case - val_ideal
-        
+
             # 简单的评价标记
             mark = ""
             # 比如 body_size 越小越好，如果 case 很大，那就是扣分项
             if feat == "feat_body_size" and val_case > val_ideal * 1.5: mark = "❌ 太大了"
             if feat == "feat_dist_ma20" and val_case < val_ideal - 0.05: mark = "❌ 跌太深"
             if feat == "feat_vol_rel_ma5" and val_case > val_ideal * 1.5: mark = "❌ 没缩量"
-        
+
             print(f"{feat:<25} | {val_case:>10.4f}         | {val_ideal:>10.4f}             | {diff:>10.4f} {mark}")
 
     # ==========================================
@@ -774,53 +775,53 @@ def _(df_test, feature_cols, model):
         # 2. 模型打分 (Scoring)
         # -------------------------------------------------------
         X_test = df_test[feature_cols]
-    
+
         # 获取预测概率 (Probability)
         y_proba = model.predict_proba(X_test)[:, 1]
-    
+
         # -------------------------------------------------------
         # 3. 构造榜单
         # -------------------------------------------------------
         res_df = df_test[["code", "date", "label"]].copy()
         res_df["AI_Score"] = y_proba
-    
+
         # 把核心特征也附带上，方便肉眼诊断
         key_feats = ["feat_dist_ma20", "feat_dist_to_yellow", "feat_retrace_ratio", "feat_body_size", "feat_vol_rel_ma5"]
         for f in key_feats:
             if f in df_test.columns:
                 res_df[f] = df_test[f]
-        
+
         # 排序取 Top N
         top_picks = res_df.sort_values("AI_Score", ascending=False).head(top_n)
-    
+
         # -------------------------------------------------------
         # 4. 深度诊断打印
         # -------------------------------------------------------
         print("\n🏆 模型眼里的 '2023年后完美B1' 排行榜:")
         print(f"{'Code':<10} | {'Date':<10} | {'Score':<6} | {'Label':<5} | {'MA20 Dist':<10} | {'Ylw Dist':<10} | {'Retrace':<8} | {'点评'}")
         print("-" * 110)
-    
+
         for _, row in top_picks.iterrows():
             # 自动生成一句点评
             comment = "✅ 趋势完美"
-        
+
             # 1. 检查是否深跌 (Ztalk大忌)
             if row['feat_dist_ma20'] < -0.10: 
                 comment = "❌ 深跌超跌 (垃圾)"
             elif row['feat_dist_ma20'] < -0.02: 
                 comment = "⚠️ 破位回踩"
-            
+
             # 2. 检查是否悬空 (没踩实)
             elif row['feat_dist_ma20'] > 0.05: 
                 comment = "⚠️ 悬空未踩"
-            
+
             # 3. 检查回吐幅度
             if row['feat_retrace_ratio'] > 0.9: 
                 comment += " + 涨幅全吐"
-        
+
             # 格式化日期
             d_str = str(row['date'])[:10]
-        
+
             print(f"{row['code']:<10} | {d_str:<10} | {row['AI_Score']:.4f} | {row['label']:<5} | {row['feat_dist_ma20']:<10.2%} | {row['feat_dist_to_yellow']:<10.2%} | {row['feat_retrace_ratio']:<8.2f} | {comment}")
 
     # ==========================================
