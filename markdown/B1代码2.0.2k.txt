@@ -1,0 +1,38 @@
+B1选股2.0.2K
+DEN:=HHV(H,9)-LLV(L,9);                    {9日高低差，分母}
+RSV:=IF(DEN=0,50,(C-LLV(L,9))/DEN*100);    {RSV，含分母保护}
+K:=SMA(RSV,3,1);                            {TDX标准K}
+D:=SMA(K,3,1);                              {TDX标准D}
+J:=3*K-2*D;                                 {J}
+ 
+BV:=IF(C>REF(C,1) AND C>=O,VOL,0);          {阳量：涨且收≥开}
+EV:=IF(C<REF(C,1) AND C<=O,VOL,0);          {阴量：跌且收≤开}
+Y14:=IF(SUM(EV,14)=0,9999,SUM(BV,14)/SUM(EV,14)); {14日阴阳量比}
+Y28:=IF(SUM(EV,28)=0,9999,SUM(BV,28)/SUM(EV,28)); {28日阴阳量比}
+YY:=(Y14>=1.75) OR (Y28>=1.75);             {至少一档达标}
+ 
+V40P:=SUM(REF(VOL,1),40)/40;                 {前40均量(不含当日)}
+BD:=C>REF(C,1) AND C>=O;                     {当天为阳量日}
+BIGV:=VOL>2*V40P;                            {放量阈值：2倍前40均量}
+R65:=LLV(C,40)+0.65*(HHV(C,40)-LLV(C,40));   {40日区间65%位置近似}
+POSOK:=C>R65;                                {收盘在65%之上}
+SP:=BD AND BIGV AND POSOK;
+SPK:=EXIST(SP,24);
+ 
+LD:=(C/REF(C,1)-1)<=-0.098;                 {近似跌停}
+BR:=EXIST(LD AND REF(LD,1),24);             {近24日两连跌停}
+RO:=NOT(BR);                                 {无两连跌停}
+A20:=MA(AMOUNT,20)/100000000;               {20日均额(亿元)}
+LQ:=A20>=0.005;                              {流动性门槛}
+MV:=C*CAPITAL/10000;                         {总市值估算(亿元)}
+MVOK:=MV>=30;                                {市值门槛}
+ 
+XG:=YY AND LQ AND MVOK AND RO AND J<=13 AND SPK; {主逻辑(无白黄)}
+A1:=XG;                                      {输出主信号到A1}
+
+WL:= EMA(EMA(C,10),10),COLORFFFFFF,LINETHICK1;
+YL:= (MA(CLOSE,14)+MA(CLOSE,28)+MA(CLOSE,57)+MA(CLOSE,114))/4;
+B1:=A1*(WL>YL)*(C>YL);                       {ZXMod：WL>YL且C>YL}
+B1;
+
+ 
