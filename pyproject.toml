@@ -22,4 +22,22 @@ dependencies = [
     "vectorbt>=0.27.3",
     "watchdog>=6.0.0",
     "yfinance>=0.2.61",
+    "torch",
+    "torchvision",
+    "chronos-forecasting>=2.2.2",
+]
+
+# 1. 定义源：根据截图中的 URL，我们指向 cu130
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+# 2. 路由规则：Windows 强制走 CUDA 13.0，Mac 继续走默认
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'win32'" },
+]
+torchvision = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'win32'" },
 ]

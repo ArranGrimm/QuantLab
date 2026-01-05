@@ -11,6 +11,7 @@ def _():
     import numpy as np
     import os
     import plotly.graph_objects as go
+    import plotly.express as px
     from plotly.subplots import make_subplots
     from datetime import datetime
     # 引入机器学习库
@@ -279,8 +280,8 @@ def _(
             .filter(
                 (pl.col("market_regime") == 1) & # 只训练活跃市值多头区域的数据
                 (pl.col("has_violent_k") == 1) &         # 没有暴力K的直接去除
-                (pl.col("feat_dist_ma20") > -0.1) &     # 不能跌的太狠
-                (pl.col("feat_dist_to_yellow") > -0.1) & # 不能跌的太狠
+                (pl.col("feat_dist_ma20") > -0.15) &     # 不能跌的太狠
+                (pl.col("feat_dist_to_yellow") > -0.15) & # 不能跌的太狠
                 (pl.col("feat_J_val") < 14) &           # J值处于潜伏区
                 (pl.col("feat_trend_gap") > -0.05) &    # 趋势不能坏得太离谱
                 (pl.col("volume") > 0)                  # 排除停牌
@@ -398,7 +399,7 @@ def _(load_data, prepare_morphology_dataset, train_morphology_model):
     q_full = load_data()
     df_features = prepare_morphology_dataset(q_full)
     model, feature_cols, df_test = train_morphology_model(df_features)
-    return df_features, df_test, feature_cols, model
+    return df_test, feature_cols, model
 
 
 @app.cell
@@ -606,8 +607,8 @@ def _(audit_model_confidence, df_test, feature_cols, model, perfect_cases):
 
 
 @app.cell
-def _(df_features, pd, perfect_cases, pl):
-    def diagnose_perfect_cases(df_full_features, case_list):
+def _(df_test, pd, perfect_cases):
+    def diagnose_perfect_cases(df_test, case_list):
         """
         诊断完美案例为什么被过滤或分低
         """
@@ -619,12 +620,8 @@ def _(df_features, pd, perfect_cases, pl):
 
         # 从全量特征中提取这些数据（不过滤任何东西）
         # 注意：我们要看的是 B1 当天的数据，以及它过去 20 天的历史
-        debug_df = (
-            df_full_features
-            .filter(pl.col("code").is_in(target_codes))
-            .collect() # 先把相关票的所有历史拿出来，方便回溯
-            .to_pandas()
-        )
+
+        debug_df = df_test[df_test['code'].isin(target_codes)]
 
         # 逐个案例分析
         results = []
@@ -683,25 +680,22 @@ def _(df_features, pd, perfect_cases, pl):
         print(pd.DataFrame(results).to_markdown())
 
     # 运行诊断
-    # 假设 df_raw (或者 prepare_morphology_dataset 生成的 lazy frame) 还在
-    # 这里传入的是还没被 filter 的全量特征 df
-    diagnose_perfect_cases(df_features, perfect_cases)
+    diagnose_perfect_cases(df_test, perfect_cases)
     return
 
 
 @app.cell
-def _(df_features, feature_cols, model, np):
-    def diagnose_bad_score(model, df_features, feature_cols, target_case_code, target_case_date):
+def _(df_test, feature_cols, model, np):
+    def diagnose_bad_score(model, df_test, feature_cols, target_case_code, target_case_date):
         """
         照妖镜：对比“完美案例”与“模型眼里的高分股”的特征差异
         """
         print(f"🕵️‍♂️ [Micro Diagnosis] 正在解剖案例: {target_case_code} @ {target_case_date}")
-        df_pool = df_features.collect().to_pandas()
         # 1. 找到目标案例的特征行
-        # 注意：这里需要 df_pool 包含 code 和 date 列，且特征齐全
-        case_row = df_pool[
-            (df_pool["code"] == target_case_code) & 
-            (df_pool["date"].astype(str) == target_case_date)
+        # 注意：这里需要 df_test 包含 code 和 date 列，且特征齐全
+        case_row = df_test[
+            (df_test["code"] == target_case_code) & 
+            (df_test["date"].astype(str) == target_case_date)
         ]
 
         if len(case_row) == 0:
@@ -710,14 +704,14 @@ def _(df_features, feature_cols, model, np):
 
         # 2. 找到模型眼里的“高分股” (Score > 0.8)
         # 获取所有样本的打分
-        y_proba = model.predict_proba(df_pool[feature_cols])[:, 1]
+        y_proba = model.predict_proba(df_test[feature_cols])[:, 1]
         high_score_indices = np.where(y_proba > 0.8)[0]
 
         if len(high_score_indices) < 10:
             print("⚠️ 高分样本太少，降低标准到 0.7...")
             high_score_indices = np.where(y_proba > 0.7)[0]
 
-        high_score_samples = df_pool.iloc[high_score_indices]
+        high_score_samples = df_test.iloc[high_score_indices]
 
         # 3. 对比核心特征
         # 我们取出 Feature Importance 前 10 的特征进行对比
@@ -751,9 +745,7 @@ def _(df_features, feature_cols, model, np):
     # ==========================================
     # 🎯 运行诊断：针对“华纳药厂”
     # ==========================================
-    # 假设 df_train_pool 是你刚才训练用的 dataframe（转pandas后的）
-    # 且里面包含 code, date 列 (如果没有，你需要从原始数据里把 code/date 拼回来)
-    diagnose_bad_score(model, df_features, feature_cols, "688799_SH", "2025-05-12")
+    diagnose_bad_score(model, df_test, feature_cols, "688799_SH", "2025-05-12")
     return
 
 
@@ -828,6 +820,81 @@ def _(df_test, feature_cols, model):
     # 🎯 运行选秀
     # ==========================================
     show_top_model_picks_strict(model, df_test, feature_cols)
+    return
+
+
+@app.cell
+def _(df_test, feature_cols, go, make_subplots):
+    def mine_the_truth(df_pool, feature_cols, target_col="label"):
+        """
+        真相挖掘机：对比正负样本的特征分布，寻找真正的“完美参数”
+        """
+        print("🚀 [Data Mining] 正在挖掘正样本(涨)与负样本(跌)的真实差异...")
+    
+        # 1. 分离正负样本
+        df_pos = df_pool[df_pool[target_col] == 1]
+        df_neg = df_pool[df_pool[target_col] == 0]
+    
+        print(f"📊 正样本数量: {len(df_pos)} | 负样本数量: {len(df_neg)}")
+    
+        # 2. 核心特征列表 (你觉得重要的特征)
+        core_features = [
+            "feat_dist_ma20",       # 距离20日线
+            "feat_dist_to_yellow",  # 距离黄线
+            "feat_vol_rel_ma5",     # 相对5日均量
+            "feat_vol_shrink_ratio",# 缩量程度
+            "feat_body_size",       # 实体大小
+            "feat_retrace_ratio",   # 回调深度
+            "feat_J_val"            # J值
+        ]
+    
+        # 3. 绘图：分布对比 (Violin Plot / Histogram)
+        # 我们用 Box Plot 看分布区间，用 Histogram 看密度
+    
+        rows = len(core_features)
+        fig = make_subplots(
+            rows=rows, cols=2, 
+            subplot_titles=[f"{f} 分布对比" for f in core_features for _ in range(2)],
+            column_widths=[0.7, 0.3],
+            vertical_spacing=0.05
+        )
+    
+        for i, feat in enumerate(core_features):
+            row_idx = i + 1
+        
+            # 截断极值 (Winsorize) 以防图表被压缩
+            # 取 1% - 99% 分位数
+            lower = df_pool[feat].quantile(0.01)
+            upper = df_pool[feat].quantile(0.99)
+        
+            pos_data = df_pos[feat].clip(lower, upper)
+            neg_data = df_neg[feat].clip(lower, upper)
+        
+            # 左图：直方图 (Histogram) - 看重合度
+            fig.add_trace(go.Histogram(x=neg_data, name='负样本', marker_color='green', opacity=0.5, bingroup=i), row=row_idx, col=1)
+            fig.add_trace(go.Histogram(x=pos_data, name='正样本', marker_color='red', opacity=0.5, bingroup=i), row=row_idx, col=1)
+        
+            # 右图：箱线图 (Box Plot) - 看中位数和四分位
+            fig.add_trace(go.Box(y=neg_data, name='负样本', marker_color='green'), row=row_idx, col=2)
+            fig.add_trace(go.Box(y=pos_data, name='正样本', marker_color='red'), row=row_idx, col=2)
+        
+            # 计算统计学真相
+            pos_mean = pos_data.mean()
+            pos_median = pos_data.median()
+            print(f"\n🔍 {feat} 真相:")
+            print(f"   正样本均值: {pos_mean:.4f} | 中位数: {pos_median:.4f}")
+            print(f"   我们之前的过滤: > -0.05 (如果是 dist)")
+
+        fig.update_layout(height=300 * rows, title_text="Ztalk 因子分布挖掘：数据不说谎", barmode='overlay', showlegend=False)
+        fig.show()
+
+    # ==========================================
+    # 🎯 运行挖掘
+    # ==========================================
+    # 使用未经过滤的全量数据 (df_features.collect().to_pandas())
+    # 或者是你刚才那个 df_train_pool (注意要先把过滤条件去掉，或者至少放宽)
+    # 建议：重新生成一个只过滤了“活跃市值多头”的数据集，不要过滤 ma20 和 yellow
+    mine_the_truth(df_test, feature_cols)
     return
 
 

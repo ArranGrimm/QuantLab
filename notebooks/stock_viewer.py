@@ -113,7 +113,7 @@ def _(go, input_code, input_days, make_subplots, mo, os, pl):
         # 3. 数据截取与类型转换
         # 🔥 关键点：将 date 转为 String，这是 Plotly 去除周末空缺的最简单方法
         df_plot = df.tail(lookback).with_columns(pl.col("date").cast(pl.String))
-    
+
         # 转 Pandas 绘图
         pdf = df_plot.to_pandas()
 
@@ -152,7 +152,7 @@ def _(go, input_code, input_days, make_subplots, mo, os, pl):
 
         # B. 成交量
         vol_colors = [COLOR_UP if r >= 0 else COLOR_DOWN for r in pdf["pct_change"]]
-    
+
         fig.add_trace(go.Bar(
             x=pdf["date"],
             y=pdf["volume"],
@@ -187,11 +187,11 @@ def _(go, input_code, input_days, make_subplots, mo, os, pl):
             height=650,
             xaxis_rangeslider_visible=False,
             hovermode="x unified",
-        
+
             # 🔥 背景色修改
             paper_bgcolor=COLOR_BG,  # 外框背景
             plot_bgcolor=COLOR_BG,   # 图表背景
-        
+
             xaxis=dict(
                 type='category', 
                 nticks=20, 
