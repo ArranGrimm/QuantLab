@@ -8,6 +8,7 @@ app = marimo.App(width="medium")
 def _():
     import marimo as mo
     import polars as pl
+    import numpy as np
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
     from datetime import date
@@ -117,7 +118,7 @@ def _(go, input_code, input_days, make_subplots, mo, os, pl):
         # 转 Pandas 绘图
         pdf = df_plot.to_pandas()
 
-    # ==============================================================================
+        # ==============================================================================
         # 3. Plotly 绘图 (专业护眼配色)
         # ==============================================================================
 
@@ -132,8 +133,22 @@ def _(go, input_code, input_days, make_subplots, mo, os, pl):
         fig = make_subplots(specs=[[{"secondary_y": True}]])
 
         hover_text = [
-            f"日期: {date}<br>涨幅: {pct:+.2f}%<br>收盘: {close:.2f}<br>J值: {j:.2f}"
-            for date, pct, close, j in zip(pdf["date"], pdf["pct_change"], pdf["close_adj"], pdf["J"])
+            f"日期: {date}<br>"
+            f"开盘: {open_p:.2f}<br>"
+            f"最高: {high_p:.2f}<br>"
+            f"最低: {low_p:.2f}<br>"
+            f"收盘: {close:.2f}<br>"
+            f"涨幅: {pct:+.2f}%<br>"
+            f"J值: {j:.2f}"
+            for date, pct, open_p, high_p, low_p, close, j in zip(
+                pdf["date"], 
+                pdf["pct_change"], 
+                pdf["open_adj"],  # 新增
+                pdf["high_adj"],  # 新增
+                pdf["low_adj"],   # 新增
+                pdf["close_adj"], 
+                pdf["J"]
+            )
         ]
 
         # A. K线图
@@ -151,7 +166,10 @@ def _(go, input_code, input_days, make_subplots, mo, os, pl):
         ), secondary_y=False)
 
         # B. 成交量
-        vol_colors = [COLOR_UP if r >= 0 else COLOR_DOWN for r in pdf["pct_change"]]
+        vol_colors = [
+            COLOR_UP if close >= open else COLOR_DOWN 
+            for close, open in zip(pdf["close_adj"], pdf["open_adj"])
+        ]
 
         fig.add_trace(go.Bar(
             x=pdf["date"],
@@ -232,12 +250,12 @@ def _(go, input_code, input_days, make_subplots, mo, os, pl):
 def _(date, mo):
     # 日期选择器 (默认为你刚才的案例时间)
     ui_buy_date = mo.ui.date(
-        value=date(2024, 3, 28), 
+        value=date(2025, 3, 28), 
         label="📅 买入日期 (T日)"
     )
 
     ui_sell_date = mo.ui.date(
-        value=date(2024, 4, 3), 
+        value=date(2025, 4, 3), 
         label="📅 卖出日期 (T+N日)"
     )
 

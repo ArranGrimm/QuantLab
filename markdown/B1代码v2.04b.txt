@@ -57,7 +57,9 @@ R55:=LLV(C,40)+0.55*(HHV(C,40)-LLV(C,40));
 
 POSOK:=C>R55;                       
 
-TRIGGER:= PLRY_CNT OR (BD AND BIGV AND POSOK);
+KEY_K := BD AND BIGV AND POSOK;
+
+TRIGGER := PLRY_CNT OR EXIST(KEY_K, 28);
 
 {================ 选股 ================} 
 
