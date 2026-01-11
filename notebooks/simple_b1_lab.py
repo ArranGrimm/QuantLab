@@ -505,62 +505,10 @@ def _(df_result_dynamic, pl):
 @app.cell
 def _(datetime, df_signals, pl):
     df_signals.filter(
-        (pl.col("date") >= datetime(2025,5,1)) &
-        (pl.col("b1_signal") == 1) &
+        (pl.col("date") >= datetime(2025,4,1)) &
+        # (pl.col("b1_signal") == 1) &
         (pl.col("code") == "688799_SH")
-    ).collect()
-    return
-
-
-@app.cell
-def _(df_signals, pl):
-    # 假设你已经运行了 calc_b1_factors 并得到了 df_b1 (或者你之前的 LazyFrame)
-    # 我们单独把 601279 拎出来“验尸”
-
-    target_code = "601279_SH" 
-    # 注意：你的代码里是带后缀的，如果是 "601279_SH"，请相应修改
-    # 这里假设你的 dataframe 里 code 列是纯数字，或者你根据实际情况调整
-
-    print(f"🔍 正在诊断 {target_code} ...")
-
-    debug_df = (
-        df_signals  # 这里填你计算完因子的那个变量名 (LazyFrame 或 DataFrame)
-        .filter(pl.col("code") == target_code)
-        .filter(pl.col("date") == pl.col("date").max()) # 只看最新的一天
-        .select([
-            pl.col("code"),
-            pl.col("date"),
-
-            # 1. 检查 J 值 (阈值 13)
-            pl.col("K"),
-            pl.col("D"),
-            pl.col("J"), 
-            (pl.col("J") <= 13).alias("Check_J_OK"),
-
-            # 2. 检查 形态 (阈值 3.5%)
-            ((pl.col("close_adj") - pl.col("open_adj")).abs() / pl.col("open_adj") * 100).alias("Shape_Pct"),
-            pl.col("SHAPE_OK").alias("Check_Shape"),
-
-            # 3. 检查 缩量 (阈值 0.5 * MaxYang)
-            pl.col("volume").alias("Vol_Today"),
-            pl.col("max_yang_vol_28").alias("Vol_MaxYang"),
-            (pl.col("volume") / pl.col("max_yang_vol_28")).alias("Vol_Ratio"),
-            pl.col("VOL_SHRINK_OK").alias("Check_Shrink"),
-
-            # 4. 检查 坏K线 (必须为 0)
-            pl.col("bad_k_count").alias("Bad_K_Count"),
-            pl.col("GOOD28").alias("Check_Good28"),
-
-            # 5. 检查 最大量避雷
-            pl.col("MAX28_OK").alias("Check_Max28"),
-
-            # 6. 最终结果
-            pl.col("XG")
-        ])
-        .collect() # 如果是 LazyFrame 需要 collect
-    )
-
-    debug_df
+    ).collect().select(["date","amount",  "MAX28_OK"])
     return
 
 
@@ -573,7 +521,7 @@ def _(df_signals, pl):
         {"code": "688321_SH", "date": "2025-06-20", "name": "微芯生物(双底)"},
         {"code": "002940_SZ", "date": "2025-07-11", "name": "昂利康(压轴)"},
         {"code": "301076_SZ", "date": "2025-08-01", "name": "新瀚新材(激进)"},
-        {"code": "600184_SH", "date": "2025-07-08", "name": "光电股份(回踩)"},
+        {"code": "600184_SH", "date": "2025-07-10", "name": "光电股份(回踩)"},
         {"code": "002074_SZ", "date": "2025-08-01", "name": "国轩高科(趋势)"},
         {"code": "605378_SH", "date": "2025-07-31", "name": "野马电池(突破)"},
         {"code": "600366_SH", "date": "2025-08-06", "name": "宁波韵升(反包)"}

@@ -331,6 +331,8 @@ def _(df, file_path, input_code, mo, os, pl, ui_buy_date, ui_sell_date):
 
 @app.cell
 def _():
+    import datetime
+    datetime.datetime.now().weekday()
     return
 
 

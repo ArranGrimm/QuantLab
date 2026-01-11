@@ -7,7 +7,6 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import polars as pl
-    import pandas as pd
     import os
     import plotly.graph_objects as go
     from datetime import datetime
@@ -16,7 +15,6 @@ def _():
     # 1. 配置
     # ==============================================================================
     DATA_ROOT = r"../QuantData/Ashare"
-
     # 我们的 10 大通缉令
     PERFECT_CASES_CONFIG = [
         {"code": "688799_SH", "date": "2025-05-12", "name": "华纳药厂(标准)"},
@@ -31,108 +29,227 @@ def _():
         {"code": "600366_SH", "date": "2025-08-06", "name": "宁波韵升(反包)"}
     ]
 
-    # ==============================================================================
-    # 2. 数据加载与探查
-    # ==============================================================================
-    def investigate_future_returns():
-        print("🚀 [Data Probe] 正在调取原始档案，计算未来真实回报...")
-    
-        # 1. 仅加载这 10 只股票的数据 (为了快)
-        target_codes = [c["code"] for c in PERFECT_CASES_CONFIG]
-    
-        q = (
-            pl.scan_parquet(os.path.join(DATA_ROOT, "stock_day_adj", "*.parquet"), include_file_paths="file_path")
-            .filter(pl.col("file_path").str.contains("|".join(target_codes))) # 文件名过滤加速
-            .with_columns([
-                pl.col("file_path").str.extract(r"(\d{6}_[A-Z]{2})", 1).alias("code"),
-                pl.from_epoch("time", time_unit="ms").dt.replace_time_zone("UTC").dt.convert_time_zone("Asia/Shanghai").dt.date().alias("date")
-            ])
-            .select(["code", "date", "close", "high"]) # 只需要 close 和 high
-            .rename({"close": "close_adj", "high": "high_adj"})
-            .sort(["code", "date"])
+    print("🚀 [Step 1] 加载原始行情数据...")
+
+    # (A) 加载复前权行情
+    files = [
+        os.path.join(DATA_ROOT, "stock_day_adj", f"{case.get("code")}.parquet") for case in PERFECT_CASES_CONFIG
+    ]
+
+    q_adj = (
+        pl.scan_parquet(
+            files,
+            include_file_paths="file_path"
         )
-    
-        df_pool = q.collect().to_pandas()
-    
-        # 2. 循环计算收益
-        results = []
-    
-        # 定义我们要看的窗口
-        windows = [3, 5, 10, 20, 30, 40]
-    
-        for case in PERFECT_CASES_CONFIG:
-            code = case['code']
-            signal_date = case['date']
-            name = case['name']
-        
-            # 找到当天的数据索引
-            # 注意：这里我们通过 date string 匹配
-            mask = (df_pool["code"] == code) & (df_pool["date"].astype(str) == signal_date)
-            if not mask.any():
-                print(f"❌ 数据缺失: {name} @ {signal_date}")
-                continue
-            
-            base_idx = df_pool[mask].index[0]
-            base_close = df_pool.loc[base_idx, "close_adj"]
-        
-            # 构建这一行的数据
-            row_data = {
-                "Name": name,
-                "Date": signal_date,
-                "Base_Price": base_close
-            }
-        
-            # 检查每个时间窗口
-            max_idx = len(df_pool) - 1
-        
-            for w in windows:
-                future_idx = base_idx + w
-            
-                # 确保不越界，且必须是同一只股票
-                if future_idx <= max_idx and df_pool.loc[future_idx, "code"] == code:
-                    # A. 收盘价收益 (拿住不动的收益)
-                    future_close = df_pool.loc[future_idx, "close_adj"]
-                    ret_close = (future_close - base_close) / base_close
-                
-                    # B. 期间最高价收益 (摸到的最高点，用于验证 Label 是否触发)
-                    # 切片范围: base_idx + 1 到 future_idx (含)
-                    period_highs = df_pool.loc[base_idx+1 : future_idx, "high_adj"]
-                    max_high = period_highs.max()
-                    ret_max = (max_high - base_close) / base_close
-                
-                    row_data[f"Hold_{w}d"] = ret_close
-                    row_data[f"Max_{w}d"] = ret_max
-                else:
-                    row_data[f"Hold_{w}d"] = None
-                    row_data[f"Max_{w}d"] = None
-                
-            results.append(row_data)
-        
-        return pd.DataFrame(results)
+        .with_columns([
+            pl.col("file_path").str.extract(r"(\d{6}_[A-Z]{2})", 1).alias("code"),
+            pl.from_epoch("time", time_unit="ms").dt.replace_time_zone("UTC").dt.convert_time_zone("Asia/Shanghai").dt.date().alias("date")
+        ])
+        .select(["code", "date", "open", "high", "low", "close", "volume", "amount"])
+        .rename({"close": "close_adj", "high": "high_adj", "low": "low_adj", "open": "open_adj"})
+        .filter(pl.col("volume") > 0)
+    )
+
+    # (B) 加载 Raw (不复权) 和 Capital (股本)
+    q_raw = (
+        pl.scan_parquet(os.path.join(DATA_ROOT, "stock_day_raw", "*.parquet"), include_file_paths="file_path")
+        .with_columns([
+            pl.col("file_path").str.extract(r"(\d{6}_[A-Z]{2})", 1).alias("code"),
+            pl.from_epoch("time", time_unit="ms").dt.replace_time_zone("UTC").dt.convert_time_zone("Asia/Shanghai").dt.date().alias("date")
+        ])
+        .select(["code", "date", "close"]).rename({"close": "close_raw"})
+    )
+
+    q_cap = (
+        pl.scan_parquet(os.path.join(DATA_ROOT, "finance_capital", "*.parquet"), include_file_paths="file_path")
+        .with_columns([
+            pl.col("file_path").str.extract(r"(\d{6}_[A-Z]{2})", 1).alias("code"),
+            pl.col("m_anntime").str.strptime(pl.Date, "%Y%m%d").alias("date"),
+            pl.col("circulating_capital").cast(pl.Float64)
+        ])
+        .select(["code", "date", "circulating_capital"]).sort(["code", "date"])
+    )
+
+    # (C) 合并数据 (移除了所有市场指数相关代码)
+    print("🔗 [Step 2] 合并基础数据...")
+    q_full = (
+        q_adj
+        .join(q_raw, on=["code", "date"])
+        .sort(["code", "date"])
+        .join_asof(q_cap, on="date", by="code", strategy="backward")
+        .with_columns([
+            (pl.col("close_raw") * pl.col("circulating_capital") / 1e8).alias("market_cap_100m")
+        ])
+    )
 
     # ==============================================================================
-    # 3. 运行并展示
+    # 2. 数据探查
     # ==============================================================================
-    df_results = investigate_future_returns()
+    # ==============================================================================
+    # 1. 核心指标计算引擎 V2.0 (纯 Polars 实现)
+    #    包含：Ztalk 双均线 (WL/YL) + 深度形态探查
+    # ==============================================================================
+    def calc_gene_vectors(df: pl.LazyFrame) -> pl.LazyFrame:
+        return df.with_columns([
+            # --- A. 基础辅助 ---
+            pl.col("close_adj").shift(1).over("code").alias("prev_close"),
+            pl.col("open_adj").shift(1).over("code").alias("prev_open"),
+            pl.col("volume").shift(1).over("code").alias("prev_vol"),
+        
+            # --- B. Ztalk 独家双均线系统 (WL & YL) ---
+            # WL (白线): 双重 EMA10
+            pl.col("close_adj").ewm_mean(span=10, adjust=False).over("code")
+              .ewm_mean(span=10, adjust=False).over("code").alias("WL"),
+          
+            # YL (黄线): 四均线加权 (14, 28, 57, 114)
+            ((pl.col("close_adj").rolling_mean(14).over("code") + 
+              pl.col("close_adj").rolling_mean(28).over("code") + 
+              pl.col("close_adj").rolling_mean(57).over("code") + 
+              pl.col("close_adj").rolling_mean(114).over("code")) / 4).alias("YL"),
 
-    # --- 美化展示 (颜色标记) ---
-    def highlight_returns(val):
-        if pd.isna(val): return ''
-        color = 'red' if val > 0.05 else ('orange' if val > 0 else 'green')
-        weight = 'bold' if val > 0.05 else 'normal'
-        return f'color: {color}; font-weight: {weight}'
+            # --- C. KDJ (N=9, M1=3, M2=3) ---
+            (pl.col("high_adj").rolling_max(9).over("code") - pl.col("low_adj").rolling_min(9).over("code")).alias("kdj_den"),
+            (pl.col("close_adj") - pl.col("low_adj").rolling_min(9).over("code")).alias("kdj_num"),
+        
+        ]).with_columns([
+            # RSV 计算
+            pl.when(pl.col("kdj_den") == 0).then(50.0)
+              .otherwise(pl.col("kdj_num") / pl.col("kdj_den") * 100).alias("rsv"),
+          
+            # --- D. 均线关系量化 (The Relationship) ---
+        
+            # 1. 股价 vs 白线 (%) -> "贴线程度" (太乖离是卖点，贴着是买点)
+            ((pl.col("close_adj") - pl.col("WL")) / pl.col("WL") * 100).alias("Bias_C_WL"),
+        
+            # 2. 股价 vs 黄线 (%) -> "回踩深度" (回踩确认支撑的关键)
+            ((pl.col("close_adj") - pl.col("YL")) / pl.col("YL") * 100).alias("Bias_C_YL"),
+        
+            # 3. 白线 vs 黄线 (%) -> "趋势强度" (开口大小)
+            ((pl.col("WL") - pl.col("YL")) / pl.col("YL") * 100).alias("Bias_WL_YL"),
+        
+        ]).with_columns([
+            # K, D 计算
+            pl.col("rsv").ewm_mean(com=2, adjust=False).over("code").alias("K"),
+            # 阳线判断 (用于计算缩量)
+            ((pl.col("close_adj") > pl.col("open_adj"))).alias("is_yang"),
+        
+        ]).with_columns([
+            pl.col("K").ewm_mean(com=2, adjust=False).over("code").alias("D"),
+        
+            # Max Yang Vol (28天最大阳量)
+            pl.when(pl.col("is_yang")).then(pl.col("volume")).otherwise(0)
+              .rolling_max(28).over("code").alias("max_yang_vol_28"),
+          
+            # MA40 Vol (用于对比均量)
+            pl.col("volume").rolling_mean(40).over("code").alias("vol_ma40"),
+        
+        ]).with_columns([
+            (3 * pl.col("K") - 2 * pl.col("D")).alias("J"),
+        
+            # --- E. 最终特征向量 (Feature Vectors) ---
+        
+            # 1. 缩量极致度 (Current / MaxYang)
+            (pl.col("volume") / pl.col("max_yang_vol_28")).alias("Vol_Shrink_Ratio"),
+        
+            # 2. 实体大小 (Abs(C-O)/O)
+            ( (pl.col("close_adj") - pl.col("open_adj")).abs() / pl.col("open_adj") * 100 ).alias("Body_Pct"),
+        
+            # 3. 基础市值
+            (pl.col("market_cap_100m")).alias("MV"),
+        
+            # 4. Ztalk 趋势确认 (白>黄?)
+            (pl.col("WL") > pl.col("YL")).alias("is_Bull_Trend")
+        ])
 
-    # 设置显示格式为百分比
-    print("\n📊 [验尸报告] 完美案例的真实涨幅数据 (Max_10d 是之前 Label 的标准):")
-    # 只展示 Max Return (看看是否有机会止盈)
-    cols_max = ["Name", "Date"] + [c for c in df_results.columns if "Max_" in c]
-    print("-" * 80)
-    print(df_results[cols_max].style.format({c: "{:.2%}" for c in df_results.columns if "_" in c}).to_string())
+    print("🧪 [Step 3] 计算全量指标 (基因测序)...")
+    # 假设 q_full 是之前加载好的 LazyFrame
+    df_indicators = calc_gene_vectors(q_full)
 
-    print("\n📉 [持有体验] 如果死拿不动的收益 (Close Return):")
-    cols_hold = ["Name", "Date"] + [c for c in df_results.columns if "Hold_" in c]
-    print("-" * 80)
-    print(df_results[cols_hold].style.format({c: "{:.2%}" for c in df_results.columns if "_" in c}).to_string())
+    # ==============================================================================
+    # 2. 提取 10 大案例的"起爆前夜"指纹
+    # ==============================================================================
+    print("🔬 [Step 4] 提取完美案例指纹...")
+
+    # 转换配置为 Polars DataFrame
+    targets_df = pl.DataFrame(PERFECT_CASES_CONFIG).with_columns(
+        pl.col("date").str.strptime(pl.Date, "%Y-%m-%d")
+    )
+
+    # 提取时空切片
+    golden_samples = (
+        df_indicators
+        .join(targets_df.lazy(), on=["code", "date"], how="inner")
+        .collect()
+    )
+
+    # ==============================================================================
+    # 3. 纯 Polars 炫酷打印 (No Pandas Required)
+    # ==============================================================================
+
+    # 配置需要展示的列 (加入双均线探查)
+    cols_to_show = [
+        "name", "code", "date", 
+        "J", "Vol_Shrink_Ratio", 
+        "Bias_C_WL", "Bias_C_YL", "Bias_WL_YL", 
+        "is_Bull_Trend"
+    ]
+
+    print("\n====== 🏆 10大完美案例·Ztalk均线基因图谱 (Pure Polars) ======")
+
+    # 使用 pl.Config 上下文管理器来控制打印样式
+    # tbl_cols=-1: 显示所有列
+    # tbl_width_chars=200: 增加宽度防止换行
+    # float_precision=2: 浮点数保留2位小数，看起来更清爽
+    with pl.Config(tbl_cols=-1, tbl_width_chars=200, float_precision=2):
+        print(golden_samples.select(cols_to_show))
+
+
+    print("\n====== 📏 硬核包络线标准 (边界提取) ======")
+
+    # 计算边界统计值
+    stats_df = golden_samples.select([
+        pl.col("J").min().alias("J_Min"),
+        pl.col("J").max().alias("J_Max"),
+    
+        pl.col("Vol_Shrink_Ratio").max().alias("Shrink_Max (缩量上限)"),
+    
+        pl.col("Bias_C_WL").min().alias("Bias_C_WL_Min (贴线底限)"),
+        pl.col("Bias_C_WL").max().alias("Bias_C_WL_Max (防追高)"),
+    
+        pl.col("Bias_C_YL").min().alias("Bias_C_YL_Min (回踩底限)"),
+        pl.col("Bias_C_YL").max().alias("Bias_C_YL_Max (回踩上限)"),
+    
+        pl.col("Bias_WL_YL").min().alias("Bias_WL_YL_Min (粘合下限)"),
+        pl.col("Bias_WL_YL").max().alias("Bias_WL_YL_Max (发散上限)"),
+    
+        pl.col("MV").min().alias("MV_Min (市值下限)"),
+    ])
+
+    # 技巧：使用 unpivot (原 melt) 替代转置 (.T)
+    # 这样会生成一个 "指标 - 数值" 的纵向列表，比 Pandas 的转置更符合配置文件的格式
+    stats_vertical = stats_df.unpivot(variable_name="Param (参数)", value_name="Value (边界值)")
+
+    with pl.Config(tbl_rows=-1, float_precision=3):
+        print(stats_vertical)
+
+    # ==============================================================================
+    # 4. 自动生成代码片段 (基于纯 Polars 提取的值)
+    # ==============================================================================
+    # 提取标量值 (Scalars) 用于 f-string
+    row = stats_df.row(0)
+    # 通过列名映射获取值 (更安全)
+    cols = stats_df.columns
+    vals = dict(zip(cols, row))
+
+    print(f"\n====== 🚀 自动生成的 Ztalk 严选参数 ======")
+    print(f"# 1. 均线位置")
+    print(f"BIAS_WL_RANGE = ({vals['Bias_C_WL_Min (贴线底限)']:.2f}, {vals['Bias_C_WL_Max (防追高)']:.2f})")
+    print(f"BIAS_YL_RANGE = ({vals['Bias_C_YL_Min (回踩底限)']:.2f}, {vals['Bias_C_YL_Max (回踩上限)']:.2f})")
+    print(f"\n# 2. 趋势强度")
+    print(f"TREND_GAP_RANGE = ({vals['Bias_WL_YL_Min (粘合下限)']:.2f}, {vals['Bias_WL_YL_Max (发散上限)']:.2f})")
+    print(f"\n# 3. 情绪与量能")
+    print(f"J_RANGE = ({vals['J_Min']:.2f}, {vals['J_Max']:.2f})")
+    print(f"SHRINK_MAX = {vals['Shrink_Max (缩量上限)']:.2f}")
     return
 
 
