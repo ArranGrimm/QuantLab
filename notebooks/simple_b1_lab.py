@@ -9,6 +9,7 @@ def _():
     import polars as pl
     import os
     from datetime import datetime
+    from utils.b1_factors import calc_b1_factors_tg
 
     # ==============================================================================
     # 1. 配置与数据加载 (Clean Version)
@@ -86,209 +87,26 @@ def _():
     # ⚙️ 策略参数配置 V3.0 (Based on 10 Golden Cases)
     # ==============================================================================
     CONFIG = {
-        # === [核心] 视觉量化严选 (The Visual Filters) ===
-        # 1. 形态收敛：实体幅度 < 3.5%
-        "SHAPE_THRESHOLD": 0.035, 
-
-        # 2. 量能窒息：今日成交量 < 30% * 28天最大阳量 (极致缩量)
-        "VOL_SHRINK_THRESHOLD": 0.30,
-
-        # === [核心] Ztalk 双均线基因 (The MA DNA) ===
-        # 3. 贴线程度: 允许假摔 -5.5%, 防止追高 5.5%
-        "BIAS_WL_RANGE": (-5.5, 5.5),
-
-        # 4. 回踩深度: 绝不有效跌破黄线 -1.0%, 上限 12.0%
-        "BIAS_YL_RANGE": (-1.0, 12.0),
-
-        # 5. 趋势强度: 必须多头排列 > 2.0%, 开口 < 32.0%
-        "BIAS_WL_YL_RANGE": (2.0, 32.0),
-
         # === 基础门槛 ===
         "J_THRESHOLD": 13.8,          # 放宽至 13.8
-        "MV_THRESHOLD": 6.5,          # 市值下限 6.5亿
-        "LIQUIDITY_THRESHOLD": 0.005, # 流动性 0.5亿
-
-        # === 能量结构 ===
-        "YANGYIN_RATIO": 1.33,       
-        "YANGYIN_PERIOD_1": 21,      
-        "YANGYIN_PERIOD_2": 14,      
-
-        # === 关键K & 触发器 ===
-        "KEY_K_LOOKBACK": 28,        
-        "CLUSTER_VOL_RATIO": 1.8,    
-        "CLUSTER_COUNT": 3,          
-        "CLUSTER_PERIOD": 28,        
-        "VIOLENT_VOL_RATIO": 1.75,   
-        "VIOLENT_POS_PCT": 0.55,     
-
-        # === 风控 (坏K线) ===
-        "BAD_K_LOOKBACK": 28,        
-        "BAD_K_OPEN_PCT": 0.925,     
-        "BAD_K_VOL_RATIO": 1.15,     
-        "BAD_K_AMNESTY_RATIO": 0.66, 
+        "X": 10
     }
 
-    # ==============================================================================
-    # 🧠 核心计算引擎 V3.0 (Polars Corrected Version)
-    # ==============================================================================
-    def calc_b1_factors(df: pl.LazyFrame) -> pl.LazyFrame:
-        print("🛠️ [Strategy] 启动 B1 V3.0 (Ztalk 完美指纹版)...")
-
-        return df.sort(["code", "date"]).with_columns([
-            # 0. 基础位移
-            pl.col("close_adj").shift(1).over("code").alias("prev_close"),
-            pl.col("volume").shift(1).over("code").alias("prev_vol"),
-            pl.col("open_adj").shift(1).over("code").alias("prev_open"),
-
-            # 1. Ztalk 双均线系统 (WL & YL)
-            # WL (白线): 双重 EMA10
-            pl.col("close_adj").ewm_mean(span=10, adjust=False).over("code")
-              .ewm_mean(span=10, adjust=False).over("code").alias("WL"),
-            # YL (黄线): 四均线加权
-            ((pl.col("close_adj").rolling_mean(14).over("code") + 
-              pl.col("close_adj").rolling_mean(28).over("code") + 
-              pl.col("close_adj").rolling_mean(57).over("code") + 
-              pl.col("close_adj").rolling_mean(114).over("code")) / 4).alias("YL"),
-
-        ]).with_columns([
-            # 2. 基础指标
-            (pl.col("high_adj").rolling_max(9).over("code") - pl.col("low_adj").rolling_min(9).over("code")).alias("kdj_den"),
-            ((pl.col("close_adj") > pl.col("open_adj")) & (pl.col("close_adj") >= pl.col("prev_close"))).alias("real_yang"),
-            ((pl.col("close_adj") < pl.col("open_adj")) & (pl.col("close_adj") <= pl.col("prev_close"))).alias("real_yin"), # 只有真跌才算真阴
-            pl.col("volume").rolling_mean(40).over("code").alias("avg40"),
-            pl.col("volume").shift(1).rolling_mean(40).over("code").alias("v40p"),
-
-            # 🔥 [V3.0] Ztalk 均线乖离率 (Bias)
-            ((pl.col("close_adj") - pl.col("WL")) / pl.col("WL") * 100).alias("Bias_C_WL"), 
-            ((pl.col("close_adj") - pl.col("YL")) / pl.col("YL") * 100).alias("Bias_C_YL"), 
-            ((pl.col("WL") - pl.col("YL")) / pl.col("YL") * 100).alias("Bias_WL_YL"),       
-
-        ]).with_columns([
-            # RSV
-            pl.when(pl.col("kdj_den") == 0).then(50.0)
-              .otherwise((pl.col("close_adj") - pl.col("low_adj").rolling_min(9).over("code")) / pl.col("kdj_den") * 100).alias("rsv"),
-
-            # 红绿量能累加
-            (pl.col("volume") * pl.col("real_yang")).rolling_sum(CONFIG["YANGYIN_PERIOD_1"]).over("code").alias("vol_yang_p1"),
-            (pl.col("volume") * pl.col("real_yin")).rolling_sum(CONFIG["YANGYIN_PERIOD_1"]).over("code").alias("vol_yin_p1"),
-            (pl.col("volume") * pl.col("real_yang")).rolling_sum(CONFIG["YANGYIN_PERIOD_2"]).over("code").alias("vol_yang_p2"),
-            (pl.col("volume") * pl.col("real_yin")).rolling_sum(CONFIG["YANGYIN_PERIOD_2"]).over("code").alias("vol_yin_p2"),
-
-            # O85 & R55
-            (pl.col("open_adj").rolling_min(28).over("code") + 
-             CONFIG["BAD_K_OPEN_PCT"] * (pl.col("open_adj").rolling_max(28).over("code") - pl.col("open_adj").rolling_min(28).over("code"))).alias("O85"),
-
-            (pl.col("close_adj").rolling_min(40).over("code") + 
-             CONFIG["VIOLENT_POS_PCT"] * (pl.col("close_adj").rolling_max(40).over("code") - pl.col("close_adj").rolling_min(40).over("code"))).alias("R55"),
-
-            # Max Yang (用于视觉量化)
-            pl.when(pl.col("real_yang")).then(pl.col("volume")).otherwise(0)
-              .rolling_max(28).over("code").alias("max_yang_vol_28"),
-
-        ]).with_columns([
-            # K
-            pl.col("rsv").ewm_mean(com=2, adjust=False).over("code").alias("K"),
-        
-            # 红绿比
-            ((pl.col("vol_yang_p1") > CONFIG["YANGYIN_RATIO"] * pl.col("vol_yin_p1")) | 
-             (pl.col("vol_yang_p2") > CONFIG["YANGYIN_RATIO"] * pl.col("vol_yin_p2"))).alias("YANGYIN_OK"),
-         
-            # 流动性
-            ((pl.col("amount").rolling_mean(28).over("code") / 1e8) >= CONFIG["LIQUIDITY_THRESHOLD"]).alias("LQ"),
-            ((pl.col("market_cap_100m")) >= CONFIG["MV_THRESHOLD"]).alias("MVOK"),
-
-            # BAD_K 计算
-            (
-                (pl.col("open_adj") >= pl.col("O85")) & 
-                (pl.col("close_adj") < pl.col("prev_close")) & 
-                (pl.col("close_adj") <= pl.col("open_adj")) & 
-                (pl.col("volume") >= CONFIG["BAD_K_VOL_RATIO"] * pl.col("prev_vol")) &
-                (pl.col("volume") >= CONFIG["BAD_K_AMNESTY_RATIO"] * pl.col("max_yang_vol_28")) 
-            ).cast(pl.Int32).rolling_sum(CONFIG["BAD_K_LOOKBACK"]).over("code").alias("bad_k_count"),
-
-            # 触发器
-            (
-                (pl.col("volume") > CONFIG["CLUSTER_VOL_RATIO"] * pl.col("prev_vol")) &
-                (pl.col("close_adj") > pl.col("open_adj")) &
-                (pl.col("volume") > pl.col("avg40"))
-            ).alias("PLRY"),
-
-            (
-                ((pl.col("close_adj") > pl.col("prev_close")) & (pl.col("close_adj") >= pl.col("open_adj"))) &
-                (pl.col("volume") > CONFIG["VIOLENT_VOL_RATIO"] * pl.col("v40p")) &
-                (pl.col("close_adj") > pl.col("R55"))
-            ).alias("KEY_K"),
-
-        ]).with_columns([
-            # D
-            pl.col("K").ewm_mean(com=2, adjust=False).over("code").alias("D"),
-        
-            # ======================================================================
-            # 🔥 [修复核心] MAX28_OK: 逻辑回归 (好量压制坏量)
-            # ======================================================================
-            # 1. 坏流 (Bad Stream): 只有 "real_yin" (真跌的阴线) 才算坏量。
-            # 2. 好流 (Safe Stream): 只要不是 real_yin (包括真阳线、假阴真阳)，都算好量。
-            # 逻辑: 只要 28天最大的好量 >= 28天最大的坏量，就说明主力没跑。
-            (
-                # 好人流 (取最大)
-                pl.when(~pl.col("real_yin")).then(pl.col("volume")).otherwise(0)
-                  .rolling_max(28).over("code") 
-                >= 
-                # 坏人流 (取最大)
-                pl.when(pl.col("real_yin")).then(pl.col("volume")).otherwise(0)
-                  .rolling_max(28).over("code")
-            ).alias("MAX28_OK"),
-            # ======================================================================
-
-            (pl.col("bad_k_count") == 0).alias("GOOD28"),
-            (pl.col("PLRY").cast(pl.Int32).rolling_sum(CONFIG["CLUSTER_PERIOD"]).over("code") >= CONFIG["CLUSTER_COUNT"]).alias("PLRY_CNT"),
-            (pl.col("KEY_K").cast(pl.Int32).rolling_max(CONFIG["KEY_K_LOOKBACK"]).over("code") == 1).alias("KEY_K_EXIST"),
-
-        ]).with_columns([
-            (3 * pl.col("K") - 2 * pl.col("D")).alias("J"),
-            (pl.col("PLRY_CNT") | pl.col("KEY_K_EXIST")).alias("TRIGGER"),
-
-            # === 视觉量化判定 ===
-            # 1. 形态收敛
-            (((pl.col("close_adj") - pl.col("open_adj")).abs() / pl.col("open_adj")) < CONFIG["SHAPE_THRESHOLD"]).alias("SHAPE_OK"),
-            # 2. 量能窒息 (0.30)
-            (pl.col("volume") < (CONFIG["VOL_SHRINK_THRESHOLD"] * pl.col("max_yang_vol_28"))).alias("VOL_SHRINK_OK"),
-
-            # 🔥 [V3.0] Ztalk 均线基因指纹判定
-            (
-                pl.col("Bias_C_WL").is_between(CONFIG["BIAS_WL_RANGE"][0], CONFIG["BIAS_WL_RANGE"][1]) & 
-                pl.col("Bias_C_YL").is_between(CONFIG["BIAS_YL_RANGE"][0], CONFIG["BIAS_YL_RANGE"][1]) & 
-                pl.col("Bias_WL_YL").is_between(CONFIG["BIAS_WL_YL_RANGE"][0], CONFIG["BIAS_WL_YL_RANGE"][1])
-            ).alias("ZTALK_GENE_OK"),
-
-        ]).with_columns([
-            (pl.col("J") <= CONFIG["J_THRESHOLD"]).alias("J_OK"),
-
-        ]).with_columns([
-            # {==== 最终选股 (XG) - V3.0 严选版 ====}
-            (
-                pl.col("TRIGGER") & 
-                pl.col("J_OK") & 
-                pl.col("LQ") & 
-                pl.col("MVOK") & 
-                pl.col("GOOD28") & 
-                pl.col("MAX28_OK") & 
-                pl.col("YANGYIN_OK") &
-                pl.col("SHAPE_OK") & 
-                pl.col("VOL_SHRINK_OK") & # 0.30 变态缩量
-                pl.col("ZTALK_GENE_OK")   # 双均线完美形态
-            ).alias("XG")
-        ]).with_columns([
-            (pl.col("XG")).alias("b1_signal")
-        ])
-    return MANUAL_LOOSE_PERIODS, calc_b1_factors, datetime, pl, q_full
+    return (
+        CONFIG,
+        MANUAL_LOOSE_PERIODS,
+        calc_b1_factors_tg,
+        datetime,
+        pl,
+        q_full,
+    )
 
 
 @app.cell
-def _(calc_b1_factors, q_full):
+def _(CONFIG, calc_b1_factors_tg, q_full):
     # 3. 执行计算
     print("⏳ 计算原始 B1 信号...")
-    df_signals = calc_b1_factors(q_full)
+    df_signals = calc_b1_factors_tg(q_full, CONFIG)
     return (df_signals,)
 
 
@@ -324,8 +142,6 @@ def _(MANUAL_LOOSE_PERIODS, datetime, df_signals, pl):
             # --- 辅助指标：冷却与排序 ---
             # 标记是否处于冷却期
             (pl.col("b1_signal").cast(pl.Int32).shift(1).rolling_max(10).over("code").fill_null(0) == 0).alias("is_cool"),
-            # 计算缩量比 (用于排序)
-            (pl.col("volume") / pl.col("avg40")).alias("vol_ratio")
         ]
 
         return_expr_list = []
@@ -376,9 +192,9 @@ def _(MANUAL_LOOSE_PERIODS, datetime, df_signals, pl):
             # ==============================================================================
             # 🔥 每日排序 (Ranking)
             # ==============================================================================
-            .with_columns([
-                pl.col("vol_ratio").rank("ordinal", descending=False).over("date").alias("daily_rank")
-            ])
+            # .with_columns([
+
+            # ])
             # .filter(pl.col("daily_rank") <= 3) # 每天只买前N个
             # ==============================================================================
             # 🔥 收益结算 (Settlement)
@@ -505,10 +321,9 @@ def _(df_result_dynamic, pl):
 @app.cell
 def _(datetime, df_signals, pl):
     df_signals.filter(
-        (pl.col("date") >= datetime(2025,4,1)) &
-        # (pl.col("b1_signal") == 1) &
-        (pl.col("code") == "688799_SH")
-    ).collect().select(["date","amount",  "MAX28_OK"])
+        (pl.col("date") == datetime(2026,1,9)) &
+        (pl.col("b1_signal") == 1) 
+    ).collect().select(["date","code"])
     return
 
 
