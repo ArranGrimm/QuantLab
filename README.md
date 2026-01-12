@@ -22,7 +22,7 @@
 │  │ [开盘]     │    │ [收盘]     │    │ [收盘后]   │        │
 │  └─────────────┘    └─────────────┘    └─────────────┘        │
 │                                                                 │
-│  特性: 分批止盈 | 动态止损 | 仓位管理 | 最大回撤跟踪            │
+│  特性: 分批止盈 | 动态止损 | 交易成本 | 最大回撤跟踪            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -36,6 +36,7 @@ QuantLab/
 │   │   ├── components/    # ECS 组件 (Position, ClosedTrade)
 │   │   ├── resources/     # ECS 资源 (Portfolio, MarketData, Config)
 │   │   └── systems/       # ECS 系统 (买入/卖出/统计)
+│   ├── config.toml        # 策略配置文件
 │   └── Cargo.toml
 ├── utils/                 # 🐍 Python 工具模块
 │   ├── b1_factors_opt.py  # B1 选股因子计算 (V3.0)
@@ -97,12 +98,41 @@ cd backtest-engine
 cargo run --release -- --data ../data/signals/market_data.parquet
 ```
 
-**可选参数:**
-```
---capital         初始资金 (默认: 100000)
---max-positions   最大持仓数 (默认: 5)
---stop-loss       止损比例 (默认: 0.03)
---max-hold-days   最大持有天数 (默认: 30)
+## ⚙️ 配置文件
+
+回测引擎通过 `config.toml` 进行配置，无需重新编译即可调参：
+
+```toml
+[backtest]
+initial_capital = 100000.0  # 初始资金
+max_positions = 5           # 最大持仓数量
+max_daily_buys = 5          # 每天最多买入数量
+position_size_pct = 0.2     # 单只股票仓位比例 (20%)
+max_hold_days = 30          # 最大持有天数
+
+[stop_loss]
+enabled = true
+pct = 0.03                  # 止损比例 (3%)
+
+[take_profit]
+tp1_pct = 0.15              # 第一阶段止盈 (15%)
+tp2_pct = 0.30              # 第二阶段止盈 (30%)
+sell_on_break_wl = true     # Stage2 跌破 WL 清仓
+
+[weak_performance]
+enabled = true
+days = 10                   # N 天后检查
+min_gain_pct = 0.05         # 最低涨幅要求 (5%)
+
+[trailing_stop]
+enabled = false             # 移动止损 (可选)
+activation_pct = 0.10
+trailing_pct = 0.05
+
+[costs]
+commission_rate = 0.00025   # 佣金 (万2.5)
+stamp_duty_rate = 0.001     # 印花税 (千1)
+slippage_pct = 0.001        # 滑点 (0.1%)
 ```
 
 ## 📈 回测策略
@@ -111,22 +141,49 @@ cargo run --release -- --data ../data/signals/market_data.parquet
 - `pre_b1_signal = true` (昨日产生 B1 信号)
 - `is_loose = true` (处于活跃期)
 - 按 `vol_ratio` 排序 (缩量优先)
+- 每日最多买入 `max_daily_buys` 只
 
-### 卖出条件
-1. **止损**: 收盘价 ≤ 止损价
-2. **分批止盈**:
-   - 涨 15% → 卖 1/3
-   - 涨 30% → 再卖 1/3
-   - 剩余部分跌破 WL 时卖出
-3. **超时**: 持有 ≥ 30 天
+### 卖出条件 (按优先级)
+1. **止损**: 收盘价 ≤ 止损价 (-3%)
+2. **移动止损**: 涨幅达激活点后，从最高点回撤超阈值 (可选)
+3. **弱势清仓**: 10 天后涨幅不足 5%
+4. **分批止盈**:
+   - 涨 15% → 卖 1/3 (Stage 1)
+   - 涨 30% → 再卖 1/3 (Stage 2)
+   - Stage 2 后跌破 WL → 卖出剩余
+5. **超时**: 持有 ≥ 30 天
 
-### 回测指标示例
+### 回测指标 (2025.04 - 2026.01)
+
 ```
-Total Trades: 40
-Win Rate: 57.5%
-Total Return: +13.68%
-Max Drawdown: 3.69%
+========================================
+           Backtest Results
+========================================
+Total Trades: 60
+Win Rate: 56.7%
+Total PnL: +13929.88
+Final Portfolio: 113929.88
+Total Return: +13.93%
+Max Drawdown: 5.36%
+----------------------------------------
+Trading Costs:
+  Commission: 353.77
+  Stamp Duty: 715.74
+  Slippage:   1415.06
+  Total:      2484.57
+========================================
 ```
+
+## 💡 策略容量发现
+
+回测显示该策略存在 **容量天花板**：
+
+| 资金规模 | 持仓数 | 收益率 | 说明 |
+|----------|--------|--------|------|
+| 10万 | 5只 | **+13.93%** | ✅ 最优 |
+| 50万 | 10只 | +6.45% | 信号稀释 |
+
+**结论**: 策略最佳规模为 **10-30万**，资金过大会导致收益稀释。
 
 ## 🔧 开发说明
 
@@ -140,8 +197,15 @@ Max Drawdown: 3.69%
 | `cargo run --release` | ⚡ 快 | 🚀 快 | 开发回测 |
 | `cargo run --profile production` | 🐢 慢 | 🚀🚀 极致 | 正式回测 |
 
+### 为什么用 Bevy ECS？
+
+- **模块化**: 买入/卖出/统计逻辑完全解耦
+- **高性能**: Rust + ECS 架构，毫秒级回测
+- **可扩展**: 新增卖出条件只需添加 System
+
 ## 📝 注意事项
 
 - `data/` 目录已被 `.gitignore` 忽略
 - Rust 回测引擎需要 `market_data.parquet` 文件
 - 建议使用 Marimo 替代 Jupyter 进行交互式研究
+- 配置文件修改后无需重新编译

@@ -6,9 +6,13 @@
 //! 3. update_stats          - 更新统计数据
 //!
 //! 分批止盈策略：
-//! - Stage 0: 涨 15% → 卖 1/3，进入 Stage 1
-//! - Stage 1: 涨 30% → 卖 1/3，进入 Stage 2
+//! - Stage 0: 涨 TP1% → 卖 1/3，进入 Stage 1
+//! - Stage 1: 涨 TP2% → 卖 1/3，进入 Stage 2
 //! - Stage 2: 跌破 WL → 卖出剩余
+//!
+//! 移动止损 (Trailing Stop)：
+//! - 涨幅达到 activation_pct 后激活
+//! - 从最高点回撤 trailing_pct 止损
 
 use bevy_ecs::prelude::*;
 
@@ -38,16 +42,35 @@ pub fn check_sell_conditions(
             None => continue,
         };
 
+        // 更新最高价 (用于移动止损)
+        position.update_high(bar.high);
+
         let hold_days = (current_date - position.entry_date).num_days() as i32;
         let current_gain_pct = (bar.close - position.entry_price) / position.entry_price;
 
+        // ========== 激活移动止损 ==========
+        if config.trailing_enabled 
+            && !position.trailing_stop_active 
+            && current_gain_pct >= config.trailing_activation_pct 
+        {
+            position.trailing_stop_active = true;
+            println!(
+                "[{}] [TRAILING ACTIVATED] {} | Gain: +{:.1}% | High: {:.2}",
+                current_date, position.code, current_gain_pct * 100.0, position.high_since_entry
+            );
+        }
+
         // ========== 分批止盈检查 ==========
-        // Stage 0 → 1: 涨 15%，卖 1/3
-        if position.take_profit_stage == 0 && current_gain_pct >= 0.15 {
+        // Stage 0 → 1: 涨 TP1%，卖 1/3
+        if position.take_profit_stage == 0 && current_gain_pct >= config.tp1_pct {
             let sell_shares = position.initial_shares / 3;
             if sell_shares > 0 {
                 let gross = sell_shares as f64 * bar.close;
-                let net = gross * (1.0 - config.slippage_pct - config.commission_pct);
+                let commission = gross * config.commission_rate;
+                let stamp_duty = gross * config.stamp_duty_rate;
+                let slippage = gross * config.slippage_pct;
+                let net = gross - commission - stamp_duty - slippage;
+                
                 let sell_cost = (sell_shares as f64 / position.shares as f64) * position.cost;
                 let pnl = net - sell_cost;
 
@@ -57,6 +80,11 @@ pub fn check_sell_conditions(
                 position.realized_pnl += pnl;
                 position.take_profit_stage = 1;
 
+                // 统计交易成本
+                stats.total_commission += commission;
+                stats.total_stamp_duty += stamp_duty;
+                stats.total_slippage += slippage;
+
                 println!(
                     "[{}] [TP1] {} @ {:.2} | +{:.1}% | Sold {}/{} shares | PnL: {:+.2}",
                     current_date, position.code, bar.close, current_gain_pct * 100.0,
@@ -64,12 +92,16 @@ pub fn check_sell_conditions(
                 );
             }
         }
-        // Stage 1 → 2: 涨 30%，再卖 1/3
-        else if position.take_profit_stage == 1 && current_gain_pct >= 0.30 {
+        // Stage 1 → 2: 涨 TP2%，再卖 1/3
+        else if position.take_profit_stage == 1 && current_gain_pct >= config.tp2_pct {
             let sell_shares = position.initial_shares / 3;
             if sell_shares > 0 && position.shares >= sell_shares {
                 let gross = sell_shares as f64 * bar.close;
-                let net = gross * (1.0 - config.slippage_pct - config.commission_pct);
+                let commission = gross * config.commission_rate;
+                let stamp_duty = gross * config.stamp_duty_rate;
+                let slippage = gross * config.slippage_pct;
+                let net = gross - commission - stamp_duty - slippage;
+                
                 let sell_cost = (sell_shares as f64 / position.shares as f64) * position.cost;
                 let pnl = net - sell_cost;
 
@@ -78,6 +110,11 @@ pub fn check_sell_conditions(
                 position.cost -= sell_cost;
                 position.realized_pnl += pnl;
                 position.take_profit_stage = 2;
+
+                // 统计交易成本
+                stats.total_commission += commission;
+                stats.total_stamp_duty += stamp_duty;
+                stats.total_slippage += slippage;
 
                 println!(
                     "[{}] [TP2] {} @ {:.2} | +{:.1}% | Sold {}/{} shares | PnL: {:+.2}",
@@ -91,17 +128,34 @@ pub fn check_sell_conditions(
         let mut should_sell_all = false;
         let mut exit_reason = ExitReason::MaxHoldDays;
 
-        // 1. 止损 (适用于所有阶段)
-        if bar.close <= position.stop_price {
+        // 1. 固定止损 (适用于所有阶段)
+        if config.stop_loss_enabled && bar.close <= position.stop_price {
             should_sell_all = true;
             exit_reason = ExitReason::StopLoss;
         }
-        // 2. Stage 2 跌破 WL → 卖出剩余
-        else if position.take_profit_stage == 2 && bar.close < bar.wl {
+        // 2. 移动止损 (如果已激活)
+        else if config.trailing_enabled && position.trailing_stop_active {
+            let trailing_stop_price = position.trailing_stop_price(config.trailing_pct);
+            if bar.close <= trailing_stop_price {
+                should_sell_all = true;
+                exit_reason = ExitReason::TrailingStop;
+            }
+        }
+        // 3. Stage 2 跌破 WL → 卖出剩余
+        else if config.sell_on_break_wl && position.take_profit_stage == 2 && bar.close < bar.wl {
             should_sell_all = true;
             exit_reason = ExitReason::BreakWL;
         }
-        // 3. 最大持有期 (适用于 Stage 0, 1)
+        // 4. 弱势清仓: N 天后涨幅不足 (仅 Stage 0，未触发过止盈)
+        else if config.weak_enabled 
+            && position.take_profit_stage == 0 
+            && hold_days >= config.weak_days 
+            && current_gain_pct < config.weak_min_gain_pct 
+        {
+            should_sell_all = true;
+            exit_reason = ExitReason::WeakPerformance;
+        }
+        // 5. 最大持有期 (适用于 Stage 0, 1)
         else if position.take_profit_stage < 2 && hold_days >= config.max_hold_days {
             should_sell_all = true;
             exit_reason = ExitReason::MaxHoldDays;
@@ -109,15 +163,22 @@ pub fn check_sell_conditions(
 
         if should_sell_all && position.shares > 0 {
             let gross = position.shares as f64 * bar.close;
-            let net = gross * (1.0 - config.slippage_pct - config.commission_pct);
+            let commission = gross * config.commission_rate;
+            let stamp_duty = gross * config.stamp_duty_rate;
+            let slippage = gross * config.slippage_pct;
+            let net = gross - commission - stamp_duty - slippage;
+            
             let pnl = net - position.cost + position.realized_pnl;
-            let total_cost = position.initial_shares as f64 * position.entry_price 
-                * (1.0 + config.slippage_pct + config.commission_pct);
-            let pnl_pct = pnl / total_cost;
+            let total_initial_cost = position.initial_shares as f64 * position.entry_price;
+            let pnl_pct = pnl / total_initial_cost;
 
             portfolio.cash += net;
             stats.total_trades += 1;
             stats.total_pnl += pnl;
+            stats.total_commission += commission;
+            stats.total_stamp_duty += stamp_duty;
+            stats.total_slippage += slippage;
+
             if pnl > 0.0 {
                 stats.winning_trades += 1;
             } else {
@@ -158,6 +219,7 @@ pub fn process_buy_signals(
     mut commands: Commands,
     config: Res<BacktestConfig>,
     mut portfolio: ResMut<Portfolio>,
+    mut stats: ResMut<BacktestStats>,
     daily_data: Res<DailyData>,
     positions: Query<&Position>,
 ) {
@@ -174,11 +236,11 @@ pub fn process_buy_signals(
     let existing_codes: std::collections::HashSet<_> =
         positions.iter().map(|p| p.code.clone()).collect();
 
-    let available_slots = config.max_positions - current_positions;
-    let mut bought_count = 0;  // 本地计数器
+    // 每天可买数量 = min(每日上限, 剩余仓位)
+    let available_slots = (config.max_positions - current_positions).min(config.max_daily_buys);
+    let mut bought_count = 0;
 
     for (code, _vol_ratio, open_price, stop_price) in daily_data.buy_candidates.iter() {
-        // 检查是否还有空位
         if bought_count >= available_slots {
             break;
         }
@@ -198,12 +260,21 @@ pub fn process_buy_signals(
             continue;
         }
 
-        let cost = shares as f64 * open_price * (1.0 + config.slippage_pct + config.commission_pct);
+        // 计算买入成本 (含佣金和滑点)
+        let gross = shares as f64 * open_price;
+        let commission = gross * config.commission_rate;
+        let slippage = gross * config.slippage_pct;
+        let cost = gross + commission + slippage;
+        
         if cost > portfolio.cash {
             continue;
         }
 
         portfolio.cash -= cost;
+        
+        // 统计交易成本
+        stats.total_commission += commission;
+        stats.total_slippage += slippage;
 
         commands.spawn(Position {
             code: code.clone(),
@@ -215,11 +286,13 @@ pub fn process_buy_signals(
             cost,
             realized_pnl: 0.0,
             take_profit_stage: 0,
+            high_since_entry: *open_price,  // 初始最高价 = 买入价
+            trailing_stop_active: false,
         });
 
         println!("[{}] [BUY] {} @ {:.2} x {} shares", current_date, code, open_price, shares);
 
-        bought_count += 1;  // 买入后计数器 +1
+        bought_count += 1;
     }
 }
 

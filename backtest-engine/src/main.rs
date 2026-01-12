@@ -2,10 +2,12 @@
 //!
 //! 设计理念：
 //! - 加载完整市场数据（包含 b1_signal, pre_b1_signal, is_loose 标记）
-//! - 每日工作流：先卖出检查，再买入
+//! - 每日工作流：先买入(开盘)，再卖出(收盘)
+//! - 支持 TOML 配置文件
 //!
 //! Usage:
 //!   cargo run --release -- --data ../data/signals/market_data.parquet
+//!   cargo run --release -- --config config.toml --data ../data/signals/market_data.parquet
 
 mod components;
 mod resources;
@@ -20,7 +22,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use components::Position;
-use resources::{BacktestConfig, BacktestStats, DailyData, MarketData, Portfolio, PriceBar};
+use resources::{BacktestConfig, BacktestStats, ConfigFile, DailyData, MarketData, Portfolio, PriceBar};
 use systems::{check_sell_conditions, process_buy_signals, update_stats};
 
 #[derive(Parser, Debug)]
@@ -30,21 +32,9 @@ struct Args {
     #[arg(short, long, default_value = "../data/signals/market_data.parquet")]
     data: PathBuf,
 
-    /// Initial capital
-    #[arg(long, default_value_t = 100_000.0)]
-    capital: f64,
-
-    /// Maximum positions
-    #[arg(long, default_value_t = 5)]
-    max_positions: usize,
-
-    /// Stop loss percentage
-    #[arg(long, default_value_t = 0.03)]
-    stop_loss: f64,
-
-    /// Maximum hold days
-    #[arg(long, default_value_t = 30)]
-    max_hold_days: i32,
+    /// Path to config file (TOML)
+    #[arg(short, long, default_value = "config.toml")]
+    config: PathBuf,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -53,13 +43,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("========================================");
     println!("   Quant Backtest Engine (Bevy ECS)");
     println!("========================================");
-    println!("Loading data from: {:?}", args.data);
 
-    // 1. Load market data
+    // 1. Load config
+    let config: BacktestConfig = match ConfigFile::load(&args.config) {
+        Ok(cfg) => {
+            println!("Loaded config from: {:?}", args.config);
+            cfg.into()
+        }
+        Err(e) => {
+            println!("Warning: {}. Using defaults.", e);
+            BacktestConfig::default()
+        }
+    };
+    
+    print_config(&config);
+
+    println!("\nLoading data from: {:?}", args.data);
+
+    // 2. Load market data
     let df = LazyFrame::scan_parquet(&args.data, Default::default())?.collect()?;
     println!("Loaded {} rows", df.height());
 
-    // 2. Build market data structure
+    // 3. Build market data structure
     let (market_data, trading_dates) = build_market_data(&df)?;
     println!(
         "Stocks: {}, Trading days: {}",
@@ -67,33 +72,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         trading_dates.len()
     );
 
-    // 3. Initialize Bevy App
+    // 4. Initialize Bevy App
     let mut app = App::new();
 
-    // 4. Add resources
-    let config = BacktestConfig {
-        initial_capital: args.capital,
-        max_positions: args.max_positions,
-        stop_loss_pct: args.stop_loss,
-        max_hold_days: args.max_hold_days,
-        ..Default::default()
-    };
-
+    // 5. Add resources
+    let initial_capital = config.initial_capital;
     app.insert_resource(config);
-    app.insert_resource(Portfolio::new(args.capital));
+    app.insert_resource(Portfolio::new(initial_capital));
     app.insert_resource(BacktestStats::default());
     app.insert_resource(market_data);
     app.insert_resource(DailyData::default());
 
-    // 5. Add systems
+    // 6. Add systems
     // 重要：先买入(开盘)，再卖出(收盘)，这样卖出释放的仓位要到下一天才能用
     app.add_systems(
         Update,
         (process_buy_signals, check_sell_conditions, update_stats).chain(),
     );
 
-    // 6. Run backtest by date
-    println!("Running backtest over {} trading days...\n", trading_dates.len());
+    // 7. Run backtest by date
+    println!("\nRunning backtest over {} trading days...\n", trading_dates.len());
 
     for date in &trading_dates {
         // Update current date and daily candidates
@@ -127,15 +125,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         app.update();
     }
 
-    // 7. Force close remaining positions
+    // 8. Force close remaining positions
     if let Some(end_date) = trading_dates.last() {
         force_close_all_positions(&mut app, *end_date);
     }
 
-    // 8. Print results
-    print_results(&app, args.capital);
+    // 9. Print results
+    print_results(&app, initial_capital);
 
     Ok(())
+}
+
+/// Print current config
+fn print_config(config: &BacktestConfig) {
+    println!("\n--- Configuration ---");
+    println!("Initial Capital: {:.0}", config.initial_capital);
+    println!("Max Positions: {} (Daily: {})", config.max_positions, config.max_daily_buys);
+    println!("Position Size: {:.0}%", config.position_size_pct * 100.0);
+    println!("Max Hold Days: {}", config.max_hold_days);
+    println!("Stop Loss: {:.1}% ({})", config.stop_loss_pct * 100.0, if config.stop_loss_enabled { "ON" } else { "OFF" });
+    println!("Take Profit: TP1={:.0}%, TP2={:.0}%", config.tp1_pct * 100.0, config.tp2_pct * 100.0);
+    println!("Weak Filter: {} days @ {:.0}% ({})", config.weak_days, config.weak_min_gain_pct * 100.0, if config.weak_enabled { "ON" } else { "OFF" });
+    println!("Trailing Stop: Activate={:.0}%, Trail={:.0}% ({})", 
+        config.trailing_activation_pct * 100.0, 
+        config.trailing_pct * 100.0,
+        if config.trailing_enabled { "ON" } else { "OFF" }
+    );
+    println!("Costs: Commission={:.4}%, Stamp={:.3}%, Slippage={:.2}%", 
+        config.commission_rate * 100.0,
+        config.stamp_duty_rate * 100.0,
+        config.slippage_pct * 100.0
+    );
+    println!("----------------------");
 }
 
 /// Build market data from DataFrame
@@ -228,12 +249,15 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
     // Close positions
     for (entity, position, exit_price) in to_close {
         let gross = position.shares as f64 * exit_price;
-        let net = gross * (1.0 - config.slippage_pct - config.commission_pct);
+        let commission = gross * config.commission_rate;
+        let stamp_duty = gross * config.stamp_duty_rate;
+        let slippage = gross * config.slippage_pct;
+        let net = gross - commission - stamp_duty - slippage;
+        
         // 总 PnL = 当前持仓盈亏 + 已实现盈亏 (分批止盈)
         let pnl = (net - position.cost) + position.realized_pnl;
-        let total_cost = position.initial_shares as f64 * position.entry_price 
-            * (1.0 + config.slippage_pct + config.commission_pct);
-        let pnl_pct = pnl / total_cost;
+        let total_initial_cost = position.initial_shares as f64 * position.entry_price;
+        let pnl_pct = pnl / total_initial_cost;
         let hold_days = (end_date - position.entry_date).num_days() as i32;
 
         world.resource_mut::<Portfolio>().cash += net;
@@ -242,6 +266,9 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
             let mut stats = world.resource_mut::<BacktestStats>();
             stats.total_trades += 1;
             stats.total_pnl += pnl;
+            stats.total_commission += commission;
+            stats.total_stamp_duty += stamp_duty;
+            stats.total_slippage += slippage;
             if pnl > 0.0 {
                 stats.winning_trades += 1;
             } else {
@@ -271,7 +298,7 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
             exit_date: end_date,
             entry_price: position.entry_price,
             exit_price,
-            shares: position.initial_shares,  // 使用初始股数
+            shares: position.initial_shares,
             pnl,
             pnl_pct,
             hold_days,
@@ -297,5 +324,11 @@ fn print_results(app: &App, initial_capital: f64) {
         (portfolio.cash / initial_capital - 1.0) * 100.0
     );
     println!("Max Drawdown: {:.2}%", stats.max_drawdown * 100.0);
+    println!("----------------------------------------");
+    println!("Trading Costs:");
+    println!("  Commission: {:.2}", stats.total_commission);
+    println!("  Stamp Duty: {:.2}", stats.total_stamp_duty);
+    println!("  Slippage:   {:.2}", stats.total_slippage);
+    println!("  Total:      {:.2}", stats.total_costs());
     println!("========================================");
 }

@@ -15,6 +15,9 @@ polars = { version = "0.46", features = ["parquet", "lazy", "dtype-date"] }
 # 序列化
 serde = { version = "1.0", features = ["derive"] }
 
+# 配置文件
+toml = "0.8"
+
 # 日期处理
 chrono = "0.4"
 
