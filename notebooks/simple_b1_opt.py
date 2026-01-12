@@ -9,6 +9,9 @@ def _():
     import polars as pl
     import os
     from datetime import datetime
+    from utils import calc_b1_factors_opt, run_backtest, print_backtest_report, analyze_yearly_intensity
+    from utils.baostock_utils import get_st_blacklist_pl
+    from utils import run_backtest_realistic, print_realistic_report
 
     # ==============================================================================
     # 1. 配置与数据加载 (Clean Version)
@@ -69,6 +72,8 @@ def _():
         .select(["code", "date", "circulating_capital"]).sort(["code", "date"])
     )
 
+
+    st_blacklist = get_st_blacklist_pl('2025-01-09') # 获取ST列表
     # (C) 合并数据 (移除了所有市场指数相关代码)
     print("🔗 [Step 2] 合并基础数据...")
     q_full = (
@@ -78,422 +83,72 @@ def _():
         .join_asof(q_cap, on="date", by="code", strategy="backward")
         .with_columns([
             (pl.col("close_raw") * pl.col("circulating_capital") / 1e8).alias("market_cap_100m")
-        ])
-        # 🔥 已移除 .join(q_market_index)
+        ]).filter(
+            ~pl.col("code").is_in(st_blacklist)
+        )
     )
 
     # ==============================================================================
     # ⚙️ 策略参数配置 V3.0 (Based on 10 Golden Cases)
     # ==============================================================================
-    CONFIG = {
-        # === [核心] 视觉量化严选 (The Visual Filters) ===
-        # 1. 形态收敛：实体幅度 < 3.5%
-        "SHAPE_THRESHOLD": 0.035, 
-
-        # 2. 量能窒息：今日成交量 < 30% * 28天最大阳量 (极致缩量)
-        "VOL_SHRINK_THRESHOLD": 0.30,
-
-        # === [核心] Ztalk 双均线基因 (The MA DNA) ===
-        # 3. 贴线程度: 允许假摔 -5.5%, 防止追高 5.5%
-        "BIAS_WL_RANGE": (-5.5, 5.5),
-
-        # 4. 回踩深度: 绝不有效跌破黄线 -1.0%, 上限 12.0%
-        "BIAS_YL_RANGE": (-1.0, 12.0),
-
-        # 5. 趋势强度: 必须多头排列 > 2.0%, 开口 < 32.0%
-        "BIAS_WL_YL_RANGE": (2.0, 32.0),
-
-        # === 基础门槛 ===
-        "J_THRESHOLD": 13.8,          # 放宽至 13.8
-        "MV_THRESHOLD": 6.5,          # 市值下限 6.5亿
-        "LIQUIDITY_THRESHOLD": 0.005, # 流动性 0.5亿
-
-        # === 能量结构 ===
-        "YANGYIN_RATIO": 1.33,       
-        "YANGYIN_PERIOD_1": 21,      
-        "YANGYIN_PERIOD_2": 14,      
-
-        # === 关键K & 触发器 ===
-        "KEY_K_LOOKBACK": 28,        
-        "CLUSTER_VOL_RATIO": 1.8,    
-        "CLUSTER_COUNT": 3,          
-        "CLUSTER_PERIOD": 28,        
-        "VIOLENT_VOL_RATIO": 1.75,   
-        "VIOLENT_POS_PCT": 0.55,     
-
-        # === 风控 (坏K线) ===
-        "BAD_K_LOOKBACK": 28,        
-        "BAD_K_OPEN_PCT": 0.925,     
-        "BAD_K_VOL_RATIO": 1.15,     
-        "BAD_K_AMNESTY_RATIO": 0.66, 
-    }
-
-    # ==============================================================================
-    # 🧠 核心计算引擎 V3.0 (Polars Corrected Version)
-    # ==============================================================================
-    def calc_b1_factors(df: pl.LazyFrame) -> pl.LazyFrame:
-        print("🛠️ [Strategy] 启动 B1 V3.0 (Ztalk 完美指纹版)...")
-
-        return df.sort(["code", "date"]).with_columns([
-            # 0. 基础位移
-            pl.col("close_adj").shift(1).over("code").alias("prev_close"),
-            pl.col("volume").shift(1).over("code").alias("prev_vol"),
-            pl.col("open_adj").shift(1).over("code").alias("prev_open"),
-
-            # 1. Ztalk 双均线系统 (WL & YL)
-            # WL (白线): 双重 EMA10
-            pl.col("close_adj").ewm_mean(span=10, adjust=False).over("code")
-              .ewm_mean(span=10, adjust=False).over("code").alias("WL"),
-            # YL (黄线): 四均线加权
-            ((pl.col("close_adj").rolling_mean(14).over("code") + 
-              pl.col("close_adj").rolling_mean(28).over("code") + 
-              pl.col("close_adj").rolling_mean(57).over("code") + 
-              pl.col("close_adj").rolling_mean(114).over("code")) / 4).alias("YL"),
-
-        ]).with_columns([
-            # 2. 基础指标
-            (pl.col("high_adj").rolling_max(9).over("code") - pl.col("low_adj").rolling_min(9).over("code")).alias("kdj_den"),
-            ((pl.col("close_adj") > pl.col("open_adj")) & (pl.col("close_adj") >= pl.col("prev_close"))).alias("real_yang"),
-            ((pl.col("close_adj") < pl.col("open_adj")) & (pl.col("close_adj") <= pl.col("prev_close"))).alias("real_yin"), # 只有真跌才算真阴
-            pl.col("volume").rolling_mean(40).over("code").alias("avg40"),
-            pl.col("volume").shift(1).rolling_mean(40).over("code").alias("v40p"),
-
-            # 🔥 [V3.0] Ztalk 均线乖离率 (Bias)
-            ((pl.col("close_adj") - pl.col("WL")) / pl.col("WL") * 100).alias("Bias_C_WL"), 
-            ((pl.col("close_adj") - pl.col("YL")) / pl.col("YL") * 100).alias("Bias_C_YL"), 
-            ((pl.col("WL") - pl.col("YL")) / pl.col("YL") * 100).alias("Bias_WL_YL"),       
-
-        ]).with_columns([
-            # RSV
-            pl.when(pl.col("kdj_den") == 0).then(50.0)
-              .otherwise((pl.col("close_adj") - pl.col("low_adj").rolling_min(9).over("code")) / pl.col("kdj_den") * 100).alias("rsv"),
-
-            # 红绿量能累加
-            (pl.col("volume") * pl.col("real_yang")).rolling_sum(CONFIG["YANGYIN_PERIOD_1"]).over("code").alias("vol_yang_p1"),
-            (pl.col("volume") * pl.col("real_yin")).rolling_sum(CONFIG["YANGYIN_PERIOD_1"]).over("code").alias("vol_yin_p1"),
-            (pl.col("volume") * pl.col("real_yang")).rolling_sum(CONFIG["YANGYIN_PERIOD_2"]).over("code").alias("vol_yang_p2"),
-            (pl.col("volume") * pl.col("real_yin")).rolling_sum(CONFIG["YANGYIN_PERIOD_2"]).over("code").alias("vol_yin_p2"),
-
-            # O85 & R55
-            (pl.col("open_adj").rolling_min(28).over("code") + 
-             CONFIG["BAD_K_OPEN_PCT"] * (pl.col("open_adj").rolling_max(28).over("code") - pl.col("open_adj").rolling_min(28).over("code"))).alias("O85"),
-
-            (pl.col("close_adj").rolling_min(40).over("code") + 
-             CONFIG["VIOLENT_POS_PCT"] * (pl.col("close_adj").rolling_max(40).over("code") - pl.col("close_adj").rolling_min(40).over("code"))).alias("R55"),
-
-            # Max Yang (用于视觉量化)
-            pl.when(pl.col("real_yang")).then(pl.col("volume")).otherwise(0)
-              .rolling_max(28).over("code").alias("max_yang_vol_28"),
-
-        ]).with_columns([
-            # K
-            pl.col("rsv").ewm_mean(com=2, adjust=False).over("code").alias("K"),
-        
-            # 红绿比
-            ((pl.col("vol_yang_p1") > CONFIG["YANGYIN_RATIO"] * pl.col("vol_yin_p1")) | 
-             (pl.col("vol_yang_p2") > CONFIG["YANGYIN_RATIO"] * pl.col("vol_yin_p2"))).alias("YANGYIN_OK"),
-         
-            # 流动性
-            ((pl.col("amount").rolling_mean(28).over("code") / 1e8) >= CONFIG["LIQUIDITY_THRESHOLD"]).alias("LQ"),
-            ((pl.col("market_cap_100m")) >= CONFIG["MV_THRESHOLD"]).alias("MVOK"),
-
-            # BAD_K 计算
-            (
-                (pl.col("open_adj") >= pl.col("O85")) & 
-                (pl.col("close_adj") < pl.col("prev_close")) & 
-                (pl.col("close_adj") <= pl.col("open_adj")) & 
-                (pl.col("volume") >= CONFIG["BAD_K_VOL_RATIO"] * pl.col("prev_vol")) &
-                (pl.col("volume") >= CONFIG["BAD_K_AMNESTY_RATIO"] * pl.col("max_yang_vol_28")) 
-            ).cast(pl.Int32).rolling_sum(CONFIG["BAD_K_LOOKBACK"]).over("code").alias("bad_k_count"),
-
-            # 触发器
-            (
-                (pl.col("volume") > CONFIG["CLUSTER_VOL_RATIO"] * pl.col("prev_vol")) &
-                (pl.col("close_adj") > pl.col("open_adj")) &
-                (pl.col("volume") > pl.col("avg40"))
-            ).alias("PLRY"),
-
-            (
-                ((pl.col("close_adj") > pl.col("prev_close")) & (pl.col("close_adj") >= pl.col("open_adj"))) &
-                (pl.col("volume") > CONFIG["VIOLENT_VOL_RATIO"] * pl.col("v40p")) &
-                (pl.col("close_adj") > pl.col("R55"))
-            ).alias("KEY_K"),
-
-        ]).with_columns([
-            # D
-            pl.col("K").ewm_mean(com=2, adjust=False).over("code").alias("D"),
-        
-            # ======================================================================
-            # 🔥 [修复核心] MAX28_OK: 逻辑回归 (好量压制坏量)
-            # ======================================================================
-            # 1. 坏流 (Bad Stream): 只有 "real_yin" (真跌的阴线) 才算坏量。
-            # 2. 好流 (Safe Stream): 只要不是 real_yin (包括真阳线、假阴真阳)，都算好量。
-            # 逻辑: 只要 28天最大的好量 >= 28天最大的坏量，就说明主力没跑。
-            (
-                # 好人流 (取最大)
-                pl.when(~pl.col("real_yin")).then(pl.col("volume")).otherwise(0)
-                  .rolling_max(28).over("code") 
-                >= 
-                # 坏人流 (取最大)
-                pl.when(pl.col("real_yin")).then(pl.col("volume")).otherwise(0)
-                  .rolling_max(28).over("code")
-            ).alias("MAX28_OK"),
-            # ======================================================================
-
-            (pl.col("bad_k_count") == 0).alias("GOOD28"),
-            (pl.col("PLRY").cast(pl.Int32).rolling_sum(CONFIG["CLUSTER_PERIOD"]).over("code") >= CONFIG["CLUSTER_COUNT"]).alias("PLRY_CNT"),
-            (pl.col("KEY_K").cast(pl.Int32).rolling_max(CONFIG["KEY_K_LOOKBACK"]).over("code") == 1).alias("KEY_K_EXIST"),
-
-        ]).with_columns([
-            (3 * pl.col("K") - 2 * pl.col("D")).alias("J"),
-            (pl.col("PLRY_CNT") | pl.col("KEY_K_EXIST")).alias("TRIGGER"),
-
-            # === 视觉量化判定 ===
-            # 1. 形态收敛
-            (((pl.col("close_adj") - pl.col("open_adj")).abs() / pl.col("open_adj")) < CONFIG["SHAPE_THRESHOLD"]).alias("SHAPE_OK"),
-            # 2. 量能窒息 (0.30)
-            (pl.col("volume") < (CONFIG["VOL_SHRINK_THRESHOLD"] * pl.col("max_yang_vol_28"))).alias("VOL_SHRINK_OK"),
-
-            # 🔥 [V3.0] Ztalk 均线基因指纹判定
-            (
-                pl.col("Bias_C_WL").is_between(CONFIG["BIAS_WL_RANGE"][0], CONFIG["BIAS_WL_RANGE"][1]) & 
-                pl.col("Bias_C_YL").is_between(CONFIG["BIAS_YL_RANGE"][0], CONFIG["BIAS_YL_RANGE"][1]) & 
-                pl.col("Bias_WL_YL").is_between(CONFIG["BIAS_WL_YL_RANGE"][0], CONFIG["BIAS_WL_YL_RANGE"][1])
-            ).alias("ZTALK_GENE_OK"),
-
-        ]).with_columns([
-            (pl.col("J") <= CONFIG["J_THRESHOLD"]).alias("J_OK"),
-
-        ]).with_columns([
-            # {==== 最终选股 (XG) - V3.0 严选版 ====}
-            (
-                pl.col("TRIGGER") & 
-                pl.col("J_OK") & 
-                pl.col("LQ") & 
-                pl.col("MVOK") & 
-                pl.col("GOOD28") & 
-                pl.col("MAX28_OK") & 
-                pl.col("YANGYIN_OK") &
-                pl.col("SHAPE_OK") & 
-                pl.col("VOL_SHRINK_OK") & # 0.30 变态缩量
-                pl.col("ZTALK_GENE_OK")   # 双均线完美形态
-            ).alias("XG")
-        ]).with_columns([
-            (pl.col("XG")).alias("b1_signal")
-        ])
-    return MANUAL_LOOSE_PERIODS, calc_b1_factors, datetime, pl, q_full
+    # 如果想放宽条件增加信号数量
+    config = {"J_THRESHOLD": 13.8, "VOL_SHRINK_THRESHOLD": 0.035}
+    return (
+        analyze_yearly_intensity,
+        calc_b1_factors_opt,
+        datetime,
+        pl,
+        print_backtest_report,
+        q_full,
+        run_backtest,
+    )
 
 
 @app.cell
-def _(calc_b1_factors, q_full):
+def _(calc_b1_factors_opt, q_full):
     # 3. 执行计算
     print("⏳ 计算原始 B1 信号...")
-    df_signals = calc_b1_factors(q_full)
+    df_signals = calc_b1_factors_opt(q_full)
     return (df_signals,)
 
 
 @app.cell
-def _(MANUAL_LOOSE_PERIODS, datetime, df_signals, pl):
-    # ==============================================================================
-    # 4. 回测引擎：实战派 (动态技术止损版 - K线最低价风控)
-    # ==============================================================================
-    def run_strategy_realistic_dynamic_stop(df_signals: pl.LazyFrame, return_days: list) -> pl.DataFrame:
-        print("🛠️ [Step 4] 启动实战回测：开盘突击 + 动态技术止损 (K线最低价下浮2%)...")
-
-        # 1. 择时日历构建 (保持原逻辑)
-        # 注意：这里为了防止 lazy schema 问题，建议先 collect 日期列表
-        all_dates = df_signals.select("date").unique().collect()["date"].to_list()
-        df_dates = pl.DataFrame({"date": all_dates}).with_columns(pl.lit(0).alias("is_loose"))
-
-        loose_date_set = set()
-        for s_str, e_str in MANUAL_LOOSE_PERIODS:
-            try:
-                s = datetime.strptime(s_str, "%Y-%m-%d").date()
-                e = datetime.strptime(e_str, "%Y-%m-%d").date()
-                loose_date_set.update([d for d in all_dates if s <= d <= e])
-            except: pass
-
-        df_regime = df_dates.with_columns(
-            pl.col("date").is_in(list(loose_date_set)).cast(pl.Int32).alias("is_loose")
-        )
-
-        expr_list = [
-            # --- 进攻视角：T+1 开盘就买 ---
-            pl.col("open_adj").shift(-1).over("code").alias("buy_price"),
-            pl.col("low_adj").shift(-1).over("code").alias("buy_price_low"),
-            # --- 辅助指标：冷却与排序 ---
-            # 标记是否处于冷却期
-            (pl.col("b1_signal").cast(pl.Int32).shift(1).rolling_max(10).over("code").fill_null(0) == 0).alias("is_cool"),
-            # 计算缩量比 (用于排序)
-            (pl.col("volume") / pl.col("avg40")).alias("vol_ratio")
-        ]
-
-        return_expr_list = []
-
-        for rd in return_days:
-            # --- 上帝视角：预取未来 N 天的数据 ---
-            expr_list.append(
-                pl.col("close_adj").shift(-rd).over("code").alias(f"close_{rd}d"),
-            )
-            # 最低价 (用于判断是否触发止损)
-            expr_list.append(
-                pl.col("close_adj").rolling_min(rd).shift(-rd).over("code").alias(f"low_min_{rd}d"),
-            )
-            # x日收益
-            return_expr_list.append(
-                pl.when(pl.col(f"low_min_{rd}d") <= pl.col("stop_price_tech"))
-                  .then(pl.col("risk_pct")) # 触发止损，亏损额度即为 risk_pct
-                  .otherwise((pl.col(f"close_{rd}d") / pl.col("buy_price")) - 1)
-                  .alias(f"ret_{rd}d")
-            )
-            # 对照组：无止损死拿
-            return_expr_list.append(
-                ((pl.col(f"close_{rd}d") / pl.col("buy_price")) - 1).alias(f"ret_{rd}d_raw")
-            )
-
-        # 2. 核心交易逻辑
-        return (
-            df_signals
-            .join(df_regime.lazy(), on="date", how="left")
-            .sort(["code", "date"])
-            # ==============================================================================
-            # 🔥 关键修改：在过滤之前，在全量数据上计算所有价格和指标
-            # ==============================================================================
-            .with_columns(expr_list)
-            .with_columns(
-                # --- 防守视角：动态技术止损 (Dynamic Technical Stop) ---
-                # 逻辑：取信号当日(T)的最低价，向下浮动 2% 作为硬防守线
-                # 这比固定 7% 更贴合个股走势
-                (pl.col("buy_price_low") * 0.98).alias("stop_price_tech"),   
-            )
-            # ==============================================================================
-            # 🔥 核心过滤 (Filtering) - 必须在 shift 计算之后
-            # ==============================================================================
-            .filter(pl.col("b1_signal"))        # 必须是信号
-            .filter(pl.col("is_loose") == 1)    # 必须是活跃市值多头
-            # .filter(pl.col("is_cool") == True)  # 必须是新鲜信号(非重复)
-            .filter(pl.col("buy_price") > 0)    # 确保明天有开盘价
-            # ==============================================================================
-            # 🔥 每日排序 (Ranking)
-            # ==============================================================================
-            .with_columns([
-                pl.col("vol_ratio").rank("ordinal", descending=False).over("date").alias("daily_rank")
-            ])
-            # .filter(pl.col("daily_rank") <= 3) # 每天只买前N个
-            # ==============================================================================
-            # 🔥 收益结算 (Settlement)
-            # ==============================================================================
-            .with_columns([
-                # 计算这一单的实际风险比例 (Stop / Buy - 1)
-                # 比如：买入日最低价很低，导致止损线在买入价下方 5%，则 risk_pct = -0.05
-                ((pl.col("stop_price_tech") / pl.col("buy_price")) - 1).alias("risk_pct")
-            ])
-            .with_columns(return_expr_list)
-            .collect()
-        )
-
-    # ==============================================================================
-    # 5. 执行并打印报告 (使用新函数)
-    # ==============================================================================
-    # 注意：传入的是 df_signals (LazyFrame)，函数内部会自动处理全量计算和过滤
+def _(df_signals, print_backtest_report, run_backtest):
     return_days = [5, 10, 15, 20, 25, 30]
 
-    df_result_dynamic = run_strategy_realistic_dynamic_stop(df_signals, return_days)
+    LOOSE_PERIODS = [
+        ("2025-04-09", "2025-09-04"),  # 2025年慢牛行情
+        ("2026-01-05", "2026-03-31"),  # 2025年慢牛行情延续
+    ]
 
-    print(f"\n====== ⚔️ Ztalk 实战回测 (动态技术止损版) ======")
-    total_trades_dynamic = df_result_dynamic.height
-    print(f"✅ 交易信号总数: {total_trades_dynamic}")
+    df_result_dynamic = run_backtest(df_signals, return_days, loose_periods=LOOSE_PERIODS, top_n=1, stop_loss_pct=0.03)
+    print_backtest_report(df_result_dynamic, return_days)
 
-    if total_trades_dynamic > 0:
-        print("-" * 100)
-        print(f"{'策略模式':<12} | {'胜率':<8} | {'均值':<8} | {'盈亏比(Odds)':<10} | {'期望值(Exp)':<10}")
-        print("-" * 100)
+    # # 执行非重叠回测
+    # df_result = run_backtest_realistic(
+    #     df_signals=df_signals,
+    #     loose_periods=LOOSE_PERIODS,
+    #     stop_loss_pct=0.03,     # 止损 3%
+    #     max_hold_days=30,       # 最大持有 30 天
+    # )
 
-        # 辅助打印函数 (逻辑不变)
-        def print_metric_dynamic(name, col_name, df_res):
-            df_valid = df_res.filter(pl.col(col_name).is_not_null())
-            cnt = df_valid.height
-            if cnt == 0: return
+    # # 打印报告
+    # print_realistic_report(df_result)
 
-            win_cnt = df_valid.filter(pl.col(col_name) > 0).height
-            win_rate = win_cnt / cnt
 
-            avg_ret = df_valid.select(pl.col(col_name).mean()).item()
-
-            avg_win = df_valid.filter(pl.col(col_name) > 0).select(pl.col(col_name).mean()).item()
-            avg_loss = df_valid.filter(pl.col(col_name) <= 0).select(pl.col(col_name).mean()).item()
-
-            if avg_loss == 0 or avg_loss is None: 
-                odds = 99.9 
-            else:
-                odds = abs(avg_win / avg_loss)
-
-            expectancy = (win_rate * avg_win) - ((1 - win_rate) * abs(avg_loss))
-
-            print(f"{name:<12} | {win_rate*100:>6.1f}% | {avg_ret*100:>6.2f}% | {odds:>10.2f}x  | {expectancy*100:>8.2f}%")
-
-        for rd in return_days:
-            print_metric_dynamic(f"持仓{rd}天", f"ret_{rd}d", df_result_dynamic)
-        print("-" * 100)
-        for rd in return_days:
-            print_metric_dynamic(f"死拿{rd}天(对照)", f"ret_{rd}d_raw", df_result_dynamic)
-        print("-" * 100)
     return (df_result_dynamic,)
 
 
 @app.cell
-def _(df_result_dynamic, pl):
+def _(df_result_dynamic):
+    df_result_dynamic
+    return
+
+
+@app.cell
+def _(analyze_yearly_intensity, df_result_dynamic):
     # ==============================================================================
     # 6. 附录：年度交易频率压力测试 (Stress Test)
-    # ==============================================================================
-    def analyze_yearly_intensity(df_result: pl.DataFrame, target_year: int):
-        print(f"\n====== 📊 {target_year} 年度交易强度分析 ======")
-
-        # 1. 提取年份并过滤
-        # 注意：需确认 date 是 Date 类型还是 String 类型，这里做了兼容处理
-        try:
-            # 尝试作为 Date 类型处理
-            df_year = df_result.filter(pl.col("date").dt.year() == target_year)
-        except:
-            # 如果报错，说明是 String 类型，按字符串切片处理
-            df_year = df_result.filter(pl.col("date").str.slice(0, 4) == str(target_year))
-
-        total_signals = df_year.height
-
-        if total_signals == 0:
-            print(f"⚠️ {target_year} 年没有交易信号 (可能是数据未包含或择时全空)。")
-            return
-
-        # 2. 按日期聚合，统计每天的信号数量
-        df_daily_counts = (
-            df_year
-            .group_by("date")
-            .agg(pl.len().alias("trade_count"))
-            .sort("trade_count", descending=True)
-        )
-
-        # 3. 计算统计指标
-        active_days = df_daily_counts.height
-        avg_trades = df_daily_counts.select(pl.col("trade_count").mean()).item()
-        median_trades = df_daily_counts.select(pl.col("trade_count").median()).item()
-        max_trades = df_daily_counts.select(pl.col("trade_count").max()).item()
-
-        # 4. 打印报告
-        print(f"📅 交易天数: {active_days} 天 (资金活跃度)")
-        print(f"🔫 总开枪数: {total_signals} 次")
-        print("-" * 40)
-        print(f"📉 平均每天: {avg_trades:.1f} 只")
-        print(f"⚖️ 中位每天: {median_trades:.1f} 只 (最常见的情况)")
-        print(f"🔥 爆发极值: {max_trades} 只 (那天你忙得过来吗？)")
-        print("-" * 40)
-
-        # 5. 打印最忙碌的 Top 3 日子，看看发生了什么
-        print("🥵 最忙碌的 3 天:")
-        for row in df_daily_counts.head(3).iter_rows(named=True):
-            print(f"   {row['date']}: {row['trade_count']} 只")
-
-    # ==============================================================================
-    # 运行分析
     # ==============================================================================
     # 统计 2024 或 2025 年的数据 (取决于你的数据源到哪一天)
     analyze_yearly_intensity(df_result_dynamic, 2024) 
@@ -503,64 +158,12 @@ def _(df_result_dynamic, pl):
 
 
 @app.cell
-def _(datetime, df_signals, pl):
-    df_signals.filter(
-        (pl.col("date") >= datetime(2025,5,1)) &
-        (pl.col("b1_signal") == 1) &
-        (pl.col("code") == "688799_SH")
-    ).collect()
-    return
-
-
-@app.cell
-def _(df_signals, pl):
-    # 假设你已经运行了 calc_b1_factors 并得到了 df_b1 (或者你之前的 LazyFrame)
-    # 我们单独把 601279 拎出来“验尸”
-
-    target_code = "601279_SH" 
-    # 注意：你的代码里是带后缀的，如果是 "601279_SH"，请相应修改
-    # 这里假设你的 dataframe 里 code 列是纯数字，或者你根据实际情况调整
-
-    print(f"🔍 正在诊断 {target_code} ...")
-
-    debug_df = (
-        df_signals  # 这里填你计算完因子的那个变量名 (LazyFrame 或 DataFrame)
-        .filter(pl.col("code") == target_code)
-        .filter(pl.col("date") == pl.col("date").max()) # 只看最新的一天
-        .select([
-            pl.col("code"),
-            pl.col("date"),
-
-            # 1. 检查 J 值 (阈值 13)
-            pl.col("K"),
-            pl.col("D"),
-            pl.col("J"), 
-            (pl.col("J") <= 13).alias("Check_J_OK"),
-
-            # 2. 检查 形态 (阈值 3.5%)
-            ((pl.col("close_adj") - pl.col("open_adj")).abs() / pl.col("open_adj") * 100).alias("Shape_Pct"),
-            pl.col("SHAPE_OK").alias("Check_Shape"),
-
-            # 3. 检查 缩量 (阈值 0.5 * MaxYang)
-            pl.col("volume").alias("Vol_Today"),
-            pl.col("max_yang_vol_28").alias("Vol_MaxYang"),
-            (pl.col("volume") / pl.col("max_yang_vol_28")).alias("Vol_Ratio"),
-            pl.col("VOL_SHRINK_OK").alias("Check_Shrink"),
-
-            # 4. 检查 坏K线 (必须为 0)
-            pl.col("bad_k_count").alias("Bad_K_Count"),
-            pl.col("GOOD28").alias("Check_Good28"),
-
-            # 5. 检查 最大量避雷
-            pl.col("MAX28_OK").alias("Check_Max28"),
-
-            # 6. 最终结果
-            pl.col("XG")
-        ])
-        .collect() # 如果是 LazyFrame 需要 collect
-    )
-
-    debug_df
+def _():
+    # df_result_dynamic.filter(
+    #     (pl.col("date") >= datetime(2025,5,1)) &
+    #     (pl.col("b1_signal") == 1) &
+    #     (pl.col("code") == "688799_SH")
+    # ).collect()
     return
 
 

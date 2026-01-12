@@ -2,13 +2,17 @@ import polars as pl
 
 def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
     """
-    【Ztalk 量化核心】B1 选股代码天宫 (完整复刻版)
-    包含 s1-s39 全因子计算、V4.1 严格过滤器、TR波幅修正
+    【Ztalk 量化核心】B1 选股代码天宫 (完整复刻修正版)
+    修正点：
+    1. 解决 Polars 上下文依赖问题 (s19依赖s18等)。
+    2. 重写 S30 黄金坑逻辑，精准还原 HHVBARS 回溯。
+    3. 补全 S37 诱多形态的趋势线条件。
+    4. 假设输入 df 已剔除 ST 股。
     """
-    print("🛠️ [Strategy] 启动 B1 天宫全因子评分系统 (calc_b1_factors_tg)...")
+    print("🛠️ [Strategy] 启动 B1 天宫全因子评分系统 (Final Fixed)...")
 
     # ==============================================================================
-    # 1. 基础算子定义 (Toolbox)
+    # 0. 基础算子 (Toolbox)
     # ==============================================================================
     def tdx_sma(series, n, m=1):
         """通达信 SMA: Y = (X*M + Y'*(N-M))/N"""
@@ -27,9 +31,9 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         return pl.when(cond_col).then(value_col).otherwise(None).forward_fill()
 
     # ==============================================================================
-    # 2. 数据清洗与增强 (Preprocessing)
+    # 1. 数据预处理 (Preprocessing)
     # ==============================================================================
-    # 假设输入列: code, date, open_adj, high_adj, low_adj, close_adj, volume
+    # 假设列名: code, date, open_adj, high_adj, low_adj, close_adj, volume
     
     base_df = df.sort(["code", "date"]).with_columns([
         pl.col("close_adj").shift(1).over("code").alias("ref_c_1"),
@@ -39,8 +43,8 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         pl.col("volume").shift(3).over("code").alias("ref_v_3"),
         pl.col("volume").shift(4).over("code").alias("ref_v_4"),
         
-        # 严格涨停价 (用于剔除一字板)
-        # 300/688/301 -> 20%, 其他 -> 10% (ST需外部剔除)
+        # 涨停价计算 (非ST逻辑)
+        # 300/688/301 -> 20%, 其他 -> 10%
         pl.when(pl.col("code").str.contains(r"^(300|688|301)"))
           .then(pl.col("close_adj").shift(1).over("code") * 1.20)
           .otherwise(pl.col("close_adj").shift(1).over("code") * 1.10).alias("zt_price_raw")
@@ -52,7 +56,7 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
             (pl.col("low_adj") - pl.col("ref_c_1")).abs()
         ]).alias("TR"),
         
-        # 涨停价取整
+        # 涨停价取整 (通达信逻辑: 乘100四舍五入再除100)
         (pl.col("zt_price_raw") * 100 + 0.5).floor() / 100
     ]).with_columns([
         # 一字涨停判定
@@ -65,7 +69,7 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
     ])
 
     # ==============================================================================
-    # 3. 核心指标计算 (Core Indicators)
+    # 2. 核心指标计算 (Indicators)
     # ==============================================================================
     indic_df = base_df.with_columns([
         # --- Ztalk 知行双线 ---
@@ -101,7 +105,7 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         pl.when(pl.col("hhv9") == pl.col("llv9")).then(50)
           .otherwise((pl.col("close_adj") - pl.col("llv9")) / (pl.col("hhv9") - pl.col("llv9")) * 100).alias("rsv"),
           
-        # RSI 因子
+        # RSI 辅助变量
         (pl.col("close_adj") - pl.col("ref_c_1")).alias("delta"),
         
         # 知行线历史波动 (用于 s26)
@@ -113,7 +117,7 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
     ]).with_columns([
         tdx_sma(pl.col("rsv"), 3, 1).over("code").alias("K"),
         
-        # RSI (3, 14, 28, 57)
+        # RSI 计算 (N1=3, N2=14, N3=28, N4=57)
         (tdx_sma(pl.max_horizontal(pl.col("delta"), 0), 14, 1).over("code") / 
          tdx_sma(pl.col("delta").abs(), 14, 1).over("code") * 100).alias("rsi2"),
         (tdx_sma(pl.max_horizontal(pl.col("delta"), 0), 28, 1).over("code") / 
@@ -152,7 +156,7 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
     ])
 
     # ==============================================================================
-    # 4. 高级形态特征与状态回溯 (Pattern Recognition)
+    # 3. 形态特征提取 (Pattern Recognition)
     # ==============================================================================
     pat_df = indic_df.with_columns([
         # 传递 DIF 高点
@@ -183,7 +187,7 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
          pl.col("big_yang") & 
          (pl.col("volume") > pl.col("volume").rolling_mean(40).over("code"))).alias("key_k"),
          
-        # 次高点基础 (复杂的逻辑判断)
+        # 次高点基础
         (
             (pl.col("high_adj").rolling_max(4).over("code") == pl.col("high_adj").rolling_max(60).over("code")) & 
             (pl.col("high_adj") != pl.col("high_adj").rolling_max(60).over("code")) &
@@ -195,15 +199,13 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
     ])
 
     # ==============================================================================
-    # 5. 全因子评分计算 (Scoring s1 - s39)
+    # 4. 全因子计算 - 第一阶段：独立因子
     # ==============================================================================
-    # 准备地量数据 (一字板放巨量排除)
-    scores = pat_df.with_columns([
+    step1_df = pat_df.with_columns([
+        # 准备地量数据 (一字板放巨量排除)
         pl.when(pl.col("is_zt_flat")).then(1e8).otherwise(pl.col("volume")).alias("vol_no_limit"),
-        
-        # 净买入量计算 (用于 s14, s15)
-        pl.when(pl.col("close_adj") > pl.col("open_adj")).then(pl.col("volume"))
-          .otherwise(-pl.col("volume")).alias("signed_vol"),
+        # 净买入量计算
+        pl.when(pl.col("close_adj") > pl.col("open_adj")).then(pl.col("volume")).otherwise(-pl.col("volume")).alias("signed_vol"),
         pl.when(pl.col("close_adj") > pl.col("open_adj")).then(pl.col("volume")).otherwise(0).alias("pos_vol"),
         pl.when(pl.col("close_adj") < pl.col("open_adj")).then(pl.col("volume")).otherwise(0).alias("neg_vol"),
     ]).with_columns([
@@ -225,7 +227,7 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
          pl.when(pl.col("close_adj") < pl.col("zx_long")).then(-3).otherwise(0) +
          pl.when(pl.col("close_adj") * 1.003 < pl.col("zx_long")).then(-3).otherwise(0)).alias("s7"),
          
-        # s8-s9: 极致缩量 (使用剔除一字板后的 vol_no_limit)
+        # s8-s9: 极致缩量
         (pl.when(pl.col("volume") == pl.col("vol_no_limit").rolling_min(30).over("code")).then(0.3).otherwise(0) +
          pl.when(pl.col("volume") == pl.col("vol_no_limit").rolling_min(26).over("code")).then(0.3).otherwise(0) +
          pl.when(pl.col("volume") == pl.col("vol_no_limit").rolling_min(24).over("code")).then(0.3).otherwise(0) +
@@ -245,7 +247,7 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
             (pl.col("volume") == pl.col("volume").rolling_min(18).over("code"))
         ).then(0.5).otherwise(0).alias("s10"),
 
-        # s11: 高量柱属性 (排他性修复: 今天不是V60, 上次V60是阳)
+        # s11: 高量柱属性
         (pl.when((~pl.col("is_v60")) & (pl.col("c_at_v60") > pl.col("o_at_v60"))).then(1.0).otherwise(0) + 
          pl.when((~pl.col("is_v30")) & (pl.col("c_at_v30") > pl.col("o_at_v30"))).then(0.5).otherwise(0) +
          pl.when((~pl.col("is_v20")) & (pl.col("c_at_v20") > pl.col("o_at_v20"))).then(0.4).otherwise(0) +
@@ -264,67 +266,41 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
          pl.when(pl.col("signed_vol").rolling_sum(30).over("code") > 0).then(0.4).otherwise(0) + 
          pl.when(pl.col("signed_vol").rolling_sum(20).over("code") > 0).then(0.4).otherwise(0)).alias("s14"),
 
-        # s15: 阳阴比
+        # s15: 阳阴比 (完整7项)
         (pl.when(pl.col("pos_vol").rolling_sum(30).over("code") > 1.25 * pl.col("neg_vol").rolling_sum(30).over("code")).then(0.4).otherwise(0) +
          pl.when(pl.col("pos_vol").rolling_sum(30).over("code") > 1.50 * pl.col("neg_vol").rolling_sum(30).over("code")).then(0.5).otherwise(0) +
          pl.when(pl.col("pos_vol").rolling_sum(30).over("code") > 2.00 * pl.col("neg_vol").rolling_sum(30).over("code")).then(0.6).otherwise(0) +
-         pl.when(pl.col("neg_vol").rolling_sum(50).over("code") > pl.col("pos_vol").rolling_sum(50).over("code")).then(-0.4).otherwise(0)).alias("s15"),
+         pl.when(pl.col("neg_vol").rolling_sum(50).over("code") > pl.col("pos_vol").rolling_sum(50).over("code")).then(-0.4).otherwise(0) +
+         pl.when(pl.col("neg_vol").rolling_sum(40).over("code") > pl.col("pos_vol").rolling_sum(40).over("code")).then(-0.4).otherwise(0) +
+         pl.when(pl.col("neg_vol").rolling_sum(30).over("code") > pl.col("pos_vol").rolling_sum(30).over("code")).then(-0.4).otherwise(0) +
+         pl.when(pl.col("neg_vol").rolling_sum(20).over("code") > pl.col("pos_vol").rolling_sum(20).over("code")).then(-0.4).otherwise(0)).alias("s15"),
 
         # s16: BBI 上升
         pl.when(pl.col("bbi") > pl.col("bbi").shift(20).over("code")).then(0.5).otherwise(0).alias("s16"),
 
-        # s17: 乖离惩罚
+        # s17: 乖离惩罚 (整体乘以-1)
         (
-            ((pl.col("low_adj") - pl.col("zx_long")).abs() * 2.5 > (pl.col("close_adj") - pl.col("high_adj").rolling_max(10).over("code")).abs()).cast(pl.Int32) + 
-            ((pl.col("low_adj") - pl.col("zx_long")).abs() * 3.0 > (pl.col("close_adj") - pl.col("high_adj").rolling_max(10).over("code")).abs()).cast(pl.Int32)
-         * (-1)).alias("s17"),
-
-        # s18: 贴线潜伏 (核心)
-        pl.when(
-            ((pl.col("close_adj") - pl.col("zx_short")) / pl.col("zx_short")).is_between(-0.015, 0.023) & 
-            (pl.col("pct_chg").is_between(-2, 1.8)) & 
-            (pl.col("amplitude") < 4)
-        ).then(1.5).otherwise(-0.5).alias("s18"),
-
-        # s19: 稍宽潜伏
-        pl.when(
-            (pl.col("s18") <= 0) & 
-            ((pl.col("close_adj") - pl.col("zx_short")) / pl.col("zx_short")).is_between(-0.015, 0.03) & 
-            (pl.col("pct_chg").is_between(-2, 1.8)) & 
-            (pl.col("amplitude") < 4)
-        ).then(2).otherwise(0).alias("s19"),
-
-        # s20: 贴多空线
-        pl.when((pl.col("s18") <= 0) & (pl.col("s19") == 0) & 
-                ((pl.col("close_adj") - pl.col("zx_long"))/pl.col("zx_long") <= 0.025) &
-                (pl.col("pct_chg").is_between(-2, 1.8))).then(0.6).otherwise(0).alias("s20"),
-
-        # s21: 夹心层惩罚
-        pl.when((pl.col("s18")<=0) & (pl.col("s19")==0) & (pl.col("s20")==0) & 
-                (pl.col("close_adj") < pl.col("zx_short")) & (pl.col("close_adj") > pl.col("zx_long")))
-          .then(-1.5).otherwise(0).alias("s21"),
-
+            (((pl.col("low_adj") - pl.col("zx_long")).abs() * 2.5 > (pl.col("close_adj") - pl.col("high_adj").rolling_max(10).over("code")).abs()).cast(pl.Int32) + 
+             ((pl.col("low_adj") - pl.col("zx_long")).abs() * 3.0 > (pl.col("close_adj") - pl.col("high_adj").rolling_max(10).over("code")).abs()).cast(pl.Int32))
+            * (-1)).alias("s17"),
+         
         # s22: 顶背离
         (pl.when(pl.col("high_point_dif") < pl.col("prev_20_high_dif")).then(-0.5).otherwise(0) + 
          pl.when(pl.col("high_point_dif") < pl.col("prev_15_high_dif")).then(-0.5).otherwise(0)).alias("s22"),
-
-        # s23: 堆量检查
-        (pl.when(tdx_exist((pl.col("volume") > pl.col("volume").rolling_mean(30).over("code") * 4), 20)).then(0.5).otherwise(0) +
-         pl.when(tdx_exist((pl.col("volume") > pl.col("volume").rolling_mean(30).over("code") * 5), 20)).then(0.3).otherwise(0)).alias("s23"),
-
-        # s24: 区间振幅过大风险
-        # 振幅>60/70/80...
+         
+        # s23: 堆量检查 (完整4档 + 阳线条件)
+        (pl.when(tdx_exist((pl.col("volume") > pl.col("volume").rolling_mean(30).over("code") * 4.0) & (pl.col("close_adj") > pl.col("open_adj")), 20)).then(0.5).otherwise(0) +
+         pl.when(tdx_exist((pl.col("volume") > pl.col("volume").rolling_mean(30).over("code") * 4.5) & (pl.col("close_adj") > pl.col("open_adj")), 20)).then(0.4).otherwise(0) +
+         pl.when(tdx_exist((pl.col("volume") > pl.col("volume").rolling_mean(30).over("code") * 5.0) & (pl.col("close_adj") > pl.col("open_adj")), 20)).then(0.3).otherwise(0) +
+         pl.when(tdx_exist((pl.col("volume") > pl.col("volume").rolling_mean(30).over("code") * 5.5) & (pl.col("close_adj") > pl.col("open_adj")), 20)).then(0.2).otherwise(0)).alias("s23"),
+         
+        # s24: 区间振幅过大风险 (完整5档)
         (pl.when(tdx_exist(((pl.col("high_adj").rolling_max(20).over("code") / pl.col("low_adj").rolling_min(20).over("code") - 1) * 100 > 60), 20)).then(-0.8).otherwise(0) +
-         pl.when(tdx_exist(((pl.col("high_adj").rolling_max(20).over("code") / pl.col("low_adj").rolling_min(20).over("code") - 1) * 100 > 80), 20)).then(-0.6).otherwise(0)).alias("s24"),
-
-        # s25: 跳空阳线 (简化)
-        # 假设: C>=O, L > Ref(H, 1)
-        pl.when(tdx_count((pl.col("close_adj") >= pl.col("open_adj")) & (pl.col("low_adj") > pl.col("ref_c_1") * 1.03), 20) >= 1)
-          .then(-1.2).otherwise(0).alias("s25"),
-          
-        # s26: 知行线平均偏离 (弱势)
-        pl.when((pl.col("s23")==0) & (pl.col("zx_avg_now") < 0.05)).then(-1).otherwise(0).alias("s26"),
-        
+         pl.when(tdx_exist(((pl.col("high_adj").rolling_max(20).over("code") / pl.col("low_adj").rolling_min(20).over("code") - 1) * 100 > 70), 20)).then(-0.7).otherwise(0) +
+         pl.when(tdx_exist(((pl.col("high_adj").rolling_max(20).over("code") / pl.col("low_adj").rolling_min(20).over("code") - 1) * 100 > 80), 20)).then(-0.6).otherwise(0) +
+         pl.when(tdx_exist(((pl.col("high_adj").rolling_max(20).over("code") / pl.col("low_adj").rolling_min(20).over("code") - 1) * 100 > 90), 20)).then(-0.5).otherwise(0) +
+         pl.when(tdx_exist(((pl.col("high_adj").rolling_max(20).over("code") / pl.col("low_adj").rolling_min(20).over("code") - 1) * 100 > 100), 20)).then(-0.4).otherwise(0)).alias("s24"),
+         
         # s27: 量能萎缩
         pl.when(pl.col("pos_vol").rolling_sum(20).over("code") > pl.col("pos_vol").rolling_sum(21).over("code").shift(35)).then(0.5).otherwise(-1).alias("s27"),
         
@@ -333,14 +309,10 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
                 (pl.col("zx_long") < pl.col("zx_long").shift(1).over("code")))
           .then(-2).otherwise(0).alias("s28"),
           
-        # s29: 一字板开板 (诈尸)
+        # s29: 一字板开板
         pl.when(tdx_count((pl.col("is_zt_flat")) & (pl.col("close_adj") <= pl.col("ref_c_1")), 60) > 2).then(-1.5).otherwise(0).alias("s29"),
         
-        # s30: 黄金坑 (J值超卖反弹)
-        # 简化: 15天内有过 J>95 且 当前跌幅小
-        pl.when((pl.col("J").shift(1).rolling_max(15).over("code") > 95) & (pl.col("rsv") < 20)).then(2.8).otherwise(0).alias("s30"),
-        
-        # s31: 连续缩量阴跌 (4连阴缩量)
+        # s31: 连续缩量阴跌
         pl.when(
             (pl.col("volume") < pl.col("ref_v_1")) & (pl.col("ref_v_1") < pl.col("ref_v_2")) &
             (pl.col("close_adj") < pl.col("open_adj")) & (pl.col("ref_c_1") < pl.col("ref_o_1"))
@@ -349,7 +321,7 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         # s32: 关键K
         pl.when(tdx_count(pl.col("key_k"), 20) >= 1).then(1).otherwise(0).alias("s32"),
         
-        # s33: 大阳缩量 (量价背离)
+        # s33: 大阳缩量
         pl.when(tdx_count(pl.col("big_yang") & (pl.col("volume") < pl.col("ref_v_1") * 0.8), 20) >= 2).then(-1).otherwise(0).alias("s33"),
         
         # s34: 巨阴出货
@@ -361,8 +333,11 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         # s36: 涨停过多
         pl.when(tdx_count(pl.col("is_zt_flat"), 20) >= 2).then(-1.5).otherwise(0).alias("s36"),
         
-        # s37: 诱多形态
-        pl.when((pl.col("open_adj") > pl.col("zx_short")) & (pl.col("close_adj") < pl.col("zx_long")) & (pl.col("volume") > pl.col("ref_v_1")))
+        # s37: 诱多形态 (修复：补全趋势线条件)
+        pl.when((pl.col("open_adj") > pl.col("zx_short")) & 
+                (pl.col("zx_short") > pl.col("zx_long")) & 
+                (pl.col("close_adj") < pl.col("zx_long")) & 
+                (pl.col("volume") > pl.col("ref_v_1")))
           .then(-3).otherwise(0).alias("s37"),
         
         # s38: 次高点
@@ -374,33 +349,113 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
     ])
 
     # ==============================================================================
-    # 6. 最终加总 (生产环境完整版)
+    # 5. 全因子计算 - 第二阶段：复杂回溯 (S30 黄金坑)
     # ==============================================================================
-    
-    # 定义 B1 所有的 39 个打分项列名
-    b1_factors = [f"s{i}" for i in range(1, 40)]
-    
-    # 安全性检查：确保所有列都存在
-    scores_filled = scores.with_columns([
-        pl.lit(0).alias(col) for col in b1_factors if col not in scores.columns
+    # 逻辑: 过去15天内有一天J>95, 且那一天到现在的跌幅<3%
+    s30_expr_list = []
+    for i in range(1, 16):
+        # 条件A: i天前是过去15天(ref 1)内J的最大值所在日
+        is_max = (pl.col("J").shift(i) == pl.col("J").shift(1).rolling_max(15).over("code"))
+        # 条件B: 那天的 J > 95
+        j_ok = (pl.col("J").shift(i) > 95)
+        # 条件C: 价格约束 ABS((C - Ref(C, N))/Ref(C, N)) <= 0.03
+        yc = pl.col("close_adj").shift(i)
+        price_stable = (((pl.col("close_adj") - yc) / yc).abs() <= 0.03)
+        # 条件D: 区间震荡小 (HHV(H, N+1) - LLV(L, N+1)) / YC < 0.12
+        range_stable = ((pl.col("high_adj").rolling_max(i+1).over("code") - pl.col("low_adj").rolling_min(i+1).over("code")) / yc < 0.12)
+        
+        s30_expr_list.append(is_max & j_ok & price_stable & range_stable)
+
+    step2_df = step1_df.with_columns([
+        pl.when(pl.any_horizontal(s30_expr_list)).then(2.8).otherwise(0).alias("s30")
     ])
 
-    final_df = scores_filled.with_columns([
-        # 核心：横向加总所有 s1 - s39
+    # ==============================================================================
+    # 6. 全因子计算 - 第三阶段：依赖因子 (必须按顺序计算)
+    # ==============================================================================
+    step3_df = step2_df.with_columns([
+        # s26 依赖 s23 (完整3档)
+        (pl.when((pl.col("s23")==0) & (pl.col("zx_avg_now") < 0.05)).then(-1).otherwise(0) +
+         pl.when((pl.col("s23")==0) & (pl.col("zx_avg_now") < 0.075)).then(-0.8).otherwise(0) +
+         pl.when((pl.col("s23")==0) & (pl.col("zx_avg_now") < 0.10)).then(-0.5).otherwise(0)).alias("s26"),
+        # s25 依赖 s23 (完整跳空阳线: C>=O AND L>REF(H,1) AND 跳空幅度判断)
+        # 跳空阳线条件: (L-REF(C,1))/REF(C,1) > 0.032 OR > 波动率*0.01
+        (pl.when(tdx_count(
+            (pl.col("close_adj") >= pl.col("open_adj")) & 
+            (pl.col("low_adj") > pl.col("high_adj").shift(1).over("code")) &
+            (((pl.col("low_adj") - pl.col("ref_c_1")) / pl.col("ref_c_1") > 0.032) | 
+             ((pl.col("low_adj") - pl.col("ref_c_1")) / pl.col("ref_c_1") > pl.col("volatility_tr") * 0.01)), 20) >= 1).then(-1.2).otherwise(0) + 
+         pl.when((pl.col("s23") > 0) & (tdx_count(
+            (pl.col("close_adj") >= pl.col("open_adj")) & 
+            (pl.col("low_adj") > pl.col("high_adj").shift(1).over("code")) &
+            (((pl.col("low_adj") - pl.col("ref_c_1")) / pl.col("ref_c_1") > 0.032) | 
+             ((pl.col("low_adj") - pl.col("ref_c_1")) / pl.col("ref_c_1") > pl.col("volatility_tr") * 0.01)), 20) >= 1)).then(-1).otherwise(0)).alias("s25"),
+         
+        # s18 (贴线潜伏 - 基础) - 独立但为后续铺垫
+        pl.when(
+            ((pl.col("close_adj") - pl.col("zx_short")) / pl.col("zx_short")).is_between(-0.015, 0.023) & 
+            (pl.col("pct_chg").is_between(-2, 1.8)) & 
+            (pl.col("amplitude") < 4)
+        ).then(1.5).otherwise(-0.5).alias("s18"),
+    ]).with_columns([
+        # s19 依赖 s18
+        pl.when(
+            (pl.col("s18") <= 0) & 
+            ((pl.col("close_adj") - pl.col("zx_short")) / pl.col("zx_short")).is_between(-0.015, 0.03) & 
+            (pl.col("pct_chg").is_between(-2, 1.8)) & 
+            (pl.col("amplitude") < 4)
+        ).then(2).otherwise(0).alias("s19"),
+    ]).with_columns([
+        # s20 依赖 s18, s19
+        pl.when((pl.col("s18") <= 0) & (pl.col("s19") == 0) & 
+                ((pl.col("close_adj") - pl.col("zx_long"))/pl.col("zx_long") <= 0.025) &
+                (pl.col("pct_chg").is_between(-2, 1.8)) &
+                (pl.col("amplitude") < 4)
+        ).then(0.6).otherwise(0).alias("s20"),
+    ]).with_columns([
+        # s21 依赖 s18, s19, s20 (夹心层惩罚)
+        pl.when((pl.col("s18")<=0) & (pl.col("s19")==0) & (pl.col("s20")==0) & 
+                (pl.col("close_adj") < pl.col("zx_short")) & (pl.col("close_adj") > pl.col("zx_long")))
+          .then(-1.5).otherwise(0).alias("s21"),
+    ])
+
+    # ==============================================================================
+    # 7. 汇总与输出
+    # ==============================================================================
+    b1_factors = [f"s{i}" for i in range(1, 40)]
+    
+    final_df = step3_df.with_columns([
         pl.sum_horizontal(b1_factors).alias("B1_Total_Score")
     ]).with_columns([
-        # 辅助条件
-        (pl.col("J") < CONFIG.get("J_THRESHOLD", 13)).alias("KDJ_J_LOW"),
-        (pl.col("dif") >= 0).alias("MACD_BULL"),
-        (pl.col("zx_short") > pl.col("zx_long")).alias("TREND_OK")
-    ]).with_columns([
-        # 最终出信号
-        pl.when(pl.col("KDJ_J_LOW") & (pl.col("B1_Total_Score") > 0))
+        # 最终选股逻辑:
+        # 1. KDJ_J 低位 (< 13)
+        # 2. MACD 多头 (DIF >= 0)
+        # 3. 趋势多头 (知行短期 > 知行多空)
+        # 4. 总分 > 0
+        pl.when((pl.col("J") < 13) & 
+                (pl.col("dif") >= 0) & 
+                (pl.col("zx_short") > pl.col("zx_long")) &
+                (pl.col("B1_Total_Score") > 0))
           .then(pl.col("B1_Total_Score"))
-          .otherwise(0)
-          .alias("B1_Final_Score")
+          .otherwise(0).alias("B1_Final_Score")
     ]).with_columns(
         (pl.col("B1_Final_Score") >= CONFIG.get("X", 10)).alias("b1_signal")
-    )
+    ).select([
+        "code", 
+        "date", 
+        "B1_Total_Score", # 保留总分方便看
+        "B1_Final_Score", # 保留最终选股分
+        "b1_signal",      # 保留选股信号
+        "open_adj",       # 保留开盘价方便验证
+        "high_adj",       # 保留最高价方便验证
+        "low_adj",        # 保留最低价方便验证
+        "close_adj",      # 保留收盘价方便验证
+        "zx_short",       # 保留趋势线方便验证
+        "zx_long",
+        # --- 排序因子 ---
+        "volume",         # 成交量 (用于缩量排序)
+        "amplitude",      # 振幅 (用于低波动排序)
+        "J",              # KDJ J值 (用于超卖排序)
+    ])
 
     return final_df

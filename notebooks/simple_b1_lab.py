@@ -10,6 +10,7 @@ def _():
     import os
     from datetime import datetime
     from utils.b1_factors import calc_b1_factors_tg
+    from utils.baostock_utils import get_st_blacklist_pl
 
     # ==============================================================================
     # 1. 配置与数据加载 (Clean Version)
@@ -70,18 +71,7 @@ def _():
         .select(["code", "date", "circulating_capital"]).sort(["code", "date"])
     )
 
-    # (C) 合并数据 (移除了所有市场指数相关代码)
-    print("🔗 [Step 2] 合并基础数据...")
-    q_full = (
-        q_adj
-        .join(q_raw, on=["code", "date"])
-        .sort(["code", "date"])
-        .join_asof(q_cap, on="date", by="code", strategy="backward")
-        .with_columns([
-            (pl.col("close_raw") * pl.col("circulating_capital") / 1e8).alias("market_cap_100m")
-        ])
-        # 🔥 已移除 .join(q_market_index)
-    )
+
 
     # ==============================================================================
     # ⚙️ 策略参数配置 V3.0 (Based on 10 Golden Cases)
@@ -91,7 +81,22 @@ def _():
         "J_THRESHOLD": 13.8,          # 放宽至 13.8
         "X": 10
     }
+    st_blacklist = get_st_blacklist_pl('2025-01-09') # 获取ST列表
 
+    # 过滤掉 ST 股
+    # (C) 合并数据 (移除了所有市场指数相关代码)
+    print("🔗 [Step 2] 合并基础数据...")
+    q_full = (
+        q_adj
+        .join(q_raw, on=["code", "date"])
+        .sort(["code", "date"])
+        .join_asof(q_cap, on="date", by="code", strategy="backward")
+        .with_columns([
+            (pl.col("close_raw") * pl.col("circulating_capital") / 1e8).alias("market_cap_100m")
+        ]).filter(
+            ~pl.col("code").is_in(st_blacklist)
+        )
+    )
     return (
         CONFIG,
         MANUAL_LOOSE_PERIODS,
@@ -118,24 +123,21 @@ def _(MANUAL_LOOSE_PERIODS, datetime, df_signals, pl):
     def run_strategy_realistic_dynamic_stop(df_signals: pl.LazyFrame, return_days: list) -> pl.DataFrame:
         print("🛠️ [Step 4] 启动实战回测：开盘突击 + 动态技术止损 (K线最低价下浮2%)...")
 
-        # 1. 择时日历构建 (保持原逻辑)
-        # 注意：这里为了防止 lazy schema 问题，建议先 collect 日期列表
-        all_dates = df_signals.select("date").unique().collect()["date"].to_list()
-        df_dates = pl.DataFrame({"date": all_dates}).with_columns(pl.lit(0).alias("is_loose"))
-
-        loose_date_set = set()
+        # 1. 择时条件构建 (纯表达式，无需 collect)
+        loose_conditions = []
         for s_str, e_str in MANUAL_LOOSE_PERIODS:
             try:
                 s = datetime.strptime(s_str, "%Y-%m-%d").date()
                 e = datetime.strptime(e_str, "%Y-%m-%d").date()
-                loose_date_set.update([d for d in all_dates if s <= d <= e])
+                loose_conditions.append(pl.col("date").is_between(s, e))
             except: pass
 
-        df_regime = df_dates.with_columns(
-            pl.col("date").is_in(list(loose_date_set)).cast(pl.Int32).alias("is_loose")
-        )
+        # 用 any_horizontal 合并所有区间条件
+        is_loose_expr = pl.any_horizontal(loose_conditions) if loose_conditions else pl.lit(False)
 
         expr_list = [
+            # --- 择时标记 ---
+            is_loose_expr.cast(pl.Int32).alias("is_loose"),
             # --- 进攻视角：T+1 开盘就买 ---
             pl.col("open_adj").shift(-1).over("code").alias("buy_price"),
             pl.col("low_adj").shift(-1).over("code").alias("buy_price_low"),
@@ -170,7 +172,6 @@ def _(MANUAL_LOOSE_PERIODS, datetime, df_signals, pl):
         # 2. 核心交易逻辑
         return (
             df_signals
-            .join(df_regime.lazy(), on="date", how="left")
             .sort(["code", "date"])
             # ==============================================================================
             # 🔥 关键修改：在过滤之前，在全量数据上计算所有价格和指标
@@ -188,14 +189,28 @@ def _(MANUAL_LOOSE_PERIODS, datetime, df_signals, pl):
             .filter(pl.col("b1_signal"))        # 必须是信号
             .filter(pl.col("is_loose") == 1)    # 必须是活跃市值多头
             # .filter(pl.col("is_cool") == True)  # 必须是新鲜信号(非重复)
-            .filter(pl.col("buy_price") > 0)    # 确保明天有开盘价
+            # 不再过滤 buy_price，让最新一天信号保留，收益自然为 null
             # ==============================================================================
-            # 🔥 每日排序 (Ranking)
+            # 🔥 每日排序 (Ranking) - 可选多种排序因子
             # ==============================================================================
-            # .with_columns([
-
-            # ])
-            # .filter(pl.col("daily_rank") <= 3) # 每天只买前N个
+            # 排序因子选项 (descending=False 表示值越小越优先):
+            #   1. "volume"    - 缩量优先 (量小=控盘强)
+            #   2. "amplitude" - 低振幅优先 (波动小=稳定)
+            #   3. "J"         - J值低优先 (超卖=安全边际)
+            #   4. "zx_dist"   - 距知行线近优先 (贴线=支撑强)
+            #   5. "random"    - 随机排序 (对照组)
+            # ==============================================================================
+            .with_columns([
+                # 距离知行多空线的相对距离 (越小越好)
+                ((pl.col("close_adj") - pl.col("zx_long")) / pl.col("zx_long")).abs().alias("zx_dist"),
+                # 随机因子
+                pl.lit(1).alias("random_factor"),  # 占位，后续用 sample 或 hash
+            ])
+            .with_columns([
+                # 🎯 修改这里切换排序因子
+                pl.col("zx_dist").rank("ordinal", descending=False).over("date").alias("daily_rank")
+            ])
+            .filter(pl.col("daily_rank") <= 3) # 每天只买前N个
             # ==============================================================================
             # 🔥 收益结算 (Settlement)
             # ==============================================================================
@@ -319,11 +334,11 @@ def _(df_result_dynamic, pl):
 
 
 @app.cell
-def _(datetime, df_signals, pl):
-    df_signals.filter(
-        (pl.col("date") == datetime(2026,1,9)) &
+def _(datetime, df_result_dynamic, pl):
+    df_result_dynamic.filter(
+        (pl.col("date") == datetime(2026,1,5)) &
         (pl.col("b1_signal") == 1) 
-    ).collect().select(["date","code"])
+    ).select(["date","code"])
     return
 
 
@@ -455,11 +470,6 @@ def _(datetime, df_result_dynamic, pl):
         'ret_25d_raw',
         'ret_30d_raw',
     ])
-    return
-
-
-@app.cell
-def _():
     return
 
 
