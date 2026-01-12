@@ -12,6 +12,7 @@ def _():
     from utils import calc_b1_factors_opt, run_backtest, print_backtest_report, analyze_yearly_intensity
     from utils.baostock_utils import get_st_blacklist_pl
     from utils import run_backtest_realistic, print_realistic_report
+    from utils import export_for_rust
 
     # ==============================================================================
     # 1. 配置与数据加载 (Clean Version)
@@ -121,20 +122,18 @@ def _(df_signals, print_backtest_report, run_backtest):
         ("2026-01-05", "2026-03-31"),  # 2025年慢牛行情延续
     ]
 
-    df_result_dynamic = run_backtest(df_signals, return_days, loose_periods=LOOSE_PERIODS, top_n=1, stop_loss_pct=0.03)
-    print_backtest_report(df_result_dynamic, return_days)
-
-    # # 执行非重叠回测
-    # df_result = run_backtest_realistic(
-    #     df_signals=df_signals,
+    # 导出信号供 Rust 使用
+    # export_for_rust(
+    #     df_signals,
+    #     output_path="data/signals/market_data.parquet",
     #     loose_periods=LOOSE_PERIODS,
-    #     stop_loss_pct=0.03,     # 止损 3%
-    #     max_hold_days=30,       # 最大持有 30 天
+    #     stop_loss_pct=0.03,
+    #     start_date='2024-12-31'
     # )
+    # print(f"导出完成: {files}")
 
-    # # 打印报告
-    # print_realistic_report(df_result)
-
+    df_result_dynamic = run_backtest(df_signals, return_days, loose_periods=LOOSE_PERIODS, top_n=100, stop_loss_pct=0.03)
+    print_backtest_report(df_result_dynamic, return_days)
 
     return (df_result_dynamic,)
 
@@ -158,12 +157,11 @@ def _(analyze_yearly_intensity, df_result_dynamic):
 
 
 @app.cell
-def _():
-    # df_result_dynamic.filter(
-    #     (pl.col("date") >= datetime(2025,5,1)) &
-    #     (pl.col("b1_signal") == 1) &
-    #     (pl.col("code") == "688799_SH")
-    # ).collect()
+def _(datetime, df_result_dynamic, pl):
+    df_result_dynamic.filter(
+        (pl.col("date") == datetime(2025,4,17)) &
+        (pl.col("b1_signal") == 1) 
+    )
     return
 
 

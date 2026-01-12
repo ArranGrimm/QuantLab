@@ -32,7 +32,7 @@ def _(mo):
 def _(mo):
     # 输入框：股票代码
     input_code = mo.ui.text(
-        value="600519_SH", 
+        value="600601_SH", 
         label="🔍 股票代码 (例如: 000001_SZ):",
         full_width=True
     )
@@ -244,6 +244,12 @@ def _(go, input_code, input_days, make_subplots, mo, os, pl):
     # 显示结果
     result_view
     return df, file_path
+
+
+@app.cell
+def _(df):
+    df
+    return
 
 
 @app.cell

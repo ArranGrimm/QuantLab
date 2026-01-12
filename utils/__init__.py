@@ -15,6 +15,9 @@ from .backtest import (
 from .baostock_utils import *
 from .data_utils import *
 
+# 信号导出 (for Rust)
+from .signal_export import export_for_rust, validate_export
+
 __all__ = [
     # 因子计算
     "calc_b1_factors_tg",
@@ -27,4 +30,7 @@ __all__ = [
     # 回测 (非重叠版)
     "run_backtest_realistic",
     "print_realistic_report",
+    # Rust 导出
+    "export_signals_for_rust",
+    "validate_signals_parquet",
 ]

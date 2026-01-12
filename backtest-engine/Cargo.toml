@@ -1,0 +1,48 @@
+﻿[package]
+name = "quant_backtest"
+version = "0.1.0"
+edition = "2021"
+description = "ECS-based stock backtesting engine using Bevy"
+
+[dependencies]
+# Bevy ECS (仅使用 ECS 核心，不含渲染)
+bevy_ecs = "0.15"
+bevy_app = "0.15"
+
+# Polars for Rust (读取 Parquet)
+polars = { version = "0.46", features = ["parquet", "lazy", "dtype-date"] }
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+
+# 日期处理
+chrono = "0.4"
+
+# 命令行参数
+clap = { version = "4.0", features = ["derive"] }
+
+# 并行计算
+rayon = "1.10"
+
+# 0. Debug 模式（日常开发调试）
+# 使用方法：cargo run
+[profile.dev]
+opt-level = 1  # 稍微优化，避免运行太慢
+
+[profile.dev.package."*"]
+opt-level = 2  # 依赖库用更高优化，只编译一次
+
+# 1. 开发用的 Release 模式（速度快，有优化，但不极致）
+# 使用方法：cargo run --release
+[profile.release]
+opt-level = 3       # 代码优化等级保持最高
+lto = "off"         # <--- 关键！关闭 LTO，链接速度提升 10 倍
+codegen-units = 16  # 允许并行生成代码，牺牲一点点运行速度换取编译速度
+
+# 2. (可选) 真正上线/跑大回测用的模式
+# 使用方法：cargo run --profile production
+[profile.production]
+inherits = "release" # 继承 release 的配置
+lto = true           # 开启 LTO，追求极致运行速度
+codegen-units = 1    # 牺牲编译速度，换取更小的体积和更快的运行
+panic = "abort"      # 发生错误直接退出，减小体积

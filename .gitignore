@@ -66,6 +66,11 @@ logs/
 *.html
 !README.md
 
+# --- Rust ---
+backtest-engine/target/
+**/*.rs.bk
+Cargo.lock
+
 # --- OS Generated ---
 .DS_Store
 Thumbs.db
