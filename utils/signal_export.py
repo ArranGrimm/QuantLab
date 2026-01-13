@@ -17,6 +17,7 @@ def export_for_rust(
     loose_periods: list = None,
     stop_loss_pct: float = 0.03,
     start_date: str = None,
+    extra_sort_cols: list = None,
 ) -> str:
     """
     Export complete market data with B1 signals for Rust backtesting
@@ -27,6 +28,7 @@ def export_for_rust(
         loose_periods: Active period list, e.g. [("2025-04-09", "2025-09-04"), ...]
         stop_loss_pct: Stop loss percentage for calculating stop price
         start_date: Only export data >= this date, e.g. "2025-01-01"
+        extra_sort_cols: Extra columns to export for sorting, e.g. ["Bias_C_WL", "J"]
 
     Returns:
         Exported file path
@@ -54,14 +56,17 @@ def export_for_rust(
     print("Processing data...")
     df_export = (
         df_full.sort(["code", "date"])
+        .with_columns([
+            pl.col("volume").rolling_mean(40).over("code").alias("vol_40_mean"),
+        ])
         .with_columns(
             [
                 # 标记：昨天是否是信号 (T日信号 → T+1日买入)
                 pl.col("b1_signal").shift(1).over("code").fill_null(False).alias("pre_b1_signal"),
                 # 标记：是否在活跃期
                 is_loose_expr.alias("is_loose"),
-                # 计算 vol_ratio (用于排序)
-                (pl.col("volume") / pl.col("avg40")).alias("vol_ratio"),
+                # 计算 vol_ratio (用于排序的默认选项)
+                (pl.col("volume") / pl.col("vol_40_mean")).alias("vol_ratio"),
                 # 止损价 = 当日最低价 * (1 - stop_loss_pct)
                 (pl.col("low_adj") * (1 - stop_loss_pct)).alias("stop_price"),
             ]
@@ -86,6 +91,12 @@ def export_for_rust(
         "vol_ratio",
         "stop_price",
     ]
+    
+    # Add extra sort columns if specified
+    if extra_sort_cols:
+        for col in extra_sort_cols:
+            if col not in required_cols:
+                required_cols.append(col)
 
     # Collect and select
     df_collected = df_export.collect()
