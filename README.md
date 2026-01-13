@@ -9,7 +9,7 @@
 │                        Python 数据层                            │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐        │
 │  │ 数据获取    │ →  │ 因子计算    │ →  │ 信号导出    │        │
-│  │ baostock   │    │ b1_factors  │    │ export_rust │        │
+│  │ qmt/baostock   │    │ b1_factors  │    │ export_rust │        │
 │  └─────────────┘    └─────────────┘    └─────────────┘        │
 │                              ↓                                  │
 │                     market_data.parquet                        │

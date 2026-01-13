@@ -30,7 +30,7 @@ def _():
         ("2022-04-27", "2022-07-05"),  # 427大反弹
         ("2023-01-15", "2023-04-15"),  # ChatGPT/CPO 狂潮
         ("2024-02-06", "2024-03-20"),  # 救市后AI反弹
-        # ("2024-09-24", "2024-10-15"),  # 924 史诗级暴涨
+        ("2024-09-24", "2024-10-15"),  # 924 史诗级暴涨
         ("2025-04-09", "2025-09-04"),  # 2025年慢牛行情
         ("2026-01-05", "2026-03-31"),  # 2025年慢牛行情延续
     ]
@@ -118,30 +118,32 @@ def _(df_signals, print_backtest_report, run_backtest):
     return_days = [5, 10, 15, 20, 25, 30]
 
     LOOSE_PERIODS = [
+        # ("2019-02-11", "2019-04-10"),  # 春季躁动
+        # ("2019-12-16", "2020-03-02"),  # 疫情反弹
+        # ("2020-06-19", "2020-07-15"),  # 证券带头的疯牛
+        # ("2020-12-24", "2021-01-25"),  # 新能源抱团主升
+        # ("2021-04-16", "2021-09-14"),  # 锂电光伏大主升
+        # ("2022-04-27", "2022-07-05"),  # 427大反弹
+        # ("2023-01-15", "2023-04-15"),  # ChatGPT/CPO 狂潮
+        # ("2024-02-06", "2024-03-20"),  # 救市后AI反弹
+        # ("2024-09-24", "2024-10-15"),  # 924 史诗级暴涨
         ("2025-04-09", "2025-09-04"),  # 2025年慢牛行情
         ("2026-01-05", "2026-03-31"),  # 2025年慢牛行情延续
     ]
 
-    # 导出信号供 Rust 使用
+    # # 导出信号供 Rust 使用
     # export_for_rust(
     #     df_signals,
     #     output_path="data/signals/market_data.parquet",
     #     loose_periods=LOOSE_PERIODS,
     #     stop_loss_pct=0.03,
-    #     start_date='2024-12-31'
+    #     start_date='2019-01-01'
     # )
-    # print(f"导出完成: {files}")
+    # print(f"导出完成")
 
-    df_result_dynamic = run_backtest(df_signals, return_days, loose_periods=LOOSE_PERIODS, top_n=100, stop_loss_pct=0.03)
+    df_result_dynamic = run_backtest(df_signals, return_days, loose_periods=LOOSE_PERIODS, top_n=200, stop_loss_pct=0.03)
     print_backtest_report(df_result_dynamic, return_days)
-
     return (df_result_dynamic,)
-
-
-@app.cell
-def _(df_result_dynamic):
-    df_result_dynamic
-    return
 
 
 @app.cell
@@ -159,8 +161,38 @@ def _(analyze_yearly_intensity, df_result_dynamic):
 @app.cell
 def _(datetime, df_result_dynamic, pl):
     df_result_dynamic.filter(
-        (pl.col("date") == datetime(2025,4,17)) &
+        (pl.col("date") == datetime(2026,1,12)) &
         (pl.col("b1_signal") == 1) 
+    )
+    return
+
+
+@app.cell
+def _(datetime, df_signals, pl):
+    ht_df = df_signals.filter(
+        (pl.col("code") == "000547_SZ") &
+        (pl.col("date") >= datetime(2025,11, 10))
+    ).collect()
+
+    ht_df
+    return (ht_df,)
+
+
+@app.cell
+def _(ht_df):
+    ht_df.select(
+        ["date",
+        "TRIGGER",
+        "J_OK",
+        "LQ",
+        "MVOK",
+        "GOOD28", 
+        "MAX28_OK", 
+        "YANGYIN_OK",
+        "SHAPE_OK", 
+        "VOL_SHRINK_OK",
+        "ZTALK_GENE_OK"
+        ]
     )
     return
 
@@ -280,8 +312,8 @@ def _(df_signals, pl):
 @app.cell
 def _(datetime, df_result_dynamic, pl):
     hn_df = df_result_dynamic.filter(
-        (pl.col("code") == "688799_SH") &
-        (pl.col("date") >= datetime(2025, 5, 1))
+        (pl.col("code") == "000547_SZ") &
+        (pl.col("date") >= datetime(2025, 11, 1))
     )
 
     hn_df.select([

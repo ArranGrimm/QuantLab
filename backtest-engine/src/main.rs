@@ -65,11 +65,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Loaded {} rows", df.height());
 
     // 3. Build market data structure
-    let (market_data, trading_dates) = build_market_data(&df)?;
+    let (market_data, mut trading_dates) = build_market_data(&df)?;
+    
+    // 4. Apply date range filter
+    let original_len = trading_dates.len();
+    if let Some(start) = config.start_date {
+        trading_dates.retain(|d| *d >= start);
+    }
+    if let Some(end) = config.end_date {
+        trading_dates.retain(|d| *d <= end);
+    }
+    
     println!(
-        "Stocks: {}, Trading days: {}",
+        "Stocks: {}, Trading days: {} (filtered from {})",
         market_data.prices.len(),
-        trading_dates.len()
+        trading_dates.len(),
+        original_len
     );
 
     // 4. Initialize Bevy App
@@ -143,6 +154,12 @@ fn print_config(config: &BacktestConfig) {
     println!("Max Positions: {} (Daily: {})", config.max_positions, config.max_daily_buys);
     println!("Position Size: {:.0}%", config.position_size_pct * 100.0);
     println!("Max Hold Days: {}", config.max_hold_days);
+    
+    // 日期范围
+    let start_str = config.start_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".to_string());
+    let end_str = config.end_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".to_string());
+    println!("Date Range: {} ~ {}", start_str, end_str);
+    
     println!("Stop Loss: {:.1}% ({})", config.stop_loss_pct * 100.0, if config.stop_loss_enabled { "ON" } else { "OFF" });
     println!("Take Profit: TP1={:.0}%, TP2={:.0}%", config.tp1_pct * 100.0, config.tp2_pct * 100.0);
     println!("Weak Filter: {} days @ {:.0}% ({})", config.weak_days, config.weak_min_gain_pct * 100.0, if config.weak_enabled { "ON" } else { "OFF" });

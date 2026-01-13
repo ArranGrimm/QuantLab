@@ -28,6 +28,10 @@ pub struct BacktestSection {
     pub max_daily_buys: usize,
     pub position_size_pct: f64,
     pub max_hold_days: i32,
+    #[serde(default)]
+    pub start_date: Option<String>,
+    #[serde(default)]
+    pub end_date: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -90,6 +94,10 @@ pub struct BacktestConfig {
     pub position_size_pct: f64,
     pub max_hold_days: i32,
     
+    // Date Range (optional)
+    pub start_date: Option<NaiveDate>,
+    pub end_date: Option<NaiveDate>,
+    
     // Stop Loss
     pub stop_loss_enabled: bool,
     pub stop_loss_pct: f64,
@@ -126,6 +134,9 @@ impl Default for BacktestConfig {
             position_size_pct: 0.2,
             max_hold_days: 30,
             
+            start_date: None,
+            end_date: None,
+            
             stop_loss_enabled: true,
             stop_loss_pct: 0.03,
             
@@ -152,12 +163,22 @@ impl Default for BacktestConfig {
 
 impl From<ConfigFile> for BacktestConfig {
     fn from(cfg: ConfigFile) -> Self {
+        // 解析日期字符串
+        let parse_date = |s: &Option<String>| -> Option<NaiveDate> {
+            s.as_ref()
+                .filter(|d| !d.is_empty())
+                .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        };
+        
         Self {
             initial_capital: cfg.backtest.initial_capital,
             max_positions: cfg.backtest.max_positions,
             max_daily_buys: cfg.backtest.max_daily_buys,
             position_size_pct: cfg.backtest.position_size_pct,
             max_hold_days: cfg.backtest.max_hold_days,
+            
+            start_date: parse_date(&cfg.backtest.start_date),
+            end_date: parse_date(&cfg.backtest.end_date),
             
             stop_loss_enabled: cfg.stop_loss.enabled,
             stop_loss_pct: cfg.stop_loss.pct,
