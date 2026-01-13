@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Loaded {} rows", df.height());
 
     // 3. Build market data structure
-    let (market_data, mut trading_dates) = build_market_data(&df)?;
+    let (market_data, mut trading_dates) = build_market_data(&df, &config.sort_field)?;
     
     // 4. Apply date range filter
     let original_len = trading_dates.len();
@@ -112,13 +112,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Build today's buy candidates (pre_b1_signal && is_loose)
             let market_data = world.resource::<MarketData>();
+            let config = world.resource::<BacktestConfig>();
+            let sort_ascending = config.sort_ascending;
+            
             let mut candidates: Vec<_> = market_data
                 .prices
                 .iter()
                 .filter_map(|(code, dates)| {
                     dates.get(date).and_then(|bar| {
                         if bar.pre_b1_signal && bar.is_loose {
-                            Some((code.clone(), bar.vol_ratio, bar.open, bar.stop_price))
+                            Some((code.clone(), bar.sort_value, bar.open, bar.stop_price))
                         } else {
                             None
                         }
@@ -126,8 +129,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .collect();
 
-            // Sort by vol_ratio (ascending = more shrinkage = priority)
-            candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            // Sort by sort_value (configurable ascending/descending)
+            if sort_ascending {
+                candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            } else {
+                candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            }
 
             world.resource_mut::<DailyData>().buy_candidates = candidates;
         }
@@ -159,6 +166,7 @@ fn print_config(config: &BacktestConfig) {
     let start_str = config.start_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".to_string());
     let end_str = config.end_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".to_string());
     println!("Date Range: {} ~ {}", start_str, end_str);
+    println!("Sort Field: {} ({})", config.sort_field, if config.sort_ascending { "ASC" } else { "DESC" });
     
     println!("Stop Loss: {:.1}% ({})", config.stop_loss_pct * 100.0, if config.stop_loss_enabled { "ON" } else { "OFF" });
     println!("Take Profit: TP1={:.0}%, TP2={:.0}%", config.tp1_pct * 100.0, config.tp2_pct * 100.0);
@@ -179,6 +187,7 @@ fn print_config(config: &BacktestConfig) {
 /// Build market data from DataFrame
 fn build_market_data(
     df: &DataFrame,
+    sort_field: &str,
 ) -> Result<(MarketData, Vec<NaiveDate>), Box<dyn std::error::Error>> {
     let mut market_data = MarketData::default();
     let mut all_dates = Vec::new();
@@ -195,8 +204,12 @@ fn build_market_data(
     let b1_signal = df.column("b1_signal")?.bool()?;
     let pre_b1_signal = df.column("pre_b1_signal")?.bool()?;
     let is_loose = df.column("is_loose")?.bool()?;
-    let vol_ratio = df.column("vol_ratio")?.f64()?;
     let stop_price = df.column("stop_price")?.f64()?;
+    
+    // 动态读取排序字段
+    let sort_col = df.column(sort_field)
+        .map_err(|_| format!("Sort field '{}' not found in parquet", sort_field))?
+        .f64()?;
 
     for i in 0..df.height() {
         let code = codes.get(i).ok_or("Missing code")?;
@@ -214,7 +227,7 @@ fn build_market_data(
             b1_signal: b1_signal.get(i).unwrap_or(false),
             pre_b1_signal: pre_b1_signal.get(i).unwrap_or(false),
             is_loose: is_loose.get(i).unwrap_or(false),
-            vol_ratio: vol_ratio.get(i).unwrap_or(999.0),
+            sort_value: sort_col.get(i).unwrap_or(999.0),
             stop_price: stop_price.get(i).unwrap_or(0.0),
         };
 

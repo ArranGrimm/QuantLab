@@ -32,6 +32,18 @@ pub struct BacktestSection {
     pub start_date: Option<String>,
     #[serde(default)]
     pub end_date: Option<String>,
+    #[serde(default = "default_sort_field")]
+    pub sort_field: String,
+    #[serde(default = "default_sort_ascending")]
+    pub sort_ascending: bool,
+}
+
+fn default_sort_field() -> String {
+    "vol_ratio".to_string()
+}
+
+fn default_sort_ascending() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -98,6 +110,10 @@ pub struct BacktestConfig {
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
     
+    // Sort settings
+    pub sort_field: String,
+    pub sort_ascending: bool,
+    
     // Stop Loss
     pub stop_loss_enabled: bool,
     pub stop_loss_pct: f64,
@@ -136,6 +152,9 @@ impl Default for BacktestConfig {
             
             start_date: None,
             end_date: None,
+            
+            sort_field: "vol_ratio".to_string(),
+            sort_ascending: true,
             
             stop_loss_enabled: true,
             stop_loss_pct: 0.03,
@@ -179,6 +198,9 @@ impl From<ConfigFile> for BacktestConfig {
             
             start_date: parse_date(&cfg.backtest.start_date),
             end_date: parse_date(&cfg.backtest.end_date),
+            
+            sort_field: cfg.backtest.sort_field,
+            sort_ascending: cfg.backtest.sort_ascending,
             
             stop_loss_enabled: cfg.stop_loss.enabled,
             stop_loss_pct: cfg.stop_loss.pct,
@@ -254,7 +276,7 @@ pub struct PriceBar {
     pub b1_signal: bool,
     pub pre_b1_signal: bool,
     pub is_loose: bool,
-    pub vol_ratio: f64,
+    pub sort_value: f64,  // 排序字段值 (从 config.sort_field 指定的列读取)
     pub stop_price: f64,
 }
 
