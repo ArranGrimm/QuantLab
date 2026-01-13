@@ -75,12 +75,12 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         # --- Ztalk 知行双线 ---
         # 短期趋势: EMA(EMA(C,10),10)
         pl.col("close_adj").ewm_mean(span=10, adjust=False).over("code")
-          .ewm_mean(span=10, adjust=False).over("code").alias("zx_short"),
+          .ewm_mean(span=10, adjust=False).over("code").alias("WL"),
         # 多空线: MA14+28+57+114 / 4
         ((pl.col("close_adj").rolling_mean(14).over("code") + 
           pl.col("close_adj").rolling_mean(28).over("code") + 
           pl.col("close_adj").rolling_mean(57).over("code") + 
-          pl.col("close_adj").rolling_mean(114).over("code")) / 4).alias("zx_long"),
+          pl.col("close_adj").rolling_mean(114).over("code")) / 4).alias("YL"),
 
         # --- MACD ---
         (pl.col("close_adj").ewm_mean(span=12, adjust=False).over("code") - 
@@ -109,10 +109,10 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         (pl.col("close_adj") - pl.col("ref_c_1")).alias("delta"),
         
         # 知行线历史波动 (用于 s26)
-        pl.col("zx_long").shift(15).over("code").alias("zx_long_15"),
-        pl.col("zx_long").shift(30).over("code").alias("zx_long_30"),
-        pl.col("zx_long").shift(45).over("code").alias("zx_long_45"),
-        pl.col("zx_long").shift(60).over("code").alias("zx_long_60"),
+        pl.col("YL").shift(15).over("code").alias("YL_15"),
+        pl.col("YL").shift(30).over("code").alias("YL_30"),
+        pl.col("YL").shift(45).over("code").alias("YL_45"),
+        pl.col("YL").shift(60).over("code").alias("YL_60"),
 
     ]).with_columns([
         tdx_sma(pl.col("rsv"), 3, 1).over("code").alias("K"),
@@ -128,7 +128,7 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
          tdx_sma(pl.col("delta").abs(), 3, 1).over("code") * 100).alias("rsi1_sim"),
          
         # 知行线波动平均
-        ((pl.col("zx_long_15") + pl.col("zx_long_30") + pl.col("zx_long_45") + pl.col("zx_long_60")) / 4).alias("zx_wave_avg"),
+        ((pl.col("YL_15") + pl.col("YL_30") + pl.col("YL_45") + pl.col("YL_60")) / 4).alias("zx_wave_avg"),
          
     ]).with_columns([
         tdx_sma(pl.col("K"), 3, 1).over("code").alias("D"),
@@ -136,7 +136,7 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         
         # 知行线平均_今
         pl.when(pl.col("zx_wave_avg") != 0)
-          .then((pl.col("zx_long") - pl.col("zx_wave_avg")) / pl.col("zx_wave_avg"))
+          .then((pl.col("YL") - pl.col("zx_wave_avg")) / pl.col("zx_wave_avg"))
           .otherwise(0).alias("zx_avg_now"),
         
         # 大长阳/大长阴 (Strict TR Logic)
@@ -223,9 +223,9 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         (pl.when(pl.col("rsi1_sim") < 20).then(0.8).otherwise(0) + 
          pl.when(pl.col("rsi1_sim") < 23).then(0.7).otherwise(0)).alias("s6"),
         # s7: 趋势线夹层
-        (pl.when((pl.col("zx_short") > pl.col("close_adj")) & (pl.col("close_adj") > pl.col("zx_long"))).then(1.3).otherwise(0) +
-         pl.when(pl.col("close_adj") < pl.col("zx_long")).then(-3).otherwise(0) +
-         pl.when(pl.col("close_adj") * 1.003 < pl.col("zx_long")).then(-3).otherwise(0)).alias("s7"),
+        (pl.when((pl.col("WL") > pl.col("close_adj")) & (pl.col("close_adj") > pl.col("YL"))).then(1.3).otherwise(0) +
+         pl.when(pl.col("close_adj") < pl.col("YL")).then(-3).otherwise(0) +
+         pl.when(pl.col("close_adj") * 1.003 < pl.col("YL")).then(-3).otherwise(0)).alias("s7"),
          
         # s8-s9: 极致缩量
         (pl.when(pl.col("volume") == pl.col("vol_no_limit").rolling_min(30).over("code")).then(0.3).otherwise(0) +
@@ -280,8 +280,8 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
 
         # s17: 乖离惩罚 (整体乘以-1)
         (
-            (((pl.col("low_adj") - pl.col("zx_long")).abs() * 2.5 > (pl.col("close_adj") - pl.col("high_adj").rolling_max(10).over("code")).abs()).cast(pl.Int32) + 
-             ((pl.col("low_adj") - pl.col("zx_long")).abs() * 3.0 > (pl.col("close_adj") - pl.col("high_adj").rolling_max(10).over("code")).abs()).cast(pl.Int32))
+            (((pl.col("low_adj") - pl.col("YL")).abs() * 2.5 > (pl.col("close_adj") - pl.col("high_adj").rolling_max(10).over("code")).abs()).cast(pl.Int32) + 
+             ((pl.col("low_adj") - pl.col("YL")).abs() * 3.0 > (pl.col("close_adj") - pl.col("high_adj").rolling_max(10).over("code")).abs()).cast(pl.Int32))
             * (-1)).alias("s17"),
          
         # s22: 顶背离
@@ -305,8 +305,8 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         pl.when(pl.col("pos_vol").rolling_sum(20).over("code") > pl.col("pos_vol").rolling_sum(21).over("code").shift(35)).then(0.5).otherwise(-1).alias("s27"),
         
         # s28: 双线死叉
-        pl.when((pl.col("zx_short") < pl.col("zx_short").shift(1).over("code")) & 
-                (pl.col("zx_long") < pl.col("zx_long").shift(1).over("code")))
+        pl.when((pl.col("WL") < pl.col("WL").shift(1).over("code")) & 
+                (pl.col("YL") < pl.col("YL").shift(1).over("code")))
           .then(-2).otherwise(0).alias("s28"),
           
         # s29: 一字板开板
@@ -334,9 +334,9 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         pl.when(tdx_count(pl.col("is_zt_flat"), 20) >= 2).then(-1.5).otherwise(0).alias("s36"),
         
         # s37: 诱多形态 (修复：补全趋势线条件)
-        pl.when((pl.col("open_adj") > pl.col("zx_short")) & 
-                (pl.col("zx_short") > pl.col("zx_long")) & 
-                (pl.col("close_adj") < pl.col("zx_long")) & 
+        pl.when((pl.col("open_adj") > pl.col("WL")) & 
+                (pl.col("WL") > pl.col("YL")) & 
+                (pl.col("close_adj") < pl.col("YL")) & 
                 (pl.col("volume") > pl.col("ref_v_1")))
           .then(-3).otherwise(0).alias("s37"),
         
@@ -393,7 +393,7 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
          
         # s18 (贴线潜伏 - 基础) - 独立但为后续铺垫
         pl.when(
-            ((pl.col("close_adj") - pl.col("zx_short")) / pl.col("zx_short")).is_between(-0.015, 0.023) & 
+            ((pl.col("close_adj") - pl.col("WL")) / pl.col("WL")).is_between(-0.015, 0.023) & 
             (pl.col("pct_chg").is_between(-2, 1.8)) & 
             (pl.col("amplitude") < 4)
         ).then(1.5).otherwise(-0.5).alias("s18"),
@@ -401,21 +401,21 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         # s19 依赖 s18
         pl.when(
             (pl.col("s18") <= 0) & 
-            ((pl.col("close_adj") - pl.col("zx_short")) / pl.col("zx_short")).is_between(-0.015, 0.03) & 
+            ((pl.col("close_adj") - pl.col("WL")) / pl.col("WL")).is_between(-0.015, 0.03) & 
             (pl.col("pct_chg").is_between(-2, 1.8)) & 
             (pl.col("amplitude") < 4)
         ).then(2).otherwise(0).alias("s19"),
     ]).with_columns([
         # s20 依赖 s18, s19
         pl.when((pl.col("s18") <= 0) & (pl.col("s19") == 0) & 
-                ((pl.col("close_adj") - pl.col("zx_long"))/pl.col("zx_long") <= 0.025) &
+                ((pl.col("close_adj") - pl.col("YL"))/pl.col("YL") <= 0.025) &
                 (pl.col("pct_chg").is_between(-2, 1.8)) &
                 (pl.col("amplitude") < 4)
         ).then(0.6).otherwise(0).alias("s20"),
     ]).with_columns([
         # s21 依赖 s18, s19, s20 (夹心层惩罚)
         pl.when((pl.col("s18")<=0) & (pl.col("s19")==0) & (pl.col("s20")==0) & 
-                (pl.col("close_adj") < pl.col("zx_short")) & (pl.col("close_adj") > pl.col("zx_long")))
+                (pl.col("close_adj") < pl.col("WL")) & (pl.col("close_adj") > pl.col("YL")))
           .then(-1.5).otherwise(0).alias("s21"),
     ])
 
@@ -434,7 +434,7 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         # 4. 总分 > 0
         pl.when((pl.col("J") < 13) & 
                 (pl.col("dif") >= 0) & 
-                (pl.col("zx_short") > pl.col("zx_long")) &
+                (pl.col("WL") > pl.col("YL")) &
                 (pl.col("B1_Total_Score") > 0))
           .then(pl.col("B1_Total_Score"))
           .otherwise(0).alias("B1_Final_Score")
@@ -450,8 +450,8 @@ def calc_b1_factors_tg(df: pl.LazyFrame, CONFIG: dict = {}) -> pl.LazyFrame:
         "high_adj",       # 保留最高价方便验证
         "low_adj",        # 保留最低价方便验证
         "close_adj",      # 保留收盘价方便验证
-        "zx_short",       # 保留趋势线方便验证
-        "zx_long",
+        "WL",       # 保留趋势线方便验证
+        "YL",
         # --- 排序因子 ---
         "volume",         # 成交量 (用于缩量排序)
         "amplitude",      # 振幅 (用于低波动排序)

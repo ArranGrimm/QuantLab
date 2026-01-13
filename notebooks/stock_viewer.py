@@ -32,7 +32,7 @@ def _(mo):
 def _(mo):
     # 输入框：股票代码
     input_code = mo.ui.text(
-        value="600601_SH", 
+        value="600570_SH", 
         label="🔍 股票代码 (例如: 000001_SZ):",
         full_width=True
     )

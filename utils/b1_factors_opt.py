@@ -194,3 +194,135 @@ def calc_b1_factors_opt(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame:
             pl.col("ZTALK_GENE_OK")
         ).alias("b1_signal")
     ])
+
+
+def calc_b1_factors_base(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame:
+    """
+    B1 选股因子计算 (V2.0.4b 还原版)
+    
+    Args:
+        df: 输入 LazyFrame，需包含列: 
+            code, date, open_adj, high_adj, low_adj, close_adj, volume, amount, market_cap_100m
+        config: 策略参数配置，默认使用 DEFAULT_CONFIG
+    
+    Returns:
+        LazyFrame，包含 b1_signal 等选股信号列
+    """
+    cfg = {**DEFAULT_CONFIG, **(config or {})}
+    print("🛠️ [Strategy] 启动 B1 V2.0.4b 还原版...")
+
+    return df.sort(["code", "date"]).with_columns([
+        # 0. 基础位移
+        pl.col("close_adj").shift(1).over("code").alias("prev_close"),
+        pl.col("volume").shift(1).over("code").alias("prev_vol"),
+        pl.col("open_adj").shift(1).over("code").alias("prev_open"),
+
+        # 1. Ztalk 双均线系统 (WL & YL)
+        pl.col("close_adj").ewm_mean(span=10, adjust=False).over("code")
+          .ewm_mean(span=10, adjust=False).over("code").alias("WL"),
+        ((pl.col("close_adj").rolling_mean(14).over("code") + 
+          pl.col("close_adj").rolling_mean(28).over("code") + 
+          pl.col("close_adj").rolling_mean(57).over("code") + 
+          pl.col("close_adj").rolling_mean(114).over("code")) / 4).alias("YL"),
+
+    ]).with_columns([
+        # 2. 基础指标
+        (pl.col("high_adj").rolling_max(9).over("code") - pl.col("low_adj").rolling_min(9).over("code")).alias("kdj_den"),
+        ((pl.col("close_adj") > pl.col("open_adj")) & (pl.col("close_adj") >= pl.col("prev_close"))).alias("real_yang"),
+        ((pl.col("close_adj") < pl.col("open_adj")) & (pl.col("close_adj") <= pl.col("prev_close"))).alias("real_yin"),
+        pl.col("volume").rolling_mean(40).over("code").alias("avg40"),
+        pl.col("volume").shift(1).rolling_mean(40).over("code").alias("v40p"),
+
+    ]).with_columns([
+        # RSV
+        pl.when(pl.col("kdj_den") == 0).then(50.0)
+          .otherwise((pl.col("close_adj") - pl.col("low_adj").rolling_min(9).over("code")) / pl.col("kdj_den") * 100).alias("rsv"),
+
+        # 红绿量能累加
+        (pl.col("volume") * pl.col("real_yang")).rolling_sum(cfg["YANGYIN_PERIOD_1"]).over("code").alias("vol_yang_p1"),
+        (pl.col("volume") * pl.col("real_yin")).rolling_sum(cfg["YANGYIN_PERIOD_1"]).over("code").alias("vol_yin_p1"),
+        (pl.col("volume") * pl.col("real_yang")).rolling_sum(cfg["YANGYIN_PERIOD_2"]).over("code").alias("vol_yang_p2"),
+        (pl.col("volume") * pl.col("real_yin")).rolling_sum(cfg["YANGYIN_PERIOD_2"]).over("code").alias("vol_yin_p2"),
+
+        # O85 & R55
+        (pl.col("open_adj").rolling_min(28).over("code") + 
+         cfg["BAD_K_OPEN_PCT"] * (pl.col("open_adj").rolling_max(28).over("code") - pl.col("open_adj").rolling_min(28).over("code"))).alias("O85"),
+        (pl.col("close_adj").rolling_min(40).over("code") + 
+         cfg["VIOLENT_POS_PCT"] * (pl.col("close_adj").rolling_max(40).over("code") - pl.col("close_adj").rolling_min(40).over("code"))).alias("R55"),
+
+        # Max Yang Vol
+        pl.when(pl.col("real_yang")).then(pl.col("volume")).otherwise(0)
+          .rolling_max(28).over("code").alias("max_yang_vol_28"),
+
+    ]).with_columns([
+        # K
+        pl.col("rsv").ewm_mean(com=2, adjust=False).over("code").alias("K"),
+
+        # 红绿比
+        ((pl.col("vol_yang_p1") > cfg["YANGYIN_RATIO"] * pl.col("vol_yin_p1")) | 
+         (pl.col("vol_yang_p2") > cfg["YANGYIN_RATIO"] * pl.col("vol_yin_p2"))).alias("YANGYIN_OK"),
+
+        # 流动性
+        ((pl.col("amount").rolling_mean(28).over("code") / 1e8) >= cfg["LIQUIDITY_THRESHOLD"]).alias("LQ"),
+        (pl.col("market_cap_100m") >= cfg["MV_THRESHOLD"]).alias("MVOK"),
+
+        # BAD_K 计算
+        (
+            (pl.col("open_adj") >= pl.col("O85")) & 
+            (pl.col("close_adj") < pl.col("prev_close")) & 
+            (pl.col("close_adj") <= pl.col("open_adj")) & 
+            (pl.col("volume") >= cfg["BAD_K_VOL_RATIO"] * pl.col("prev_vol")) &
+            (pl.col("volume") >= cfg["BAD_K_AMNESTY_RATIO"] * pl.col("max_yang_vol_28")) 
+        ).cast(pl.Int32).rolling_sum(cfg["BAD_K_LOOKBACK"]).over("code").alias("bad_k_count"),
+
+        # 触发器
+        (
+            (pl.col("volume") > cfg["CLUSTER_VOL_RATIO"] * pl.col("prev_vol")) &
+            (pl.col("close_adj") > pl.col("open_adj")) &
+            (pl.col("volume") > pl.col("avg40"))
+        ).alias("PLRY"),
+
+        (
+            ((pl.col("close_adj") > pl.col("prev_close")) & (pl.col("close_adj") >= pl.col("open_adj"))) &
+            (pl.col("volume") > cfg["VIOLENT_VOL_RATIO"] * pl.col("v40p")) &
+            (pl.col("close_adj") > pl.col("R55"))
+        ).alias("KEY_K"),
+
+    ]).with_columns([
+        # D
+        pl.col("K").ewm_mean(com=2, adjust=False).over("code").alias("D"),
+
+        # MAX28_OK: 好量压制坏量
+        (
+            pl.when(~pl.col("real_yin")).then(pl.col("volume")).otherwise(0)
+              .rolling_max(28).over("code") 
+            >= 
+            pl.when(pl.col("real_yin")).then(pl.col("volume")).otherwise(0)
+              .rolling_max(28).over("code")
+        ).alias("MAX28_OK"),
+
+        (pl.col("bad_k_count") == 0).alias("GOOD28"),
+        (pl.col("PLRY").cast(pl.Int32).rolling_sum(cfg["CLUSTER_PERIOD"]).over("code") >= cfg["CLUSTER_COUNT"]).alias("PLRY_CNT"),
+        (pl.col("KEY_K").cast(pl.Int32).rolling_max(cfg["KEY_K_LOOKBACK"]).over("code") == 1).alias("KEY_K_EXIST"),
+
+    ]).with_columns([
+        (3 * pl.col("K") - 2 * pl.col("D")).alias("J"),
+        (pl.col("PLRY_CNT") | pl.col("KEY_K_EXIST")).alias("TRIGGER"),
+
+    ]).with_columns([
+        (pl.col("J") <= cfg["J_THRESHOLD"]).alias("J_OK"),
+
+    ]).with_columns([
+        # 最终选股信号
+        (
+            (pl.col("WL") > pl.col("YL")) & 
+            (pl.col("close_adj") > pl.col("YL")) &
+            pl.col("TRIGGER") & 
+            pl.col("J_OK") & 
+            pl.col("LQ") & 
+            pl.col("MVOK") & 
+            pl.col("GOOD28") & 
+            pl.col("MAX28_OK") & 
+            pl.col("YANGYIN_OK") 
+        ).alias("b1_signal")
+    ])

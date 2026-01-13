@@ -9,9 +9,9 @@ def _():
     import polars as pl
     import os
     from datetime import datetime
-    from utils import calc_b1_factors_opt, run_backtest, print_backtest_report, analyze_yearly_intensity
+    from utils import calc_b1_factors_opt, calc_b1_factors_base, calc_b1_factors_tg
+    from utils import run_backtest, print_backtest_report, analyze_yearly_intensity
     from utils.baostock_utils import get_st_blacklist_pl
-    from utils import run_backtest_realistic, print_realistic_report
     from utils import export_for_rust
 
     # ==============================================================================
@@ -30,7 +30,7 @@ def _():
         ("2022-04-27", "2022-07-05"),  # 427大反弹
         ("2023-01-15", "2023-04-15"),  # ChatGPT/CPO 狂潮
         ("2024-02-06", "2024-03-20"),  # 救市后AI反弹
-        ("2024-09-24", "2024-10-15"),  # 924 史诗级暴涨
+        # ("2024-09-24", "2024-10-15"),  # 924 史诗级暴涨
         ("2025-04-09", "2025-09-04"),  # 2025年慢牛行情
         ("2026-01-05", "2026-03-31"),  # 2025年慢牛行情延续
     ]
@@ -93,57 +93,61 @@ def _():
     # ⚙️ 策略参数配置 V3.0 (Based on 10 Golden Cases)
     # ==============================================================================
     # 如果想放宽条件增加信号数量
-    config = {"J_THRESHOLD": 13.8, "VOL_SHRINK_THRESHOLD": 0.035}
+    config_base = {"J_THRESHOLD": 13, "YANGYIN_RATIO": 1.5, "MV_THRESHOLD": 50}
+    config_opt = {}
     return (
         analyze_yearly_intensity,
         calc_b1_factors_opt,
+        config_opt,
         datetime,
+        export_for_rust,
         pl,
-        print_backtest_report,
         q_full,
-        run_backtest,
     )
 
 
 @app.cell
-def _(calc_b1_factors_opt, q_full):
+def _(calc_b1_factors_opt, config_opt, q_full):
     # 3. 执行计算
     print("⏳ 计算原始 B1 信号...")
-    df_signals = calc_b1_factors_opt(q_full)
+    # df_signals = calc_b1_factors_base(q_full, config)
+    df_signals = calc_b1_factors_opt(q_full, config_opt)
+    # df_signals = calc_b1_factors_tg(q_full)
     return (df_signals,)
 
 
 @app.cell
-def _(df_signals, print_backtest_report, run_backtest):
+def _(df_signals, export_for_rust):
     return_days = [5, 10, 15, 20, 25, 30]
 
     LOOSE_PERIODS = [
-        # ("2019-02-11", "2019-04-10"),  # 春季躁动
-        # ("2019-12-16", "2020-03-02"),  # 疫情反弹
-        # ("2020-06-19", "2020-07-15"),  # 证券带头的疯牛
-        # ("2020-12-24", "2021-01-25"),  # 新能源抱团主升
-        # ("2021-04-16", "2021-09-14"),  # 锂电光伏大主升
-        # ("2022-04-27", "2022-07-05"),  # 427大反弹
-        # ("2023-01-15", "2023-04-15"),  # ChatGPT/CPO 狂潮
-        # ("2024-02-06", "2024-03-20"),  # 救市后AI反弹
+        ("2019-02-11", "2019-04-10"),  # 春季躁动
+        ("2019-12-16", "2020-03-02"),  # 疫情反弹
+        ("2020-06-19", "2020-07-15"),  # 证券带头的疯牛
+        ("2020-12-24", "2021-01-25"),  # 新能源抱团主升
+        ("2021-04-16", "2021-09-14"),  # 锂电光伏大主升
+        ("2022-04-27", "2022-07-05"),  # 427大反弹
+        ("2023-01-15", "2023-04-15"),  # ChatGPT/CPO 狂潮
+        ("2024-02-06", "2024-03-20"),  # 救市后AI反弹
         # ("2024-09-24", "2024-10-15"),  # 924 史诗级暴涨
         ("2025-04-09", "2025-09-04"),  # 2025年慢牛行情
         ("2026-01-05", "2026-03-31"),  # 2025年慢牛行情延续
     ]
 
-    # # 导出信号供 Rust 使用
-    # export_for_rust(
-    #     df_signals,
-    #     output_path="data/signals/market_data.parquet",
-    #     loose_periods=LOOSE_PERIODS,
-    #     stop_loss_pct=0.03,
-    #     start_date='2019-01-01'
-    # )
-    # print(f"导出完成")
+    # 导出信号供 Rust 使用
+    export_for_rust(
+        df_signals,
+        output_path="data/signals/market_data.parquet",
+        loose_periods=LOOSE_PERIODS,
+        stop_loss_pct=0.03,
+        start_date='2019-01-01',
+        # extra_sort_cols=['B1_Final_Score']
+    )
+    print(f"导出完成")
 
-    df_result_dynamic = run_backtest(df_signals, return_days, loose_periods=LOOSE_PERIODS, top_n=200, stop_loss_pct=0.03)
-    print_backtest_report(df_result_dynamic, return_days)
-    return (df_result_dynamic,)
+    # df_result_dynamic = run_backtest(df_signals, return_days, loose_periods=LOOSE_PERIODS, top_n=200, stop_loss_pct=0.03)
+    # print_backtest_report(df_result_dynamic, return_days)
+    return
 
 
 @app.cell
@@ -161,7 +165,7 @@ def _(analyze_yearly_intensity, df_result_dynamic):
 @app.cell
 def _(datetime, df_result_dynamic, pl):
     df_result_dynamic.filter(
-        (pl.col("date") == datetime(2026,1,12)) &
+        (pl.col("date") == datetime(2026,1,9)) &
         (pl.col("b1_signal") == 1) 
     )
     return
@@ -169,13 +173,13 @@ def _(datetime, df_result_dynamic, pl):
 
 @app.cell
 def _(datetime, df_signals, pl):
-    ht_df = df_signals.filter(
-        (pl.col("code") == "000547_SZ") &
-        (pl.col("date") >= datetime(2025,11, 10))
+    alk_df = df_signals.filter(
+        (pl.col("code") == "002940_SZ") &
+        (pl.col("date") >= datetime(2025,7, 5))
     ).collect()
 
-    ht_df
-    return (ht_df,)
+    alk_df
+    return
 
 
 @app.cell
@@ -284,15 +288,30 @@ def _(df_signals, pl):
             # 打印核心行
             print(f"{name:<10} | {date_str}  | {code:<8} | {is_signal:<5} | {buy:<6.2f} | {fmt(row['max_5d']):<8} | {fmt(row['max_10d']):<8} | {fmt(row['max_20d']):<8} | {fmt(row['max_30d']):<8} | {fmt(row['ret_30d']):<8}")
 
+
+                # pl.col("TRIGGER") & 
+                # pl.col("J_OK") & 
+                # pl.col("LQ") & 
+                # pl.col("MVOK") & 
+                # pl.col("GOOD28") & 
+                # pl.col("MAX28_OK") & 
+                # pl.col("YANGYIN_OK") &
+                # pl.col("SHAPE_OK") & 
+                # pl.col("VOL_SHRINK_OK") &
+                # pl.col("ZTALK_GENE_OK")
             # 如果没选出来，打印原因
             if not row['b1_signal']:
                 # 简单诊断一下原因
                 reasons = []
+                if not row['MVOK']: reasons.append("流通市值不在")
                 if not row['J_OK']: reasons.append(f"J值({row['J']:.1f})>13")
                 if not row['MAX28_OK']: reasons.append("有天量阴")
                 if not row['GOOD28']: reasons.append("有坏K线")
                 if not row['YANGYIN_OK']: reasons.append(f"红绿比不足, p1: {row["vol_yang_p1"]/row["vol_yin_p1"]}, p2: {row["vol_yang_p2"]/row["vol_yin_p2"]}")
                 if not row['TRIGGER']: reasons.append("无关键K")
+                if not row['SHAPE_OK']: reasons.append("涨跌幅过大")
+                if not row['VOL_SHRINK_OK']: reasons.append("28天缩量不够")
+                if not row['ZTALK_GENE_OK']: reasons.append("不符合均线指纹")
                 print(f"   ⚠️ 落选原因: {', '.join(reasons)}")
 
         print("-" * 120)
@@ -312,8 +331,8 @@ def _(df_signals, pl):
 @app.cell
 def _(datetime, df_result_dynamic, pl):
     hn_df = df_result_dynamic.filter(
-        (pl.col("code") == "000547_SZ") &
-        (pl.col("date") >= datetime(2025, 11, 1))
+        (pl.col("code") == "002940_SZ") &
+        (pl.col("date") >= datetime(2025, 1, 1))
     )
 
     hn_df.select([
