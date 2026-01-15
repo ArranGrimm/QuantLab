@@ -36,6 +36,8 @@ pub struct BacktestSection {
     pub sort_field: String,
     #[serde(default = "default_sort_ascending")]
     pub sort_ascending: bool,
+    #[serde(default = "default_min_position_ratio")]
+    pub min_position_ratio: f64,  // 最小仓位比例阈值 (低于此比例不买)
 }
 
 fn default_sort_field() -> String {
@@ -44,6 +46,10 @@ fn default_sort_field() -> String {
 
 fn default_sort_ascending() -> bool {
     true
+}
+
+fn default_min_position_ratio() -> f64 {
+    0.5  // 默认至少能买目标的 50%
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -114,6 +120,9 @@ pub struct BacktestConfig {
     pub sort_field: String,
     pub sort_ascending: bool,
     
+    // Position sizing
+    pub min_position_ratio: f64,  // 最小仓位比例阈值
+    
     // Stop Loss
     pub stop_loss_enabled: bool,
     pub stop_loss_pct: f64,
@@ -155,6 +164,8 @@ impl Default for BacktestConfig {
             
             sort_field: "vol_ratio".to_string(),
             sort_ascending: true,
+            
+            min_position_ratio: 0.5,
             
             stop_loss_enabled: true,
             stop_loss_pct: 0.03,
@@ -201,6 +212,8 @@ impl From<ConfigFile> for BacktestConfig {
             
             sort_field: cfg.backtest.sort_field,
             sort_ascending: cfg.backtest.sort_ascending,
+            
+            min_position_ratio: cfg.backtest.min_position_ratio,
             
             stop_loss_enabled: cfg.stop_loss.enabled,
             stop_loss_pct: cfg.stop_loss.pct,
@@ -271,6 +284,7 @@ pub struct PriceBar {
     pub high: f64,
     pub low: f64,
     pub close: f64,
+    pub pre_close: f64,   // 昨日收盘价 (用于计算持仓市值)
     pub wl: f64,
     pub yl: f64,
     pub b1_signal: bool,

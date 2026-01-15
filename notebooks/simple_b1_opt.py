@@ -165,7 +165,7 @@ def _(analyze_yearly_intensity, df_result_dynamic):
 @app.cell
 def _(datetime, df_result_dynamic, pl):
     df_result_dynamic.filter(
-        (pl.col("date") == datetime(2026,1,9)) &
+        (pl.col("date") == datetime(2026,1,8)) &
         (pl.col("b1_signal") == 1) 
     )
     return
@@ -174,8 +174,8 @@ def _(datetime, df_result_dynamic, pl):
 @app.cell
 def _(datetime, df_signals, pl):
     alk_df = df_signals.filter(
-        (pl.col("code") == "002940_SZ") &
-        (pl.col("date") >= datetime(2025,7, 5))
+        (pl.col("code") == "300377_SZ") &
+        (pl.col("date") >= datetime(2026,1, 5))
     ).collect()
 
     alk_df

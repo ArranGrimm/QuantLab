@@ -218,6 +218,7 @@ pub fn check_sell_conditions(
 pub fn process_buy_signals(
     mut commands: Commands,
     config: Res<BacktestConfig>,
+    market_data: Res<MarketData>,
     mut portfolio: ResMut<Portfolio>,
     mut stats: ResMut<BacktestStats>,
     daily_data: Res<DailyData>,
@@ -236,6 +237,18 @@ pub fn process_buy_signals(
     let existing_codes: std::collections::HashSet<_> =
         positions.iter().map(|p| p.code.clone()).collect();
 
+    // ========== 计算当前总资产 (用昨日收盘价估算持仓市值) ==========
+    let mut positions_value = 0.0;
+    for position in positions.iter() {
+        if let Some(prices) = market_data.prices.get(&position.code) {
+            if let Some(bar) = prices.get(&current_date) {
+                // 用 pre_close (昨日收盘价) 估算持仓市值
+                positions_value += position.shares as f64 * bar.pre_close;
+            }
+        }
+    }
+    let total_value = portfolio.cash + positions_value;
+
     // 每天可买数量 = min(每日上限, 剩余仓位)
     let available_slots = (config.max_positions - current_positions).min(config.max_daily_buys);
     let mut bought_count = 0;
@@ -249,14 +262,21 @@ pub fn process_buy_signals(
             continue;
         }
 
-        let position_value = portfolio.cash * config.position_size_pct;
-        if position_value < open_price * 100.0 {
+        // ========== 用总资产计算目标仓位 ==========
+        let target_position_value = total_value * config.position_size_pct;
+        let ideal_shares = ((target_position_value / open_price / 300.0).floor() as u32) * 300;
+        if ideal_shares == 0 {
             continue;
         }
-
-        // 股数取整到 300 的倍数，方便分批卖出 (1/3)
-        let shares = ((position_value / open_price / 300.0).floor() as u32) * 300;
-        if shares == 0 {
+        
+        // ========== 现金不足时尽量买 ==========
+        let cost_per_share = open_price * (1.0 + config.commission_rate + config.slippage_pct);
+        let affordable_shares = ((portfolio.cash / cost_per_share / 300.0).floor() as u32) * 300;
+        let shares = ideal_shares.min(affordable_shares);
+        
+        // 最小仓位阈值：至少能买目标的 X%，否则跳过
+        let min_shares = (ideal_shares as f64 * config.min_position_ratio) as u32;
+        if shares < min_shares || shares == 0 {
             continue;
         }
 

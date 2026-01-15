@@ -61,6 +61,8 @@ def export_for_rust(
         ])
         .with_columns(
             [
+                # 标记：昨天收盘价
+                pl.col("close_adj").shift(1).over("code").fill_null(pl.col("close_adj")).alias("pre_close_adj"),
                 # 标记：昨天是否是信号 (T日信号 → T+1日买入)
                 pl.col("b1_signal").shift(1).over("code").fill_null(False).alias("pre_b1_signal"),
                 # 标记：是否在活跃期
@@ -81,6 +83,7 @@ def export_for_rust(
         "high_adj",
         "low_adj",
         "close_adj",
+        "pre_close_adj",
         "volume",
         "WL",
         "YL",

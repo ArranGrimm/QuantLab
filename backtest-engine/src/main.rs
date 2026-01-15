@@ -199,6 +199,7 @@ fn build_market_data(
     let high_adj = df.column("high_adj")?.f64()?;
     let low_adj = df.column("low_adj")?.f64()?;
     let close_adj = df.column("close_adj")?.f64()?;
+    let pre_close_adj = df.column("pre_close_adj")?.f64()?;
     let wl = df.column("WL")?.f64()?;
     let yl = df.column("YL")?.f64()?;
     let b1_signal = df.column("b1_signal")?.bool()?;
@@ -222,6 +223,7 @@ fn build_market_data(
             high: high_adj.get(i).unwrap_or(0.0),
             low: low_adj.get(i).unwrap_or(0.0),
             close: close_adj.get(i).unwrap_or(0.0),
+            pre_close: pre_close_adj.get(i).unwrap_or(0.0),
             wl: wl.get(i).unwrap_or(0.0),
             yl: yl.get(i).unwrap_or(0.0),
             b1_signal: b1_signal.get(i).unwrap_or(false),
