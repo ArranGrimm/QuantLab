@@ -7,7 +7,7 @@ B1 选股因子计算模块 (V3.0 精简优化版)
 - 视觉量化：形态收敛 + 极致缩量 + 均线基因
 """
 import polars as pl
-
+from .sector_factors import get_sector_status
 # ==============================================================================
 # 默认配置 (基于 10 大完美案例优化)
 # ==============================================================================
@@ -47,7 +47,7 @@ DEFAULT_CONFIG = {
 }
 
 
-def calc_b1_factors_opt(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame:
+def calc_b1_factors_opt(df: pl.LazyFrame, config: dict = None, sector_calc: bool = False) -> pl.LazyFrame:
     """
     B1 选股因子计算 (V3.0 精简优化版)
     
@@ -55,12 +55,20 @@ def calc_b1_factors_opt(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame:
         df: 输入 LazyFrame，需包含列: 
             code, date, open_adj, high_adj, low_adj, close_adj, volume, amount, market_cap_100m
         config: 策略参数配置，默认使用 DEFAULT_CONFIG
-    
+        sector_calc: 是否计算板块因子，默认不计算
     Returns:
         LazyFrame，包含 b1_signal 等选股信号列
     """
     cfg = {**DEFAULT_CONFIG, **(config or {})}
     print("🛠️ [Strategy] 启动 B1 V3.0 (精简优化版)...")
+
+    if sector_calc:
+        df_sector_status = get_sector_status(df)
+        print("🔍 [Sector] 板块状态计算完成")
+        df = df.join(df_sector_status, on=["date", "industry"], how="left")
+        print("🔍 [Sector] 板块状态合并完成")
+        # 填充空值 (没有板块的票，默认 SECTOR_OK = False)
+        df = df.with_columns(pl.col("SECTOR_OK").fill_null(False))
 
     return df.sort(["code", "date"]).with_columns([
         # 0. 基础位移

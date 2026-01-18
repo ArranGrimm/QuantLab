@@ -11,7 +11,7 @@ def _():
     from datetime import datetime
     from utils import calc_b1_factors_opt, calc_b1_factors_base, calc_b1_factors_tg
     from utils import run_backtest, print_backtest_report, analyze_yearly_intensity
-    from utils.baostock_utils import get_st_blacklist_pl
+    from utils import get_st_blacklist_pl
     from utils import export_for_rust
 
     # ==============================================================================
@@ -74,7 +74,10 @@ def _():
     )
 
 
-    st_blacklist = get_st_blacklist_pl('2025-01-09') # 获取ST列表
+    st_blacklist = get_st_blacklist_pl('2025-01-16') # 获取ST列表
+    df_sector = pl.scan_csv("data/sector_map_em.csv").select(["code", "industry"]).with_columns([
+        pl.col("industry").cast(pl.Categorical) 
+    ])
     # (C) 合并数据 (移除了所有市场指数相关代码)
     print("🔗 [Step 2] 合并基础数据...")
     q_full = (
@@ -87,6 +90,7 @@ def _():
         ]).filter(
             ~pl.col("code").is_in(st_blacklist)
         )
+        .join(df_sector, on="code", how="left")
     )
 
     # ==============================================================================
@@ -100,9 +104,10 @@ def _():
         calc_b1_factors_opt,
         config_opt,
         datetime,
-        export_for_rust,
         pl,
+        print_backtest_report,
         q_full,
+        run_backtest,
     )
 
 
@@ -117,7 +122,7 @@ def _(calc_b1_factors_opt, config_opt, q_full):
 
 
 @app.cell
-def _(df_signals, export_for_rust):
+def _(df_signals, print_backtest_report, run_backtest):
     return_days = [5, 10, 15, 20, 25, 30]
 
     LOOSE_PERIODS = [
@@ -134,20 +139,20 @@ def _(df_signals, export_for_rust):
         ("2026-01-05", "2026-03-31"),  # 2025年慢牛行情延续
     ]
 
-    # 导出信号供 Rust 使用
-    export_for_rust(
-        df_signals,
-        output_path="data/signals/market_data.parquet",
-        loose_periods=LOOSE_PERIODS,
-        stop_loss_pct=0.03,
-        start_date='2019-01-01',
-        # extra_sort_cols=['B1_Final_Score']
-    )
-    print(f"导出完成")
+    # # 导出信号供 Rust 使用
+    # export_for_rust(
+    #     df_signals,
+    #     output_path="data/signals/market_data.parquet",
+    #     loose_periods=LOOSE_PERIODS,
+    #     stop_loss_pct=0.03,
+    #     start_date='2019-01-01',
+    #     # extra_sort_cols=['B1_Final_Score']
+    # )
+    # print(f"导出完成")
 
-    # df_result_dynamic = run_backtest(df_signals, return_days, loose_periods=LOOSE_PERIODS, top_n=200, stop_loss_pct=0.03)
-    # print_backtest_report(df_result_dynamic, return_days)
-    return
+    df_result_dynamic = run_backtest(df_signals, return_days, loose_periods=LOOSE_PERIODS, top_n=200, stop_loss_pct=0.03)
+    print_backtest_report(df_result_dynamic, return_days)
+    return (df_result_dynamic,)
 
 
 @app.cell
@@ -179,12 +184,12 @@ def _(datetime, df_signals, pl):
     ).collect()
 
     alk_df
-    return
+    return (alk_df,)
 
 
 @app.cell
-def _(ht_df):
-    ht_df.select(
+def _(alk_df):
+    alk_df.select(
         ["date",
         "TRIGGER",
         "J_OK",
@@ -195,7 +200,7 @@ def _(ht_df):
         "YANGYIN_OK",
         "SHAPE_OK", 
         "VOL_SHRINK_OK",
-        "ZTALK_GENE_OK"
+        "ZTALK_GENE_OK",
         ]
     )
     return

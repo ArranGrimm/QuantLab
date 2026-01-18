@@ -1,50 +1,76 @@
 import akshare as ak
 import pandas as pd
+import time
 
 def generate_sector_file():
-    print("🚀 开始下载申万一级行业数据 (基于 Akshare)...")
+    print("🚀 开始下载东方财富行业板块数据...")
     
-    # 1. 获取行业列表
-    df_index = ak.index_classify_sw(level="L1")
-    
+    # 1. 获取所有行业板块列表
+    # 对应函数：stock_board_industry_name_em
+    try:
+        df_boards = ak.stock_board_industry_name_em()
+        print(f"✅ 获取到 {len(df_boards)} 个行业板块")
+    except Exception as e:
+        print(f"❌ 获取板块列表失败: {e}")
+        return
+
+    # 准备一个列表存储所有结果
     all_data = []
     
-    # 2. 遍历每个行业获取成分股
-    for idx, row in df_index.iterrows():
-        sector_name = row['index_name']
-        sector_code = row['index_code']
-        print(f"正在获取: {sector_name} ({sector_code})...")
+    # 2. 遍历每个板块，获取成分股
+    # 对应函数：stock_board_industry_cons_em
+    total = len(df_boards)
+    
+    for i, row in df_boards.iterrows():
+        board_name = row['板块名称']
+        board_code = row['板块代码']
+        
+        print(f"[{i+1}/{total}] 正在获取: {board_name} ...", end="\r")
         
         try:
-            # 获取成分股
-            df_member = ak.index_component_sw(index_code=sector_code)
-            # 统一列名格式，方便 Polars 读取
-            # Akshare返回的 code 通常是 "000001" 这种，你需要根据你的系统转成 "000001_SZ" 或者保持原样
-            for stock_code in df_member['stock_code']:
-                # 简单的数据清洗
+            # 获取该板块下的成分股
+            df_cons = ak.stock_board_industry_cons_em(symbol=board_name)
+            
+            # 提取我们需要的数据
+            # df_cons 通常包含 '代码', '名称' 等字段
+            for _, stock_row in df_cons.iterrows():
                 all_data.append({
-                    "code": stock_code,
-                    "industry": sector_name
+                    "code": stock_row['代码'],      # 比如 000001
+                    "name": stock_row['名称'],      # 比如 平安银行
+                    "industry": board_name,        # 比如 银行
+                    "industry_code": board_code    # 比如 BK0475
                 })
+            
+            # ⚠️ 关键：稍微停顿一下，防止请求太快被东方财富封IP
+            time.sleep(0.5) 
+            
         except Exception as e:
-            print(f"⚠️ 获取 {sector_name} 失败: {e}")
+            print(f"\n⚠️ 跳过 {board_name}: {e}")
 
-    # 3. 保存
+    print(f"\n🎉 数据下载完成，共收集 {len(all_data)} 条记录")
+    
+    # 3. 数据清洗与保存
+    if not all_data:
+        print("未获取到数据，请检查网络。")
+        return
+
     df_final = pd.DataFrame(all_data)
     
-    # 这里做一步简单的后缀处理，为了匹配你 Rust 里的 code 格式 (如 600000_SH)
-    # 如果你的系统里 code 主要是带后缀的，可以用简单的规则加一下
+    # 4. 格式化代码 (适配你的 Rust/Polars 系统)
+    # 东方财富返回的是纯数字代码 (000001)，你的系统可能需要后缀 (000001_SZ)
     def format_code(c):
-        if c.startswith('6'): return f"{c}_SH"  # noqa: E701
-        if c.startswith('0') or c.startswith('3'): return f"{c}_SZ"  # noqa: E701
-        if c.startswith('8') or c.startswith('4'): return f"{c}_BJ"  # noqa: E701
+        c = str(c)
+        if c.startswith('6'): return f"{c}_SH"
+        if c.startswith('0') or c.startswith('3'): return f"{c}_SZ"
+        if c.startswith('8') or c.startswith('4'): return f"{c}_BJ" # 北交所
         return c
 
     df_final['code'] = df_final['code'].apply(format_code)
     
-    output_path = "data/sector_map.csv"
+    output_path = "data/sector_map_em.csv"
     df_final.to_csv(output_path, index=False)
-    print(f"✅ 行业分类表已保存至: {output_path}，共 {len(df_final)} 条数据")
+    print(f"💾 文件已保存至: {output_path}")
+    print("包含列: code, name, industry, industry_code")
 
 if __name__ == "__main__":
     generate_sector_file()
