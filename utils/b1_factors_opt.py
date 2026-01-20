@@ -70,7 +70,7 @@ def calc_b1_factors_opt(df: pl.LazyFrame, config: dict = None, sector_calc: bool
         # 填充空值 (没有板块的票，默认 SECTOR_OK = False)
         df = df.with_columns(pl.col("SECTOR_OK").fill_null(False))
 
-    return df.sort(["code", "date"]).with_columns([
+    df_b1_signals = df.lazy().sort(["code", "date"]).with_columns([
         # 0. 基础位移
         pl.col("close_adj").shift(1).over("code").alias("prev_close"),
         pl.col("volume").shift(1).over("code").alias("prev_vol"),
@@ -185,9 +185,28 @@ def calc_b1_factors_opt(df: pl.LazyFrame, config: dict = None, sector_calc: bool
         ).alias("ZTALK_GENE_OK"),
 
     ]).with_columns([
-        (pl.col("J") <= cfg["J_THRESHOLD"]).alias("J_OK"),
-
-    ]).with_columns([
+        (pl.col("J") <= cfg["J_THRESHOLD"]).alias("J_OK")
+    ])
+    
+    if sector_calc:
+        return df_b1_signals.with_columns([
+            # 最终选股信号叠加板块效应
+            (
+                pl.col("TRIGGER") & 
+                pl.col("J_OK") & 
+                pl.col("LQ") & 
+                pl.col("MVOK") & 
+                pl.col("GOOD28") & 
+                pl.col("MAX28_OK") & 
+                pl.col("YANGYIN_OK") &
+                pl.col("SHAPE_OK") & 
+                pl.col("VOL_SHRINK_OK") &
+                pl.col("ZTALK_GENE_OK") &
+                pl.col("SECTOR_OK")
+            ).alias("b1_signal")
+        ])
+    
+    return df_b1_signals.with_columns([
         # 最终选股信号
         (
             pl.col("TRIGGER") & 

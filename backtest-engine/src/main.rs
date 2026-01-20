@@ -1,4 +1,4 @@
-﻿//! Quant Backtest Engine - ECS-based backtesting using Bevy
+//! Quant Backtest Engine - ECS-based backtesting using Bevy
 //!
 //! 设计理念：
 //! - 加载完整市场数据（包含 b1_signal, pre_b1_signal, is_loose 标记）
@@ -115,13 +115,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let config = world.resource::<BacktestConfig>();
             let sort_ascending = config.sort_ascending;
             
+            let stop_loss_pct = config.stop_loss_pct;
             let mut candidates: Vec<_> = market_data
                 .prices
                 .iter()
                 .filter_map(|(code, dates)| {
                     dates.get(date).and_then(|bar| {
                         if bar.pre_b1_signal && bar.is_loose {
-                            Some((code.clone(), bar.sort_value, bar.open, bar.stop_price))
+                            // 止损价 = 当日最低价 * (1 - stop_loss_pct)
+                            let stop_price = bar.low * (1.0 - stop_loss_pct);
+                            Some((code.clone(), bar.sort_value, bar.open, stop_price))
                         } else {
                             None
                         }
@@ -205,7 +208,6 @@ fn build_market_data(
     let b1_signal = df.column("b1_signal")?.bool()?;
     let pre_b1_signal = df.column("pre_b1_signal")?.bool()?;
     let is_loose = df.column("is_loose")?.bool()?;
-    let stop_price = df.column("stop_price")?.f64()?;
     
     // 动态读取排序字段
     let sort_col = df.column(sort_field)
@@ -230,7 +232,6 @@ fn build_market_data(
             pre_b1_signal: pre_b1_signal.get(i).unwrap_or(false),
             is_loose: is_loose.get(i).unwrap_or(false),
             sort_value: sort_col.get(i).unwrap_or(999.0),
-            stop_price: stop_price.get(i).unwrap_or(0.0),
         };
 
         market_data

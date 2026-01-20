@@ -1,4 +1,4 @@
-﻿//! ECS Resources for the backtesting engine
+//! ECS Resources for the backtesting engine
 
 use bevy_ecs::prelude::*;
 use chrono::NaiveDate;
@@ -291,7 +291,6 @@ pub struct PriceBar {
     pub pre_b1_signal: bool,
     pub is_loose: bool,
     pub sort_value: f64,  // 排序字段值 (从 config.sort_field 指定的列读取)
-    pub stop_price: f64,
 }
 
 /// Market data: code -> date -> PriceBar

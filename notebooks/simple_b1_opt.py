@@ -104,10 +104,9 @@ def _():
         calc_b1_factors_opt,
         config_opt,
         datetime,
+        export_for_rust,
         pl,
-        print_backtest_report,
         q_full,
-        run_backtest,
     )
 
 
@@ -116,13 +115,13 @@ def _(calc_b1_factors_opt, config_opt, q_full):
     # 3. 执行计算
     print("⏳ 计算原始 B1 信号...")
     # df_signals = calc_b1_factors_base(q_full, config)
-    df_signals = calc_b1_factors_opt(q_full, config_opt)
+    df_signals = calc_b1_factors_opt(q_full, config_opt, sector_calc=False)
     # df_signals = calc_b1_factors_tg(q_full)
     return (df_signals,)
 
 
 @app.cell
-def _(df_signals, print_backtest_report, run_backtest):
+def _(df_signals, export_for_rust):
     return_days = [5, 10, 15, 20, 25, 30]
 
     LOOSE_PERIODS = [
@@ -139,20 +138,19 @@ def _(df_signals, print_backtest_report, run_backtest):
         ("2026-01-05", "2026-03-31"),  # 2025年慢牛行情延续
     ]
 
-    # # 导出信号供 Rust 使用
-    # export_for_rust(
-    #     df_signals,
-    #     output_path="data/signals/market_data.parquet",
-    #     loose_periods=LOOSE_PERIODS,
-    #     stop_loss_pct=0.03,
-    #     start_date='2019-01-01',
-    #     # extra_sort_cols=['B1_Final_Score']
-    # )
-    # print(f"导出完成")
+    # 导出信号供 Rust 使用
+    export_for_rust(
+        df_signals,
+        output_path="data/signals/market_data.parquet",
+        loose_periods=LOOSE_PERIODS,
+        start_date='2019-01-01',
+        # extra_sort_cols=['B1_Final_Score']
+    )
+    print(f"导出完成")
 
-    df_result_dynamic = run_backtest(df_signals, return_days, loose_periods=LOOSE_PERIODS, top_n=200, stop_loss_pct=0.03)
-    print_backtest_report(df_result_dynamic, return_days)
-    return (df_result_dynamic,)
+    # df_result_dynamic = run_backtest(df_signals, return_days, loose_periods=LOOSE_PERIODS, top_n=200, stop_loss_pct=0.03)
+    # print_backtest_report(df_result_dynamic, return_days)
+    return
 
 
 @app.cell

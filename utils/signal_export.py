@@ -15,7 +15,6 @@ def export_for_rust(
     df_full: pl.LazyFrame,
     output_path: str = "data/signals/market_data.parquet",
     loose_periods: list = None,
-    stop_loss_pct: float = 0.03,
     start_date: str = None,
     extra_sort_cols: list = None,
 ) -> str:
@@ -68,9 +67,7 @@ def export_for_rust(
                 # 标记：是否在活跃期
                 is_loose_expr.alias("is_loose"),
                 # 计算 vol_ratio (用于排序的默认选项)
-                (pl.col("volume") / pl.col("vol_40_mean")).alias("vol_ratio"),
-                # 止损价 = 当日最低价 * (1 - stop_loss_pct)
-                (pl.col("low_adj") * (1 - stop_loss_pct)).alias("stop_price"),
+                (pl.col("volume") / pl.col("vol_40_mean")).alias("vol_ratio")
             ]
         )
     )
@@ -91,8 +88,7 @@ def export_for_rust(
         "b1_signal",
         "pre_b1_signal",
         "is_loose",
-        "vol_ratio",
-        "stop_price",
+        "vol_ratio"
     ]
     
     # Add extra sort columns if specified
