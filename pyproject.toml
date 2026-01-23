@@ -33,6 +33,7 @@ dependencies = [
     "torchvision",
     "chronos-forecasting>=2.2.2",
     "baostock>=0.8.9",
+    "duckdb>=1.4.3",
 ]
 
 # 1. 定义源：根据截图中的 URL，我们指向 cu130
