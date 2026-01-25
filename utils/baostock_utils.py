@@ -163,6 +163,62 @@ def download_all_60m_data(start_date, end_date, save_path="a_share_60m.parquet")
     df_final.write_parquet(save_path, compression="zstd")
     print("保存成功！")
 
+def create_adjustment_views(conn):
+    print("🚀 正在创建前复权视图 (Views)...")
+
+    # ================= 1. 日线前复权视图 (v_kline_daily_qfq) =================
+    # 逻辑：K线价格 * 前复权因子 (fore_adjust_factor)
+    # COALESCE(..., 1.0) 用于防止找不到因子时变成 NULL，默认不复权(1.0)
+    conn.execute("""
+        CREATE OR REPLACE VIEW v_kline_daily_qfq AS
+        SELECT
+            k.code,
+            k.date,
+            -- 价格字段复权
+            k.open * COALESCE(f.fore_adjust_factor, 1.0) AS open,
+            k.high * COALESCE(f.fore_adjust_factor, 1.0) AS high,
+            k.low * COALESCE(f.fore_adjust_factor, 1.0) AS low,
+            k.close * COALESCE(f.fore_adjust_factor, 1.0) AS close,
+            k.preclose * COALESCE(f.fore_adjust_factor, 1.0) AS preclose,
+            -- 其他字段保持原样
+            k.volume,
+            k.amount,
+            k.turn,
+            k.tradestatus,
+            k.pctChg,
+            k.isST,
+            -- 保留因子方便核对
+            f.fore_adjust_factor
+        FROM kline_daily k
+        ASOF LEFT JOIN adjust_factors f
+            ON k.code = f.code AND k.date >= f.date
+    """)
+    print("✅ 日线前复权视图 [v_kline_daily_qfq] 创建完成")
+
+    # ================= 2. 60分钟前复权视图 (v_kline_60m_qfq) =================
+    # 逻辑：虽然是分钟线，但因子是按“日”生效的。
+    # 所以依然是用 kline_60m.date 去匹配 adjust_factors.date
+    conn.execute("""
+        CREATE OR REPLACE VIEW v_kline_60m_qfq AS
+        SELECT
+            k.code,
+            k.date,
+            k.time,
+            -- 价格字段复权
+            k.open * COALESCE(f.fore_adjust_factor, 1.0) AS open,
+            k.high * COALESCE(f.fore_adjust_factor, 1.0) AS high,
+            k.low * COALESCE(f.fore_adjust_factor, 1.0) AS low,
+            k.close * COALESCE(f.fore_adjust_factor, 1.0) AS close,
+            -- 其它字段
+            k.volume,
+            k.amount,
+            k.adjustflag,
+            f.fore_adjust_factor
+        FROM kline_60m k
+        ASOF LEFT JOIN adjust_factors f
+            ON k.code = f.code AND k.date >= f.date
+    """)
+    print("✅ 60分钟前复权视图 [v_kline_60m_qfq] 创建完成")
 
 
 
