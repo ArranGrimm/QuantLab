@@ -12,11 +12,17 @@ from .backtest import (
 # 数据工具
 from .baostock_utils import get_st_blacklist_pl
 from .akshare_utils import generate_sector_file
+from .duckdb_utils import get_adj_factor_frame, load_daily_data_full, load_60m_data_adj, load_daily_data_single
 
 # 信号导出 (for Rust)
 from .signal_export import export_for_rust, validate_export
 
 __all__ = [
+    # duckdb utils
+    "get_adj_factor_frame",
+    "load_daily_data_full",
+    "load_60m_data_adj",
+    "load_daily_data_single",
     # 因子计算
     "calc_b1_factors_tg",
     "calc_b1_factors_base",

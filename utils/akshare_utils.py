@@ -57,12 +57,12 @@ def generate_sector_file():
     df_final = pd.DataFrame(all_data)
     
     # 4. 格式化代码 (适配你的 Rust/Polars 系统)
-    # 东方财富返回的是纯数字代码 (000001)，你的系统可能需要后缀 (000001_SZ)
+    # 东方财富返回的是纯数字代码 (000001)，你的系统可能需要后缀 (sh.000001)
     def format_code(c):
         c = str(c)
-        if c.startswith('6'): return f"{c}_SH"
-        if c.startswith('0') or c.startswith('3'): return f"{c}_SZ"
-        if c.startswith('8') or c.startswith('4'): return f"{c}_BJ" # 北交所
+        if c.startswith('6'): return f"sh.{c}"
+        if c.startswith('0') or c.startswith('3'): return f"sz.{c}"
+        if c.startswith('8') or c.startswith('4') or c.startswith('92'): return f"bj.{c}"        
         return c
 
     df_final['code'] = df_final['code'].apply(format_code)
