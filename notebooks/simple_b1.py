@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.18.4"
+__generated_with = "0.19.6"
 app = marimo.App(width="medium")
 
 
@@ -58,9 +58,9 @@ def _():
         analyze_yearly_intensity,
         calc_b1_factors_opt,
         config_opt,
-        export_for_rust,
         pl,
         q_full,
+        run_backtest,
     )
 
 
@@ -74,7 +74,7 @@ def _(calc_b1_factors_opt, config_opt, q_full):
 
 
 @app.cell
-def _(df_signals, export_for_rust):
+def _(df_signals, run_backtest):
     return_days = [5, 10, 15, 20, 25, 30]
 
     LOOSE_PERIODS = [
@@ -92,18 +92,18 @@ def _(df_signals, export_for_rust):
     ]
 
     # 导出信号供 Rust 使用
-    export_for_rust(
-        df_signals,
-        output_path="data/signals/market_data.parquet",
-        loose_periods=LOOSE_PERIODS,
-        start_date='2019-01-01',
-        # extra_sort_cols=['B1_Final_Score']
-    )
-    print(f"导出完成")
+    # export_for_rust(
+    #     df_signals,
+    #     output_path="data/signals/market_data.parquet",
+    #     loose_periods=LOOSE_PERIODS,
+    #     start_date='2019-01-01',
+    #     # extra_sort_cols=['B1_Final_Score']
+    # )
+    # print(f"导出完成")
 
-    # df_result_dynamic = run_backtest(df_signals, return_days, loose_periods=LOOSE_PERIODS, top_n=200, stop_loss_pct=0.03)
+    df_result_dynamic = run_backtest(df_signals, return_days, loose_periods=LOOSE_PERIODS, top_n=200, stop_loss_pct=0.03)
     # print_backtest_report(df_result_dynamic, return_days)
-    return
+    return (df_result_dynamic,)
 
 
 @app.cell
