@@ -1,8 +1,8 @@
 import os
-import math
 import datetime
 import pandas as pd
 import duckdb
+from tqdm import tqdm
 from xtquant import xtdata
 
 # ==================== 配置区域 ====================
@@ -146,15 +146,13 @@ def chunks(lst, n):
 # --- 模块1: 日线行情同步 ---
 def task_sync_daily(conn, stock_list, start_date: str):
     print(f"\n[1/4] 正在同步日线行情 ({start_date} ~ now)...")
-    # QMT 自身是增量下载，start_time 用 INIT_START_DATE 确保本地缓存完整
+    # QMT 自身是增量下载
     xtdata.download_history_data2(stock_list, period='1d', incrementally=True, callback=on_progress)
     
     fields = ['time', 'open', 'high', 'low', 'close', 'volume', 'amount']
-    total_batches = math.ceil(len(stock_list) / BATCH_SIZE)
+    batches = list(chunks(stock_list, BATCH_SIZE))
 
-    for i, batch_codes in enumerate(chunks(stock_list, BATCH_SIZE)):
-        print(f"\r🚀 日线批次 {i+1}/{total_batches} ...", end="")
-        
+    for batch_codes in tqdm(batches, desc="📈 日线入库", unit="batch"):
         data_raw = xtdata.get_market_data_ex(field_list=fields, stock_list=batch_codes, period='1d', start_time=start_date, dividend_type='none')
 
         df_list = []
@@ -176,21 +174,18 @@ def task_sync_daily(conn, stock_list, start_date: str):
                     open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
                     close = EXCLUDED.close, volume = EXCLUDED.volume, amount = EXCLUDED.amount
             """)
-    print("\n✅ 日线行情入库完毕")
 
 
 # --- 模块2: 60分钟行情同步 ---
 def task_sync_60m(conn, stock_list, start_date: str):
     print(f"\n[2/4] 正在同步60分钟行情 ({start_date} ~ now)...")
-    # QMT 自身是增量下载，start_time 用 INIT_START_DATE 确保本地缓存完整
-    xtdata.download_history_data2(stock_list, period='5m', incrementally=True, callback=on_progress)
+    # QMT 自身是增量下载
+    xtdata.download_history_data2(stock_list, period='1h', incrementally=True, callback=on_progress)
     
     fields = ['time', 'open', 'high', 'low', 'close', 'volume', 'amount']
-    total_batches = math.ceil(len(stock_list) / BATCH_SIZE)
+    batches = list(chunks(stock_list, BATCH_SIZE))
 
-    for i, batch_codes in enumerate(chunks(stock_list, BATCH_SIZE)):
-        print(f"\r🚀 60分钟批次 {i+1}/{total_batches} ...", end="")
-        
+    for batch_codes in tqdm(batches, desc="📉 60m入库", unit="batch"):
         data_raw = xtdata.get_market_data_ex(field_list=fields, stock_list=batch_codes, period='1h', start_time=start_date, dividend_type='none')
 
         df_list = []
@@ -212,7 +207,6 @@ def task_sync_60m(conn, stock_list, start_date: str):
                     open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
                     close = EXCLUDED.close, volume = EXCLUDED.volume, amount = EXCLUDED.amount
             """)
-    print("\n✅ 60分钟行情入库完毕")
 
 # --- 辅助函数：落盘分红因子 ---
 def _flush_dividend(conn, df_list):
@@ -234,10 +228,7 @@ def task_sync_dividend(conn, stock_list, start_date: str = '1990-12-19'):
     print(f"\n[3/4] 正在同步分红因子({start_date} ~ now)...")
     df_list = []
     
-    for idx, code in enumerate(stock_list):
-        if idx % 100 == 0: 
-            print(f"\r💾 处理中: {idx}/{len(stock_list)}", end="")
-        
+    for code in tqdm(stock_list, desc="➗ 分红因子", unit="stock"):
         # 使用 start_time 参数进行增量获取
         df = xtdata.get_divid_factors(code, start_time=start_date)
         if df is not None and not df.empty:
@@ -257,7 +248,6 @@ def task_sync_dividend(conn, stock_list, start_date: str = '1990-12-19'):
             df_list = []
 
     _flush_dividend(conn, df_list)
-    print("\n✅ 分红数据同步完毕")
 
 # --- 模块4: 财务数据同步 ---
 def task_sync_finance(conn, stock_list):
@@ -270,10 +260,9 @@ def task_sync_finance(conn, stock_list):
     xtdata.download_financial_data2(stock_list, table_list=tables, callback=on_progress)
     
     # 2. 批量处理并入库
-    total_batches = math.ceil(len(stock_list) / BATCH_SIZE)
+    batches = list(chunks(stock_list, BATCH_SIZE))
     
-    for i, batch_codes in enumerate(chunks(stock_list, BATCH_SIZE)):
-        print(f"\r🚀 财务批次 {i+1}/{total_batches} ...", end="")
+    for batch_codes in tqdm(batches, desc="📊 财务入库", unit="batch"):
         
         # 批量获取数据
         data_batch = xtdata.get_financial_data(batch_codes, table_list=tables)
@@ -343,15 +332,15 @@ def main():
         print(f"📋 标的: {len(all_stocks)} 只")
         start_daily = get_start_date(conn, 'stock_daily') or INIT_START_DATE
         # start_60m = get_start_date(conn, 'stock_60m') or INIT_START_DATE
-        start_60m = '2025-01-01'
+        # start_60m = '2025-01-01'
 
         print(f"📌 日线起始:     {start_daily}")
-        print(f"📌 60分钟起始:   {start_60m}")
+        # print(f"📌 60分钟起始:   {start_60m}")
         print("📌 分红因子起始: 1990-12-19")
         
         # 执行同步任务
         task_sync_daily(conn, all_stocks, start_daily)
-        task_sync_60m(conn, all_stocks, start_60m)
+        # task_sync_60m(conn, all_stocks, start_60m)
         task_sync_dividend(conn, all_stocks)
         # 财务数据始终全量同步（数据量不大，且有 ON CONFLICT 保护）
         task_sync_finance(conn, all_stocks)
