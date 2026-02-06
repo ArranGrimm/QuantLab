@@ -62,38 +62,38 @@ def _():
         n = len(y_arr)
         if np.isnan(y_arr).any() or n < 2: 
             return np.nan
-    
+
         log_y = np.log(y_arr)
         x = np.arange(n)
-    
+
         # --- 开始修改：引入线性递增权重 ---
         weights = np.linspace(1.0, 2.0, n) # 权重从1线性增加到2
-    
+
         # 加权线性回归计算 (参考Numpy的polyfit对于加权w的实现思路，或直接实现加权最小二乘法)
         # Numba环境下直接用np.polyfit(x, y, 1, w=weights)可能不支持或效率不高
         # 我们需要手动实现加权最小二乘法的斜率和截距计算
-    
+
         w_sum = np.sum(weights)
         w_x_sum = np.sum(weights * x)
         w_y_sum = np.sum(weights * log_y)
         w_x2_sum = np.sum(weights * x**2)
         w_xy_sum = np.sum(weights * x * log_y)
-    
+
         denominator = w_sum * w_x2_sum - w_x_sum**2
         if denominator == 0: 
             return np.nan
-    
+
         slope = (w_sum * w_xy_sum - w_x_sum * w_y_sum) / denominator
         intercept = (w_y_sum - slope * w_x_sum) / w_sum # 也可以是 (w_x2_sum * w_y_sum - w_x_sum * w_xy_sum) / denominator
-    
+
         # 计算加权R²
         y_pred = slope * x + intercept
         weighted_residuals_sq = weights * (log_y - y_pred)**2
-    
+
         # 加权均值
         weighted_mean_y = np.sum(weights * log_y) / w_sum
         weighted_ss_tot = np.sum(weights * (log_y - weighted_mean_y)**2)
-    
+
         if weighted_ss_tot == 0: # 如果加权总平方和为0 (例如加权后的y值恒定)
             r_squared = 0.0 # 或1.0，取决于定义。如果预测完美，残差为0，R^2应为1。若y本身无波动，R^2通常无意义或为0。
                             # MarioC代码中是 np.sum(weights * (y - np.mean(y))**2)，这里用加权均值更一致。
@@ -110,14 +110,13 @@ def _():
             r_squared = max(0.0, r_squared) # 确保R²不为负
 
         # --- 修改结束 ---
-        
+
         daily_factor = np.exp(slope)
         annualized_returns = daily_factor**annual_days - 1.0
         score = annualized_returns * r_squared
-    
+
         if not np.isfinite(score): return np.nan
         return score
-
 
     return (
         ak,
@@ -182,7 +181,7 @@ def _(
             if etf_hist_df.empty:
                 logger.warning(f"akshare 未返回 {original_symbol} (代码: {ak_code}) 的数据。")
                 continue
-        
+
             # 重命名列
             etf_hist_df.rename(columns={
                 '日期': 'Date',
@@ -274,19 +273,19 @@ def _(
         # 对于不满足条件的，我们给一个非常低的值，确保它们不会被选中
         # 或者，可以直接将它们设为NaN，rank函数会处理NaN
         filtered_momentum_scores[~condition] = np.nan 
-    
+
         logger.info(f"应用安全区间 (0, 5] 过滤后的动量得分 (部分显示NaN为不合格):\n{filtered_momentum_scores.tail()}")
 
         # 3. 对过滤后的得分进行排名
         #   如果所有ETF都被过滤掉（即filtered_momentum_scores该行全是NaN），则ranks对应行也会是NaN
         ranks = filtered_momentum_scores.rank(axis=1, ascending=False, method='first')
-    
+
         # 4. 生成目标权重：选择排名第一的（如果存在）
         #   如果某行ranks全是NaN，那么np.where(ranks == 1,...) 的结果在该行仍将是False(0.0)
         target_weights = pd.DataFrame(np.where(ranks == 1, 1.0, 0.0),
                                       index=price_df.index, 
                                       columns=price_df.columns)
-    
+
         # 检查是否有任何一天选出了ETF (即是否有权重为1的情况)
         # 如果某天 target_weights.sum(axis=1) == 0，则表示当天无ETF可选，即空仓
         days_with_selection = target_weights.sum(axis=1) > 0
@@ -337,7 +336,6 @@ def _(
         logger.error(f"执行组合回测时出错: {e}")
         sys.exit(1)
     # 在 portfolio 回测完成之后，生成统计和绘图之前
-
     return (portfolio,)
 
 
@@ -359,27 +357,27 @@ def analyze_year_return(portfolio):
     # =========================
     # 深度分析：年度收益 & 关键时期分析
     # =========================
-    
+
     print("=" * 60)
     print("          ETF轮动策略深度分析报告")
     print("=" * 60)
-    
+
     # 1. 每年年底的真实收益率分析
     print("\n📊 1. 年度收益率分析 (每年12月31日)")
     print("-" * 50)
-    
+
     # 获取组合价值时间序列
     portfolio_value = portfolio.value()
     yearly_returns = {}
-    
+
     # 定义年份和对应的年底日期
     years = [2020, 2021, 2022, 2023, 2024, 2025, 2026]
     year_end_dates = ['2020-12-31', '2021-12-31', '2022-12-30', '2023-12-29', '2024-12-31', '2025-12-31', '2026-01-28']  # 最后一个是当前
-    
+
     start_value = portfolio_value.iloc[0]
     print(f"初始投资金额: ${start_value:,.2f}")
     print()
-    
+
     for i, year in enumerate(years):
         try:
             if i == 0:  # 2020年
@@ -390,7 +388,7 @@ def analyze_year_return(portfolio):
                 year_end_date = year_end_dates[i]
                 # 获取年初价值
                 year_start_value = portfolio_value.loc[portfolio_value.index <= year_start_date].iloc[-1]
-            
+
             # 获取年末价值
             if year == 2025:
                 year_end_value = portfolio_value.iloc[-1]  # 当前最新值
@@ -398,46 +396,46 @@ def analyze_year_return(portfolio):
             else:
                 year_end_value = portfolio_value.loc[portfolio_value.index <= year_end_date].iloc[-1]
                 print(f"{year}年:")
-            
+
             annual_return = (year_end_value / year_start_value - 1) * 100
             yearly_returns[year] = annual_return
-            
+
             print(f"  起始价值: ${year_start_value:,.2f}")
             print(f"  结束价值: ${year_end_value:,.2f}")
             print(f"  年度收益率: {annual_return:+.2f}%")
             print()
-            
+
         except Exception as e:
             print(f"{year}年数据获取失败: {e}")
-    
+
     # 2. 2024年9-10月暴涨分析
     print("\n🚀 2. 2024年9-10月暴涨期分析")
     print("-" * 50)
-    
+
     # 分析2024年9月到10月的情况
     sept_oct_start = '2024-09-01'
     sept_oct_end = '2024-11-30'
-    
+
     # 获取这个时期的组合价值
     sept_oct_value = portfolio_value.loc[sept_oct_start:sept_oct_end]
     if len(sept_oct_value) > 0:
         period_start_value = sept_oct_value.iloc[0]
         period_end_value = sept_oct_value.iloc[-1]
         period_return = (period_end_value / period_start_value - 1) * 100
-        
+
         print(f"时期: {sept_oct_start} 到 {sept_oct_end}")
         print(f"期初价值: ${period_start_value:,.2f}")
         print(f"期末价值: ${period_end_value:,.2f}")
         print(f"期间收益率: {period_return:+.2f}%")
         print()
-    
+
     # 获取这个时期的交易记录
     orders_records = portfolio.orders.records_readable
     sept_oct_trades = orders_records[
         (orders_records['Timestamp'] >= sept_oct_start) & 
         (orders_records['Timestamp'] <= sept_oct_end)
     ]
-    
+
     print("📈 期间交易记录:")
     if len(sept_oct_trades) > 0:
         for _, trade in sept_oct_trades.iterrows():
@@ -445,7 +443,7 @@ def analyze_year_return(portfolio):
                   f"价格: ¥{trade['Price']:.2f}, 数量: {trade['Size']:.0f}")
     else:
         print("  无交易记录")
-    
+
     # 获取持仓信息
     print(f"\n📊 期间持仓分析:")
     try:
@@ -456,33 +454,33 @@ def analyze_year_return(portfolio):
                 etf_trades = sept_oct_trades[sept_oct_trades['Column'] == etf]
                 buy_trades = etf_trades[etf_trades['Side'] == 'Buy']
                 sell_trades = etf_trades[etf_trades['Side'] == 'Sell']
-                
+
                 etf_name = {
                     '518880.SH': '黄金ETF',
                     '513100.SH': '纳指ETF', 
                     '513130.SH': '恒生科技ETF',
                     '159915.SZ': '创业板ETF'
                 }.get(etf, etf)
-                
+
                 net_shares = buy_trades['Size'].sum() - sell_trades['Size'].sum()
                 total_value = (buy_trades['Size'] * buy_trades['Price']).sum()
-                
+
                 print(f"  {etf_name}: 净持仓变化 {net_shares:.0f}股, 交易金额 ¥{total_value:,.0f}")
         else:
             print("期间无交易，持仓无变化")
-            
+
         # 尝试获取期间的组合权重
         try:
             asset_value = portfolio.asset_value()
             total_value_series = portfolio.value()
-            
+
             period_asset_value = asset_value.loc[sept_oct_start:sept_oct_end]
             period_total_value = total_value_series.loc[sept_oct_start:sept_oct_end]
-            
+
             if len(period_asset_value) > 0 and len(period_total_value) > 0:
                 # 计算权重
                 period_weights = period_asset_value.div(period_total_value, axis=0)
-                
+
                 print(f"\n期间平均持仓权重:")
                 for col in period_weights.columns:
                     col_weights = period_weights[col]
@@ -498,18 +496,18 @@ def analyze_year_return(portfolio):
                         print(f"  {etf_name}: {avg_weight:.1%}")
         except Exception as weight_e:
             print(f"权重计算失败: {weight_e}")
-            
+
     except Exception as e:
         print(f"持仓分析出错: {e}")
-    
+
     # 3. 2025年持仓分析 - 黄金和纳指的占比
     print("\n🥇 3. 2025年持仓分析 (黄金 vs 纳指)")
     print("-" * 50)
-    
+
     # 分析2025年的持仓情况
     year_2025_start = '2025-01-01'
     year_2025_trades = orders_records[orders_records['Timestamp'] >= year_2025_start]
-    
+
     print("🔄 2025年交易记录:")
     if len(year_2025_trades) > 0:
         # 按ETF分类统计
@@ -517,7 +515,7 @@ def analyze_year_return(portfolio):
         etf_trade_value = year_2025_trades.groupby('Column').apply(
             lambda x: (x['Size'] * x['Price']).sum()
         )
-        
+
         print("各ETF交易次数和金额:")
         for etf in etf_trades_count.index:
             trade_count = etf_trades_count[etf]
@@ -529,7 +527,7 @@ def analyze_year_return(portfolio):
                 '159915.SZ': '创业板ETF'
             }.get(etf, etf)
             print(f"  {etf_name} ({etf}): {trade_count}次交易, 总金额: ¥{trade_value:,.0f}")
-        
+
         print(f"\n📅 2025年详细交易时间线:")
         for _, trade in year_2025_trades.iterrows():
             etf_name = {
@@ -542,7 +540,7 @@ def analyze_year_return(portfolio):
                   f"价格: ¥{trade['Price']:.2f}")
     else:
         print("  2025年无交易记录")
-    
+
     # 分析当前持仓
     print(f"\n💼 当前持仓状况 (截至 {portfolio_value.index[-1].strftime('%Y-%m-%d')}):")
     try:
@@ -565,7 +563,7 @@ def analyze_year_return(portfolio):
             print("  无持仓记录")
     except Exception as e:
         print(f"当前持仓分析出错: {e}")
-    
+
     # 总结分析
     print(f"\n📋 4. 关键发现总结")
     print("-" * 50)
@@ -574,13 +572,18 @@ def analyze_year_return(portfolio):
         print("• 2024年确实是表现突出的一年，收益率超过50%")
     print("• 从交易记录可以看出策略的轮动特征")
     print("• 2025年的交易主要集中在哪些ETF上")
-    
+
     print("\n" + "=" * 60)
 
 
 @app.cell
 def _(portfolio):
     analyze_year_return(portfolio)
+    return
+
+
+@app.cell
+def _():
     return
 
 
