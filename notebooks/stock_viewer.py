@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.18.4"
+__generated_with = "0.19.6"
 app = marimo.App(width="medium")
 
 
@@ -324,6 +324,11 @@ def _(df, file_path, input_code, mo, os, pl, ui_buy_date, ui_sell_date):
 def _():
     import datetime
     datetime.datetime.now().weekday()
+    return
+
+
+@app.cell
+def _():
     return
 
 
