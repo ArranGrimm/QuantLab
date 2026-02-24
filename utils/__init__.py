@@ -1,6 +1,6 @@
 # B1 选股因子模块
 from .b1_factors import calc_b1_factors_tg
-from .b1_factors_opt import calc_b1_factors_base, calc_b1_factors_opt, DEFAULT_CONFIG
+from .b1_factors_opt import calc_b1_factors_base, calc_b1_factors_opt, calc_b1_factors_dynamic_j, calc_b1_factors_wmacd, DEFAULT_CONFIG
 
 # 回测引擎模块
 from .backtest import (
@@ -27,6 +27,8 @@ __all__ = [
     "calc_b1_factors_tg",
     "calc_b1_factors_base",
     "calc_b1_factors_opt",
+    "calc_b1_factors_dynamic_j",
+    "calc_b1_factors_wmacd",
     "DEFAULT_CONFIG",
     # 回测 (简单版)
     "run_backtest",

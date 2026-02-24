@@ -1,15 +1,18 @@
 import marimo
 
-__generated_with = "0.18.4"
+__generated_with = "0.20.2"
 app = marimo.App(width="medium")
 
 
 @app.cell
 def _():
+    import marimo as mo
+    import duckdb
     import polars as pl
     import os
     from datetime import datetime
-    from utils import calc_b1_factors_opt, calc_b1_factors_base, calc_b1_factors_tg
+    from utils import load_daily_data_full
+    from utils import calc_b1_factors_wmacd
     from utils import run_backtest, print_backtest_report, analyze_yearly_intensity
     from utils import get_st_blacklist_pl
     from utils import export_for_rust
@@ -17,7 +20,8 @@ def _():
     # ==============================================================================
     # 1. 配置与数据加载 (Clean Version)
     # ==============================================================================
-    DATA_ROOT = r"../QuantData/Ashare"
+    DB_PATH = r"../QuantData/Ashare/qmt_data.duckdb"
+    conn = duckdb.connect(DB_PATH)
 
     # ==============================================================================
     # Ztalk 体系核心：只在“活跃市值”强势期开仓
@@ -35,62 +39,13 @@ def _():
         ("2026-01-05", "2026-03-31"),  # 2025年慢牛行情延续
     ]
 
-
     print("🚀 [Step 1] 加载原始行情数据...")
-
-    # (A) 加载复前权行情
-    q_adj = (
-        pl.scan_parquet(
-            os.path.join(DATA_ROOT, "stock_day_adj", "*.parquet"),
-            include_file_paths="file_path"
-        )
-        .with_columns([
-            pl.col("file_path").str.extract(r"(\d{6}_[A-Z]{2})", 1).alias("code"),
-            pl.from_epoch("time", time_unit="ms").dt.replace_time_zone("UTC").dt.convert_time_zone("Asia/Shanghai").dt.date().alias("date")
-        ])
-        .select(["code", "date", "open", "high", "low", "close", "volume", "amount"])
-        .rename({"close": "close_adj", "high": "high_adj", "low": "low_adj", "open": "open_adj"})
-        .filter(pl.col("volume") > 0)
-    )
-
-    # (B) 加载 Raw (不复权) 和 Capital (股本)
-    q_raw = (
-        pl.scan_parquet(os.path.join(DATA_ROOT, "stock_day_raw", "*.parquet"), include_file_paths="file_path")
-        .with_columns([
-            pl.col("file_path").str.extract(r"(\d{6}_[A-Z]{2})", 1).alias("code"),
-            pl.from_epoch("time", time_unit="ms").dt.replace_time_zone("UTC").dt.convert_time_zone("Asia/Shanghai").dt.date().alias("date")
-        ])
-        .select(["code", "date", "close"]).rename({"close": "close_raw"})
-    )
-
-    q_cap = (
-        pl.scan_parquet(os.path.join(DATA_ROOT, "finance_capital", "*.parquet"), include_file_paths="file_path")
-        .with_columns([
-            pl.col("file_path").str.extract(r"(\d{6}_[A-Z]{2})", 1).alias("code"),
-            pl.col("m_anntime").str.strptime(pl.Date, "%Y%m%d").alias("date"),
-            pl.col("circulating_capital").cast(pl.Float64)
-        ])
-        .select(["code", "date", "circulating_capital"]).sort(["code", "date"])
-    )
-
-
-    st_blacklist = get_st_blacklist_pl('2025-01-16') # 获取ST列表
-    df_sector = pl.scan_csv("data/sector_map_em.csv").select(["code", "industry"]).with_columns([
-        pl.col("industry").cast(pl.Categorical) 
-    ])
-    # (C) 合并数据 (移除了所有市场指数相关代码)
+    st_blacklist = get_st_blacklist_pl('2026-01-27') # 获取ST列表
     print("🔗 [Step 2] 合并基础数据...")
     q_full = (
-        q_adj
-        .join(q_raw, on=["code", "date"])
-        .sort(["code", "date"])
-        .join_asof(q_cap, on="date", by="code", strategy="backward")
-        .with_columns([
-            (pl.col("close_raw") * pl.col("circulating_capital") / 1e8).alias("market_cap_100m")
-        ]).filter(
+        load_daily_data_full(conn).filter(
             ~pl.col("code").is_in(st_blacklist)
         )
-        .join(df_sector, on="code", how="left")
     )
 
     # ==============================================================================
@@ -98,10 +53,10 @@ def _():
     # ==============================================================================
     # 如果想放宽条件增加信号数量
     config_base = {"J_THRESHOLD": 13, "YANGYIN_RATIO": 1.5, "MV_THRESHOLD": 50}
-    config_opt = {}
+    config_opt = {"MV_THRESHOLD": 25}
     return (
         analyze_yearly_intensity,
-        calc_b1_factors_opt,
+        calc_b1_factors_wmacd,
         config_opt,
         datetime,
         export_for_rust,
@@ -111,12 +66,10 @@ def _():
 
 
 @app.cell
-def _(calc_b1_factors_opt, config_opt, q_full):
+def _(calc_b1_factors_wmacd, config_opt, q_full):
     # 3. 执行计算
     print("⏳ 计算原始 B1 信号...")
-    # df_signals = calc_b1_factors_base(q_full, config)
-    df_signals = calc_b1_factors_opt(q_full, config_opt, sector_calc=False)
-    # df_signals = calc_b1_factors_tg(q_full)
+    df_signals = calc_b1_factors_wmacd(q_full, config_opt)
     return (df_signals,)
 
 
@@ -141,7 +94,7 @@ def _(df_signals, export_for_rust):
     # 导出信号供 Rust 使用
     export_for_rust(
         df_signals,
-        output_path="data/signals/market_data.parquet",
+        output_path="data/signals/market_data_wmacd.parquet",
         loose_periods=LOOSE_PERIODS,
         start_date='2019-01-01',
         # extra_sort_cols=['B1_Final_Score']
@@ -171,182 +124,6 @@ def _(datetime, df_result_dynamic, pl):
         (pl.col("date") == datetime(2026,1,8)) &
         (pl.col("b1_signal") == 1) 
     )
-    return
-
-
-@app.cell
-def _(datetime, df_signals, pl):
-    alk_df = df_signals.filter(
-        (pl.col("code") == "300377_SZ") &
-        (pl.col("date") >= datetime(2026,1, 5))
-    ).collect()
-
-    alk_df
-    return (alk_df,)
-
-
-@app.cell
-def _(alk_df):
-    alk_df.select(
-        ["date",
-        "TRIGGER",
-        "J_OK",
-        "LQ",
-        "MVOK",
-        "GOOD28", 
-        "MAX28_OK", 
-        "YANGYIN_OK",
-        "SHAPE_OK", 
-        "VOL_SHRINK_OK",
-        "ZTALK_GENE_OK",
-        ]
-    )
-    return
-
-
-@app.cell
-def _(df_signals, pl):
-    PERFECT_CASES_CONFIG = [
-        {"code": "688799_SH", "date": "2025-05-12", "name": "华纳药厂(标准)"},
-        {"code": "300689_SZ", "date": "2025-07-18", "name": "澄天伟业(极缩)"},
-        {"code": "600601_SH", "date": "2025-07-23", "name": "方正科技(蓄势)"},
-        {"code": "688321_SH", "date": "2025-06-20", "name": "微芯生物(双底)"},
-        {"code": "002940_SZ", "date": "2025-07-11", "name": "昂利康(压轴)"},
-        {"code": "301076_SZ", "date": "2025-08-01", "name": "新瀚新材(激进)"},
-        {"code": "600184_SH", "date": "2025-07-08", "name": "光电股份(回踩)"},
-        {"code": "002074_SZ", "date": "2025-08-01", "name": "国轩高科(趋势)"},
-        {"code": "605378_SH", "date": "2025-07-31", "name": "野马电池(突破)"},
-        {"code": "600366_SH", "date": "2025-08-06", "name": "宁波韵升(反包)"}
-    ]
-    def verify_perfect_cases(df_signals: pl.LazyFrame, cases_config: list):
-        print("🔍 [Audit] 启动十大完美案例专项验证...")
-
-        # 1. 构造案例查询表
-        # 注意：这里我们假设 df_signals 包含了全量计算数据
-        # 我们需要重新计算未来 30 天的数据，因为之前的 df_result 可能被 filter 掉了
-
-        # 构造 Polars DataFrame 用于 Join
-        target_df = pl.DataFrame(cases_config).with_columns(
-            pl.col("date").str.strptime(pl.Date, "%Y-%m-%d")
-        )
-
-        # 2. 扩展计算未来 30 天的收益数据
-        # 我们直接在 df_signals 上通过 code 和 date 关联，不需要全量重算
-        # 但为了获取未来数据，我们需要先在 df_signals 里 shift
-
-        print("⏳ 正在回溯历史行情 (T+1 -> T+30)...")
-
-        # 定义评估周期
-        horizons = [5, 10, 15, 20, 25, 30]
-
-        # 核心验证逻辑
-        audit_df = (
-            df_signals
-            .sort(["code", "date"])
-            .with_columns([
-                # 买入价：T+1 开盘价 (实战标准)
-                pl.col("open_adj").shift(-1).over("code").alias("audit_buy_price"),
-
-                # 择时状态 (复用之前的逻辑)
-                # 这里简单起见，我们直接检查 b1_signal 字段
-            ])
-        )
-
-        # 动态生成不同周期的收益列
-        exprs = []
-        for h in horizons:
-            # 持有涨幅: (Close_T+N - Buy) / Buy
-            exprs.append(
-                ((pl.col("close_adj").shift(-h).over("code") / pl.col("audit_buy_price")) - 1).alias(f"ret_{h}d")
-            )
-            # 最高涨幅: (Max_High_T+1_to_T+N - Buy) / Buy
-            # rolling_max(h) 往前看，shift(-h) 移到现在
-            exprs.append(
-                ((pl.col("high_adj").rolling_max(h).shift(-h).over("code") / pl.col("audit_buy_price")) - 1).alias(f"max_{h}d")
-            )
-
-        # 执行计算并关联目标
-        result = (
-            audit_df
-            .with_columns(exprs)
-            .join(target_df.lazy(), on=["code", "date"], how="inner") # 只保留这10个
-            .collect()
-        )
-
-        # 3. 输出报表
-        print("\n====== ✨ 十大完美案例验证报告 ✨ ======")
-        print(f"{'名称':<10} | {'日期':<9} | {'代码':<8} | {'信号?':<5} | {'买入价':<6} | {'5日最高':<8} | {'10日最高':<8} | {'20日最高':<8} | {'30日最高':<8} | {'30日持有':<8}")
-        print("-" * 120)
-
-        for row in result.iter_rows(named=True):
-            name = row['name']
-            code = row['code']
-            date_str = row['date']
-            is_signal = "✅" if row['b1_signal'] else "❌"
-            buy = row['audit_buy_price']
-
-            # 格式化涨幅
-            def fmt(val): return f"{val*100:>6.2f}%" if val is not None else "   N/A"
-
-            # 打印核心行
-            print(f"{name:<10} | {date_str}  | {code:<8} | {is_signal:<5} | {buy:<6.2f} | {fmt(row['max_5d']):<8} | {fmt(row['max_10d']):<8} | {fmt(row['max_20d']):<8} | {fmt(row['max_30d']):<8} | {fmt(row['ret_30d']):<8}")
-
-
-                # pl.col("TRIGGER") & 
-                # pl.col("J_OK") & 
-                # pl.col("LQ") & 
-                # pl.col("MVOK") & 
-                # pl.col("GOOD28") & 
-                # pl.col("MAX28_OK") & 
-                # pl.col("YANGYIN_OK") &
-                # pl.col("SHAPE_OK") & 
-                # pl.col("VOL_SHRINK_OK") &
-                # pl.col("ZTALK_GENE_OK")
-            # 如果没选出来，打印原因
-            if not row['b1_signal']:
-                # 简单诊断一下原因
-                reasons = []
-                if not row['MVOK']: reasons.append("流通市值不在")
-                if not row['J_OK']: reasons.append(f"J值({row['J']:.1f})>13")
-                if not row['MAX28_OK']: reasons.append("有天量阴")
-                if not row['GOOD28']: reasons.append("有坏K线")
-                if not row['YANGYIN_OK']: reasons.append(f"红绿比不足, p1: {row["vol_yang_p1"]/row["vol_yin_p1"]}, p2: {row["vol_yang_p2"]/row["vol_yin_p2"]}")
-                if not row['TRIGGER']: reasons.append("无关键K")
-                if not row['SHAPE_OK']: reasons.append("涨跌幅过大")
-                if not row['VOL_SHRINK_OK']: reasons.append("28天缩量不够")
-                if not row['ZTALK_GENE_OK']: reasons.append("不符合均线指纹")
-                print(f"   ⚠️ 落选原因: {', '.join(reasons)}")
-
-        print("-" * 120)
-
-
-    # ==============================================================================
-    # 执行验证
-    # ==============================================================================
-    # 假设 df_signals 依然在内存中 (即 run_strategy_b_with_manual_regime 的输入)
-    if 'df_signals' in locals():
-        verify_perfect_cases(df_signals, PERFECT_CASES_CONFIG)
-    else:
-        print("⚠️ df_signals 不在内存中，请先运行 Step 3 的 calc_b1_factors")
-    return
-
-
-@app.cell
-def _(datetime, df_result_dynamic, pl):
-    hn_df = df_result_dynamic.filter(
-        (pl.col("code") == "002940_SZ") &
-        (pl.col("date") >= datetime(2025, 1, 1))
-    )
-
-    hn_df.select([
-        'date',
-        'ret_5d_raw',
-        'ret_10d_raw',
-        'ret_15d_raw',
-        'ret_20d_raw',
-        'ret_25d_raw',
-        'ret_30d_raw',
-    ])
     return
 
 
