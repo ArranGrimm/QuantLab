@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.20.2"
 app = marimo.App(width="medium")
 
 
@@ -53,7 +53,7 @@ def _():
     # ==============================================================================
     # 如果想放宽条件增加信号数量
     config_base = {"J_THRESHOLD": 13, "YANGYIN_RATIO": 1.5, "MV_THRESHOLD": 50}
-    config_opt = {}
+    config_opt = {"MV_THRESHOLD": 40}
     return (
         analyze_yearly_intensity,
         calc_b1_factors_opt,
