@@ -394,33 +394,27 @@ def calc_b1_factors_wmacd(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame
     cfg = {**DEFAULT_CONFIG, **(config or {})}
     print("🛠️ [Strategy] 启动 B1 V3.0 + 周线MACD...")
 
-    # ===== Phase 1: Running Weekly MACD =====
+# ===== Phase 1: 准备周线和月线级别的上一周期截面 =====
     df_sorted = df.lazy().sort(["code", "date"])
 
-    df_with_week = df_sorted.with_columns(
-        pl.col("date").dt.truncate("1w").alias("week_start")
-    )
+    # 同时打上周和月的标签
+    df_with_time = df_sorted.with_columns([
+        pl.col("date").dt.truncate("1w").alias("week_start"),
+        pl.col("date").dt.truncate("1mo").alias("month_start")
+    ])
 
+    # --- 周线级别预计算 ---
     df_weekly = (
-        df_with_week
-        .sort(["code", "date"])
+        df_with_time.sort(["code", "date"])
         .group_by(["code", "week_start"])
         .agg(pl.col("close_adj").last().alias("weekly_close"))
         .sort(["code", "week_start"])
-    )
-
-    df_weekly = (
-        df_weekly
         .with_columns([
             pl.col("weekly_close").ewm_mean(span=12, adjust=False).over("code").alias("w_ema12"),
             pl.col("weekly_close").ewm_mean(span=26, adjust=False).over("code").alias("w_ema26"),
         ])
-        .with_columns(
-            (pl.col("w_ema12") - pl.col("w_ema26")).alias("w_dif")
-        )
-        .with_columns(
-            pl.col("w_dif").ewm_mean(span=9, adjust=False).over("code").alias("w_dea")
-        )
+        .with_columns((pl.col("w_ema12") - pl.col("w_ema26")).alias("w_dif"))
+        .with_columns(pl.col("w_dif").ewm_mean(span=9, adjust=False).over("code").alias("w_dea"))
     )
 
     df_weekly_prev = df_weekly.select([
@@ -428,29 +422,70 @@ def calc_b1_factors_wmacd(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame
         pl.col("w_ema12").shift(1).over("code").alias("prev_w_ema12"),
         pl.col("w_ema26").shift(1).over("code").alias("prev_w_ema26"),
         pl.col("w_dea").shift(1).over("code").alias("prev_w_dea"),
+        # 新增：记录上周完整的红柱长度，用于过滤高位飘逸(动能衰退)
+        (2 * (pl.col("w_dif").shift(1).over("code") - pl.col("w_dea").shift(1).over("code"))).alias("prev_w_hist")
     ])
 
+    # --- 月线级别预计算 ---
+    df_monthly = (
+        df_with_time.sort(["code", "date"])
+        .group_by(["code", "month_start"])
+        .agg(pl.col("close_adj").last().alias("monthly_close"))
+        .sort(["code", "month_start"])
+        .with_columns([
+            pl.col("monthly_close").ewm_mean(span=12, adjust=False).over("code").alias("m_ema12"),
+            pl.col("monthly_close").ewm_mean(span=26, adjust=False).over("code").alias("m_ema26"),
+        ])
+        .with_columns((pl.col("m_ema12") - pl.col("m_ema26")).alias("m_dif"))
+        .with_columns(pl.col("m_dif").ewm_mean(span=9, adjust=False).over("code").alias("m_dea"))
+    )
+
+    df_monthly_prev = df_monthly.select([
+        "code", "month_start",
+        pl.col("m_ema12").shift(1).over("code").alias("prev_m_ema12"),
+        pl.col("m_ema26").shift(1).over("code").alias("prev_m_ema26"),
+        pl.col("m_dea").shift(1).over("code").alias("prev_m_dea"),
+    ])
+
+# ===== Phase 1.5: 在日线级别估算 Running MACD 并生成过滤因子 =====
     a12, a26, a9 = 2.0 / 13.0, 2.0 / 27.0, 2.0 / 10.0
 
     df_daily = (
-        df_with_week
+        df_with_time
         .join(df_weekly_prev, on=["code", "week_start"], how="left")
+        .join(df_monthly_prev, on=["code", "month_start"], how="left")
         .with_columns([
+            # 推算周线
             (a12 * pl.col("close_adj") + (1 - a12) * pl.col("prev_w_ema12")).alias("rw_ema12"),
             (a26 * pl.col("close_adj") + (1 - a26) * pl.col("prev_w_ema26")).alias("rw_ema26"),
+            # 推算月线
+            (a12 * pl.col("close_adj") + (1 - a12) * pl.col("prev_m_ema12")).alias("rm_ema12"),
+            (a26 * pl.col("close_adj") + (1 - a26) * pl.col("prev_m_ema26")).alias("rm_ema26"),
         ])
-        .with_columns(
-            (pl.col("rw_ema12") - pl.col("rw_ema26")).alias("rw_dif")
-        )
-        .with_columns(
-            (a9 * pl.col("rw_dif") + (1 - a9) * pl.col("prev_w_dea")).alias("rw_dea")
-        )
-        .with_columns(
-            (2 * (pl.col("rw_dif") - pl.col("rw_dea"))).alias("rw_hist")
-        )
-        .with_columns(
-            ((pl.col("rw_hist") > 0) & (pl.col("rw_dif") > 0)).alias("WEEKLY_MACD_OK")
-        )
+        .with_columns([
+            (pl.col("rw_ema12") - pl.col("rw_ema26")).alias("rw_dif"),
+            (pl.col("rm_ema12") - pl.col("rm_ema26")).alias("rm_dif"),
+        ])
+        .with_columns([
+            (a9 * pl.col("rw_dif") + (1 - a9) * pl.col("prev_w_dea")).alias("rw_dea"),
+            (a9 * pl.col("rm_dif") + (1 - a9) * pl.col("prev_m_dea")).alias("rm_dea"),
+        ])
+        .with_columns([
+            (2 * (pl.col("rw_dif") - pl.col("rw_dea"))).alias("rw_hist"),
+            # 月线通常看黄白线即可，不用严格看柱子
+            (2 * (pl.col("rm_dif") - pl.col("rm_dea"))).alias("rm_hist"),
+        ])
+        .with_columns([
+            # 月线水上：只要快线 DIF 在水上即可，代表长线资金在场。要求 DEA 也在水上太滞后。
+            (pl.col("rm_dif") > 0).alias("MONTHLY_MACD_OK"),
+            # 周线大红区间过滤（包含防高位飘逸逻辑）：
+            # 1. rw_hist > 0: 必须是金叉红柱状态
+            # 2. rw_dif > 0: 必须在水上
+            (
+                (pl.col("rw_hist") > 0) & 
+                (pl.col("rw_dif") > 0)
+            ).alias("WEEKLY_MACD_OK")
+        ])
     )
 
     # ===== Phase 2: B1 因子计算 (标准 V3.0 流程) =====
@@ -568,7 +603,8 @@ def calc_b1_factors_wmacd(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame
             pl.col("SHAPE_OK") & 
             pl.col("VOL_SHRINK_OK") &
             pl.col("ZTALK_GENE_OK") &
-            pl.col("WEEKLY_MACD_OK")
+            pl.col("WEEKLY_MACD_OK") &       # 周线大红防飘逸
+            pl.col("MONTHLY_MACD_OK")        # 月线水上保证大趋势
         ).alias("b1_signal")
     ])
 
