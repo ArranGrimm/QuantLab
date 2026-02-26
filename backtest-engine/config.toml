@@ -14,8 +14,8 @@ start_date = "2025-01-05"             # 开始日期, 格式: "2025-01-01"
 end_date = "2026-02-02"               # 结束日期, 格式: "2025-12-31"
 
 # 买入排序字段 (候选股票的优先级排序)
-sort_field = "vol_ratio"              # 排序字段名 (parquet 中的列名)
-sort_ascending = true                 # true=升序 (值小优先), false=降序 (值大优先)
+sort_field = "rw_dif_pct"              # 排序字段名 (parquet 中的列名)
+sort_ascending = false                 # true=升序 (值小优先), false=降序 (值大优先)
 
 # 最小仓位比例 (现金不足时，至少能买目标仓位的 X% 才执行买入)
 min_position_ratio = 0.5              # 50% = 至少能买目标仓位的一半
@@ -42,7 +42,7 @@ sell_on_break_yl = false    # 跌破 YL 清仓 (已禁用)
 # ----------------------------------------------------------------------------
 [weak_performance]
 enabled = true
-days = 3                   # N 天后检查
+days = 10                   # N 天后检查
 min_gain_pct = 0.05         # 最低涨幅要求 (5%)
 
 # ----------------------------------------------------------------------------

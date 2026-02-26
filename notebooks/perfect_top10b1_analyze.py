@@ -1,282 +1,321 @@
 import marimo
 
-__generated_with = "0.18.4"
+__generated_with = "0.20.2"
 app = marimo.App(width="medium")
 
 
 @app.cell
 def _():
+    import marimo as mo
     import polars as pl
-    import os
+    import duckdb
     import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
     from datetime import datetime
+    from utils import load_daily_data_full
 
-    # ==============================================================================
-    # 1. 配置
-    # ==============================================================================
-    DATA_ROOT = r"../QuantData/Ashare"
-    # 我们的 10 大通缉令
+    DB_PATH = r"../QuantData/Ashare/qmt_data.duckdb"
+    conn = duckdb.connect(DB_PATH, read_only=True)
+
     PERFECT_CASES_CONFIG = [
-        {"code": "688799_SH", "date": "2025-05-12", "name": "华纳药厂(标准)"},
-        {"code": "300689_SZ", "date": "2025-07-18", "name": "澄天伟业(极缩)"},
-        {"code": "600601_SH", "date": "2025-07-23", "name": "方正科技(蓄势)"},
-        {"code": "688321_SH", "date": "2025-06-20", "name": "微芯生物(双底)"},
-        {"code": "002940_SZ", "date": "2025-07-11", "name": "昂利康(压轴)"},
-        {"code": "301076_SZ", "date": "2025-08-01", "name": "新瀚新材(激进)"},
-        {"code": "600184_SH", "date": "2025-07-10", "name": "光电股份(回踩)"},
-        {"code": "002074_SZ", "date": "2025-08-01", "name": "国轩高科(趋势)"},
-        {"code": "605378_SH", "date": "2025-07-31", "name": "野马电池(突破)"},
-        {"code": "600366_SH", "date": "2025-08-06", "name": "宁波韵升(反包)"}
+        # 教科书案例, 10大完美案例
+        {"code": "sh.688799", "date": "2025-05-12", "name": "华纳药厂(标准)"},
+        {"code": "sz.300689", "date": "2025-07-18", "name": "澄天伟业(极缩)"},
+        {"code": "sh.600601", "date": "2025-07-23", "name": "方正科技(蓄势)"},
+        {"code": "sh.688321", "date": "2025-06-20", "name": "微芯生物(双底)"},
+        {"code": "sz.002940", "date": "2025-07-11", "name": "昂利康(压轴)"},
+        {"code": "sz.301076", "date": "2025-08-01", "name": "新瀚新材(激进)"},
+        {"code": "sh.600184", "date": "2025-07-10", "name": "光电股份(回踩)"},
+        {"code": "sz.002074", "date": "2025-08-01", "name": "国轩高科(趋势)"},
+        {"code": "sh.605378", "date": "2025-07-31", "name": "野马电池(突破)"},
+        {"code": "sh.600366", "date": "2025-08-06", "name": "宁波韵升(反包)"},
+        # 以下是自己发现的案例
+        {"code": "sz.000547", "date": "2025-11-13", "name": "航天发展(标准)"}
     ]
 
     print("🚀 [Step 1] 加载原始行情数据...")
+    perfect_case_list = [item.get("code") for item in PERFECT_CASES_CONFIG]
+    q_full = load_daily_data_full(conn, perfect_case_list)
+    print(f"✅ 加载完成, 共 {q_full.collect().height} 行")
+    return PERFECT_CASES_CONFIG, go, make_subplots, mo, pl, q_full
 
-    # (A) 加载复前权行情
-    files = [
-        os.path.join(DATA_ROOT, "stock_day_adj", f"{case.get("code")}.parquet") for case in PERFECT_CASES_CONFIG
-    ]
 
-    q_adj = (
-        pl.scan_parquet(
-            files,
-            include_file_paths="file_path"
-        )
+@app.cell
+def _(PERFECT_CASES_CONFIG, pl, q_full):
+    """Phase 1: 计算 Running Weekly & Monthly MACD"""
+
+    df_sorted = q_full.sort(["code", "date"])
+
+    df_with_time = df_sorted.with_columns([
+        pl.col("date").dt.truncate("1w").alias("week_start"),
+        pl.col("date").dt.truncate("1mo").alias("month_start"),
+    ])
+
+    # --- 周线 MACD ---
+    df_weekly = (
+        df_with_time.sort(["code", "date"])
+        .group_by(["code", "week_start"])
+        .agg(pl.col("close_adj").last().alias("weekly_close"))
+        .sort(["code", "week_start"])
         .with_columns([
-            pl.col("file_path").str.extract(r"(\d{6}_[A-Z]{2})", 1).alias("code"),
-            pl.from_epoch("time", time_unit="ms").dt.replace_time_zone("UTC").dt.convert_time_zone("Asia/Shanghai").dt.date().alias("date")
+            pl.col("weekly_close").ewm_mean(span=12, adjust=False).over("code").alias("w_ema12"),
+            pl.col("weekly_close").ewm_mean(span=26, adjust=False).over("code").alias("w_ema26"),
         ])
-        .select(["code", "date", "open", "high", "low", "close", "volume", "amount"])
-        .rename({"close": "close_adj", "high": "high_adj", "low": "low_adj", "open": "open_adj"})
-        .filter(pl.col("volume") > 0)
+        .with_columns((pl.col("w_ema12") - pl.col("w_ema26")).alias("w_dif"))
+        .with_columns(pl.col("w_dif").ewm_mean(span=9, adjust=False).over("code").alias("w_dea"))
     )
 
-    # (B) 加载 Raw (不复权) 和 Capital (股本)
-    q_raw = (
-        pl.scan_parquet(os.path.join(DATA_ROOT, "stock_day_raw", "*.parquet"), include_file_paths="file_path")
+    df_weekly_prev = df_weekly.select([
+        "code", "week_start",
+        pl.col("w_ema12").shift(1).over("code").alias("prev_w_ema12"),
+        pl.col("w_ema26").shift(1).over("code").alias("prev_w_ema26"),
+        pl.col("w_dea").shift(1).over("code").alias("prev_w_dea"),
+        (2 * (pl.col("w_dif").shift(1).over("code") - pl.col("w_dea").shift(1).over("code"))).alias("prev_w_hist"),
+    ])
+
+    # --- 月线 MACD ---
+    df_monthly = (
+        df_with_time.sort(["code", "date"])
+        .group_by(["code", "month_start"])
+        .agg(pl.col("close_adj").last().alias("monthly_close"))
+        .sort(["code", "month_start"])
         .with_columns([
-            pl.col("file_path").str.extract(r"(\d{6}_[A-Z]{2})", 1).alias("code"),
-            pl.from_epoch("time", time_unit="ms").dt.replace_time_zone("UTC").dt.convert_time_zone("Asia/Shanghai").dt.date().alias("date")
+            pl.col("monthly_close").ewm_mean(span=12, adjust=False).over("code").alias("m_ema12"),
+            pl.col("monthly_close").ewm_mean(span=26, adjust=False).over("code").alias("m_ema26"),
         ])
-        .select(["code", "date", "close"]).rename({"close": "close_raw"})
+        .with_columns((pl.col("m_ema12") - pl.col("m_ema26")).alias("m_dif"))
+        .with_columns(pl.col("m_dif").ewm_mean(span=9, adjust=False).over("code").alias("m_dea"))
     )
 
-    q_cap = (
-        pl.scan_parquet(os.path.join(DATA_ROOT, "finance_capital", "*.parquet"), include_file_paths="file_path")
+    df_monthly_prev = df_monthly.select([
+        "code", "month_start",
+        pl.col("m_ema12").shift(1).over("code").alias("prev_m_ema12"),
+        pl.col("m_ema26").shift(1).over("code").alias("prev_m_ema26"),
+        pl.col("m_dea").shift(1).over("code").alias("prev_m_dea"),
+    ])
+
+    # --- Running MACD ---
+    a12, a26, a9 = 2.0 / 13.0, 2.0 / 27.0, 2.0 / 10.0
+
+    df_daily = (
+        df_with_time
+        .join(df_weekly_prev, on=["code", "week_start"], how="left")
+        .join(df_monthly_prev, on=["code", "month_start"], how="left")
         .with_columns([
-            pl.col("file_path").str.extract(r"(\d{6}_[A-Z]{2})", 1).alias("code"),
-            pl.col("m_anntime").str.strptime(pl.Date, "%Y%m%d").alias("date"),
-            pl.col("circulating_capital").cast(pl.Float64)
+            (a12 * pl.col("close_adj") + (1 - a12) * pl.col("prev_w_ema12")).alias("rw_ema12"),
+            (a26 * pl.col("close_adj") + (1 - a26) * pl.col("prev_w_ema26")).alias("rw_ema26"),
+            (a12 * pl.col("close_adj") + (1 - a12) * pl.col("prev_m_ema12")).alias("rm_ema12"),
+            (a26 * pl.col("close_adj") + (1 - a26) * pl.col("prev_m_ema26")).alias("rm_ema26"),
         ])
-        .select(["code", "date", "circulating_capital"]).sort(["code", "date"])
-    )
-
-    # (C) 合并数据 (移除了所有市场指数相关代码)
-    print("🔗 [Step 2] 合并基础数据...")
-    q_full = (
-        q_adj
-        .join(q_raw, on=["code", "date"])
-        .sort(["code", "date"])
-        .join_asof(q_cap, on="date", by="code", strategy="backward")
         .with_columns([
-            (pl.col("close_raw") * pl.col("circulating_capital") / 1e8).alias("market_cap_100m")
+            (pl.col("rw_ema12") - pl.col("rw_ema26")).alias("rw_dif"),
+            (pl.col("rm_ema12") - pl.col("rm_ema26")).alias("rm_dif"),
         ])
-    )
-
-    # ==============================================================================
-    # 2. 数据探查
-    # ==============================================================================
-    # ==============================================================================
-    # 1. 核心指标计算引擎 V2.0 (纯 Polars 实现)
-    #    包含：Ztalk 双均线 (WL/YL) + 深度形态探查
-    # ==============================================================================
-    def calc_gene_vectors(df: pl.LazyFrame) -> pl.LazyFrame:
-        return df.with_columns([
-            # --- A. 基础辅助 ---
-            pl.col("close_adj").shift(1).over("code").alias("prev_close"),
-            pl.col("open_adj").shift(1).over("code").alias("prev_open"),
-            pl.col("volume").shift(1).over("code").alias("prev_vol"),
-
-            # --- B. Ztalk 独家双均线系统 (WL & YL) ---
-            # WL (白线): 双重 EMA10
-            pl.col("close_adj").ewm_mean(span=10, adjust=False).over("code")
-              .ewm_mean(span=10, adjust=False).over("code").alias("WL"),
-
-            # YL (黄线): 四均线加权 (14, 28, 57, 114)
-            ((pl.col("close_adj").rolling_mean(14).over("code") + 
-              pl.col("close_adj").rolling_mean(28).over("code") + 
-              pl.col("close_adj").rolling_mean(57).over("code") + 
-              pl.col("close_adj").rolling_mean(114).over("code")) / 4).alias("YL"),
-
-            # --- C. KDJ (N=9, M1=3, M2=3) ---
-            (pl.col("high_adj").rolling_max(9).over("code") - pl.col("low_adj").rolling_min(9).over("code")).alias("kdj_den"),
-            (pl.col("close_adj") - pl.col("low_adj").rolling_min(9).over("code")).alias("kdj_num"),
-
-        ]).with_columns([
-            # RSV 计算
-            pl.when(pl.col("kdj_den") == 0).then(50.0)
-              .otherwise(pl.col("kdj_num") / pl.col("kdj_den") * 100).alias("rsv"),
-
-            # --- D. 均线关系量化 (The Relationship) ---
-
-            # 1. 股价 vs 白线 (%) -> "贴线程度" (太乖离是卖点，贴着是买点)
-            ((pl.col("close_adj") - pl.col("WL")) / pl.col("WL") * 100).alias("Bias_C_WL"),
-
-            # 2. 股价 vs 黄线 (%) -> "回踩深度" (回踩确认支撑的关键)
-            ((pl.col("close_adj") - pl.col("YL")) / pl.col("YL") * 100).alias("Bias_C_YL"),
-
-            # 3. 白线 vs 黄线 (%) -> "趋势强度" (开口大小)
-            ((pl.col("WL") - pl.col("YL")) / pl.col("YL") * 100).alias("Bias_WL_YL"),
-
-        ]).with_columns([
-            # K, D 计算
-            pl.col("rsv").ewm_mean(com=2, adjust=False).over("code").alias("K"),
-            # 阳线判断 (用于计算缩量)
-            ((pl.col("close_adj") > pl.col("open_adj"))).alias("is_yang"),
-
-        ]).with_columns([
-            pl.col("K").ewm_mean(com=2, adjust=False).over("code").alias("D"),
-
-            # Max Yang Vol (28天最大阳量)
-            pl.when(pl.col("is_yang")).then(pl.col("volume")).otherwise(0)
-              .rolling_max(28).over("code").alias("max_yang_vol_28"),
-
-            # MA40 Vol (用于对比均量)
-            pl.col("volume").rolling_mean(40).over("code").alias("vol_ma40"),
-
-        ]).with_columns([
-            (3 * pl.col("K") - 2 * pl.col("D")).alias("J"),
-
-            # --- E. 最终特征向量 (Feature Vectors) ---
-
-            # 1. 缩量极致度 (Current / MaxYang)
-            (pl.col("volume") / pl.col("max_yang_vol_28")).alias("Vol_Shrink_Ratio"),
-
-            # 2. 实体大小 (Abs(C-O)/O)
-            ( (pl.col("close_adj") - pl.col("open_adj")).abs() / pl.col("open_adj") * 100 ).alias("Body_Pct"),
-
-            # 3. 基础市值
-            (pl.col("market_cap_100m")).alias("MV"),
-
-            # 4. Ztalk 趋势确认 (白>黄?)
-            (pl.col("WL") > pl.col("YL")).alias("is_Bull_Trend")
+        .with_columns([
+            (a9 * pl.col("rw_dif") + (1 - a9) * pl.col("prev_w_dea")).alias("rw_dea"),
+            (a9 * pl.col("rm_dif") + (1 - a9) * pl.col("prev_m_dea")).alias("rm_dea"),
         ])
-
-    print("🧪 [Step 3] 计算全量指标 (基因测序)...")
-    # 假设 q_full 是之前加载好的 LazyFrame
-    df_indicators = calc_gene_vectors(q_full)
-
-    # ==============================================================================
-    # 2. 提取 10 大案例的"起爆前夜"指纹
-    # ==============================================================================
-    print("🔬 [Step 4] 提取完美案例指纹...")
-
-    # 转换配置为 Polars DataFrame
-    targets_df = pl.DataFrame(PERFECT_CASES_CONFIG).with_columns(
-        pl.col("date").str.strptime(pl.Date, "%Y-%m-%d")
-    )
-
-    # 提取时空切片
-    golden_samples = (
-        df_indicators
-        .join(targets_df.lazy(), on=["code", "date"], how="inner")
+        .with_columns([
+            (2 * (pl.col("rw_dif") - pl.col("rw_dea"))).alias("rw_hist"),
+            (2 * (pl.col("rm_dif") - pl.col("rm_dea"))).alias("rm_hist"),
+        ])
+        .with_columns([
+            # 红柱变化率: 当前周 running hist vs 上一完整周 hist
+            pl.when(pl.col("prev_w_hist").abs() > 0.001)
+              .then((pl.col("rw_hist") - pl.col("prev_w_hist")) / pl.col("prev_w_hist").abs())
+              .otherwise(None)
+              .alias("w_hist_chg_pct"),
+        ])
         .collect()
     )
 
-    # ==============================================================================
-    # 3. 纯 Polars 炫酷打印 (No Pandas Required)
-    # ==============================================================================
+    # --- 提取完美案例触发日的特征 ---
+    cases_df = pl.DataFrame(PERFECT_CASES_CONFIG).with_columns(
+        pl.col("date").str.to_date().alias("date")
+    )
 
-    # 配置需要展示的列 (加入双均线探查)
-    cols_to_show = [
-        "name", "code", "date", 
-        "J", "Vol_Shrink_Ratio", 
-        "Bias_C_WL", "Bias_C_YL", "Bias_WL_YL", 
-        "is_Bull_Trend"
-    ]
-
-    print("\n====== 🏆 10大完美案例·Ztalk均线基因图谱 (Pure Polars) ======")
-
-    # 使用 pl.Config 上下文管理器来控制打印样式
-    # tbl_cols=-1: 显示所有列
-    # tbl_width_chars=200: 增加宽度防止换行
-    # float_precision=2: 浮点数保留2位小数，看起来更清爽
-    with pl.Config(tbl_cols=-1, tbl_width_chars=200, float_precision=2):
-        print(golden_samples.select(cols_to_show))
-
-
-    print("\n====== 📏 硬核包络线标准 (边界提取) ======")
-
-    # 计算边界统计值
-    stats_df = golden_samples.select([
-        pl.col("J").min().alias("J_Min"),
-        pl.col("J").max().alias("J_Max"),
-
-        pl.col("Vol_Shrink_Ratio").max().alias("Shrink_Max (缩量上限)"),
-
-        pl.col("Bias_C_WL").min().alias("Bias_C_WL_Min (贴线底限)"),
-        pl.col("Bias_C_WL").max().alias("Bias_C_WL_Max (防追高)"),
-
-        pl.col("Bias_C_YL").min().alias("Bias_C_YL_Min (回踩底限)"),
-        pl.col("Bias_C_YL").max().alias("Bias_C_YL_Max (回踩上限)"),
-
-        pl.col("Bias_WL_YL").min().alias("Bias_WL_YL_Min (粘合下限)"),
-        pl.col("Bias_WL_YL").max().alias("Bias_WL_YL_Max (发散上限)"),
-
-        pl.col("MV").min().alias("MV_Min (市值下限)"),
+    features = df_daily.join(cases_df, on=["code", "date"], how="inner").select([
+        "name", "code", "date",
+        "rw_dif", "rw_dea", "rw_hist",
+        "prev_w_hist", "w_hist_chg_pct",
+        "rm_dif", "rm_dea", "rm_hist",
     ])
 
-    # 技巧：使用 unpivot (原 melt) 替代转置 (.T)
-    # 这样会生成一个 "指标 - 数值" 的纵向列表，比 Pandas 的转置更符合配置文件的格式
-    stats_vertical = stats_df.unpivot(variable_name="Param (参数)", value_name="Value (边界值)")
+    print(f"✅ 成功匹配 {features.height}/{cases_df.height} 个完美案例")
+    return df_daily, features
 
-    with pl.Config(tbl_rows=-1, float_precision=3):
-        print(stats_vertical)
 
-    # ==============================================================================
-    # 4. 自动生成代码片段 (基于纯 Polars 提取的值)
-    # ==============================================================================
-    # 提取标量值 (Scalars) 用于 f-string
-    row = stats_df.row(0)
-    # 通过列名映射获取值 (更安全)
-    cols = stats_df.columns
-    vals = dict(zip(cols, row))
-
-    print(f"\n====== 🚀 自动生成的 Ztalk 严选参数 ======")
-    print(f"# 1. 均线位置")
-    print(f"BIAS_WL_RANGE = ({vals['Bias_C_WL_Min (贴线底限)']:.2f}, {vals['Bias_C_WL_Max (防追高)']:.2f})")
-    print(f"BIAS_YL_RANGE = ({vals['Bias_C_YL_Min (回踩底限)']:.2f}, {vals['Bias_C_YL_Max (回踩上限)']:.2f})")
-    print(f"\n# 2. 趋势强度")
-    print(f"TREND_GAP_RANGE = ({vals['Bias_WL_YL_Min (粘合下限)']:.2f}, {vals['Bias_WL_YL_Max (发散上限)']:.2f})")
-    print(f"\n# 3. 情绪与量能")
-    print(f"J_RANGE = ({vals['J_Min']:.2f}, {vals['J_Max']:.2f})")
-    print(f"SHRINK_MAX = {vals['Shrink_Max (缩量上限)']:.2f}")
+@app.cell
+def _(mo):
+    """Phase 2: 完美案例 B1 触发日的周线/月线 MACD 特征总览"""
+    mo.md("## 📊 完美案例 B1 触发日 — 周线/月线 MACD 特征")
     return
 
 
 @app.cell
-def _():
+def _(features, mo, pl):
+    display_df = features.select([
+        "name",
+        pl.col("rw_dif").round(4).alias("周DIF"),
+        pl.col("rw_dea").round(4).alias("周DEA"),
+        pl.col("rw_hist").round(4).alias("周HIST(红柱)"),
+        pl.col("prev_w_hist").round(4).alias("上周HIST"),
+        pl.col("w_hist_chg_pct").round(2).alias("HIST变化%"),
+        pl.col("rm_dif").round(4).alias("月DIF"),
+        pl.col("rm_hist").round(4).alias("月HIST"),
+        # 标记
+        (pl.col("rw_hist") > 0).alias("周红柱?"),
+        (pl.col("rw_dif") > 0).alias("周水上?"),
+        (pl.col("rm_dif") > 0).alias("月水上?"),
+    ])
+    mo.ui.table(display_df.to_pandas())
     return
 
 
 @app.cell
-def _(get_source_data):
-    # 假设你的prodt_cd列表有好多个: ['123', '456', '789']
-    # 或者能从哪里复制进来，300多个产品代码问题不大
-    # 变成这样也可以: "123,456,789"
-    # 那调用的时候这样写就行
+def _(features, mo, pl):
+    """Phase 3: 统计摘要 — 找阈值"""
+    stats = features.select([
+        pl.col("rw_dif").alias("周DIF"),
+        pl.col("rw_hist").alias("周HIST"),
+        pl.col("prev_w_hist").alias("上周HIST"),
+        pl.col("w_hist_chg_pct").alias("HIST变化%"),
+        pl.col("rm_dif").alias("月DIF"),
+        pl.col("rm_hist").alias("月HIST"),
+    ]).describe()
 
-    prodt_cd = "123,456,789"
-    input_params = {
-        "prodt_cd": prodt_cd
-    }
-    df_data = get_source_data(input_params)
+    all_weekly_red = (features["rw_hist"] > 0).all()
+    all_weekly_above = (features["rw_dif"] > 0).all()
+    all_monthly_above = (features["rm_dif"] > 0).all()
 
+    summary = f"""
+    ## 📈 统计摘要
 
+    | 检查项 | 结果 |
+    |--------|------|
+    | 全部周线红柱 (rw_hist > 0) | {'✅ 是' if all_weekly_red else '❌ 否'} |
+    | 全部周线水上 (rw_dif > 0) | {'✅ 是' if all_weekly_above else '❌ 否'} |
+    | 全部月线水上 (rm_dif > 0) | {'✅ 是' if all_monthly_above else '❌ 否'} |
+
+    ### 关键指标分布
+
+    | 指标 | 最小值 | 中位数 | 最大值 |
+    |------|--------|--------|--------|
+    | 周 DIF | {features['rw_dif'].min():.4f} | {features['rw_dif'].median():.4f} | {features['rw_dif'].max():.4f} |
+    | 周 HIST | {features['rw_hist'].min():.4f} | {features['rw_hist'].median():.4f} | {features['rw_hist'].max():.4f} |
+    | 上周 HIST | {features['prev_w_hist'].min():.4f} | {features['prev_w_hist'].median():.4f} | {features['prev_w_hist'].max():.4f} |
+    | HIST 变化% | {features['w_hist_chg_pct'].drop_nulls().min():.2f} | {features['w_hist_chg_pct'].drop_nulls().median():.2f} | {features['w_hist_chg_pct'].drop_nulls().max():.2f} |
+    | 月 DIF | {features['rm_dif'].min():.4f} | {features['rm_dif'].median():.4f} | {features['rm_dif'].max():.4f} |
+    | 月 HIST | {features['rm_hist'].min():.4f} | {features['rm_hist'].median():.4f} | {features['rm_hist'].max():.4f} |
+
+    > **阈值建议**: 基于 min 值可以推导出过滤条件的下限。
+    > 例如: 如果所有完美案例的周 HIST 最小值为 X, 则 `rw_hist >= X` 就是一个有数据支撑的阈值。
+    """
+    mo.md(summary)
     return
 
 
 @app.cell
-def _():
+def _(features, go, make_subplots, mo):
+    """Phase 4: 可视化 — 每个案例的周线MACD指标"""
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=["周线 DIF (水上?)", "周线 HIST (红柱大小)", "月线 DIF (水上?)", "HIST 变化率%"],
+        vertical_spacing=0.12,
+    )
+
+    names = features["name"].to_list()
+
+    fig.add_trace(go.Bar(
+        x=names, y=features["rw_dif"].to_list(),
+        marker_color=["#ef5350" if v > 0 else "#26a69a" for v in features["rw_dif"].to_list()],
+        name="周DIF"
+    ), row=1, col=1)
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", row=1, col=1)
+
+    fig.add_trace(go.Bar(
+        x=names, y=features["rw_hist"].to_list(),
+        marker_color=["#ef5350" if v > 0 else "#26a69a" for v in features["rw_hist"].to_list()],
+        name="周HIST"
+    ), row=1, col=2)
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", row=1, col=2)
+
+    fig.add_trace(go.Bar(
+        x=names, y=features["rm_dif"].to_list(),
+        marker_color=["#ef5350" if v > 0 else "#26a69a" for v in features["rm_dif"].to_list()],
+        name="月DIF"
+    ), row=2, col=1)
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", row=2, col=1)
+
+    chg_vals = features["w_hist_chg_pct"].fill_null(0).to_list()
+    fig.add_trace(go.Bar(
+        x=names, y=chg_vals,
+        marker_color=["#ef5350" if v > 0 else "#26a69a" for v in chg_vals],
+        name="HIST变化%"
+    ), row=2, col=2)
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", row=2, col=2)
+
+    fig.update_layout(
+        height=700, showlegend=False,
+        title_text="完美案例 B1 触发日 — 周线/月线 MACD 特征画像",
+        template="plotly_white",
+    )
+    fig.update_xaxes(tickangle=45)
+
+    mo.ui.plotly(fig)
+    return
+
+
+@app.cell
+def _(df_daily, features, go, make_subplots, mo, pl):
+    """Phase 5: 每个案例触发日前后的周线 MACD 走势 (上下文视图)"""
+    case_rows = features.select(["code", "date"]).to_dicts()
+    n_cases = len(case_rows)
+    cols = 3
+    rows = (n_cases + cols - 1) // cols
+
+    names_map = {r["code"]: r["name"] for r in features.select(["code", "name"]).to_dicts()}
+
+    fig2 = make_subplots(
+        rows=rows, cols=cols,
+        subplot_titles=[names_map.get(c["code"], c["code"]) for c in case_rows],
+        vertical_spacing=0.08, horizontal_spacing=0.06,
+    )
+
+    for i, case in enumerate(case_rows):
+        r, c = i // cols + 1, i % cols + 1
+        signal_date = case["date"]
+
+        # 取触发日前后 60 天的数据
+        ctx = df_daily.filter(
+            (pl.col("code") == case["code"]) &
+            (pl.col("date") >= signal_date - pl.duration(days=120)) &
+            (pl.col("date") <= signal_date + pl.duration(days=30))
+        ).sort("date")
+
+        if ctx.height == 0:
+            continue
+
+        dates = ctx["date"].to_list()
+        hist_vals = ctx["rw_hist"].to_list()
+
+        fig2.add_trace(go.Bar(
+            x=dates, y=hist_vals,
+            marker_color=["#ef5350" if v and v > 0 else "#26a69a" for v in hist_vals],
+            showlegend=False,
+        ), row=r, col=c)
+
+        fig2.add_vline(x=signal_date, line_dash="dash", line_color="blue", line_width=1.5, row=r, col=c)
+
+    fig2.update_layout(
+        height=300 * rows,
+        title_text="各案例 B1 触发日前后 — Running Weekly MACD HIST 走势 (蓝线=触发日)",
+        template="plotly_white",
+        showlegend=False,
+    )
+    fig2.update_xaxes(tickangle=45, tickfont_size=8)
+
+    mo.ui.plotly(fig2)
     return
 
 

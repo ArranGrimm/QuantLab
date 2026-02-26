@@ -472,12 +472,13 @@ def calc_b1_factors_wmacd(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame
         ])
         .with_columns([
             (2 * (pl.col("rw_dif") - pl.col("rw_dea"))).alias("rw_hist"),
-            # 月线通常看黄白线即可，不用严格看柱子
             (2 * (pl.col("rm_dif") - pl.col("rm_dea"))).alias("rm_hist"),
+            # 归一化周线 MACD 强度 (消除股价量纲，可用于排序)
+            (pl.col("rw_dif") / pl.col("close_adj") * 100).alias("rw_dif_pct"),
         ])
         .with_columns([
-            # 月线水上：只要快线 DIF 在水上即可，代表长线资金在场。要求 DEA 也在水上太滞后。
-            (pl.col("rm_dif") > 0).alias("MONTHLY_MACD_OK"),
+            # 月线红柱：DIF 上穿 DEA 即可，捕捉零下金叉的早期主升浪 (数据验证: 11/11 完美案例 rm_hist > 0)
+            (pl.col("rm_hist") > 0).alias("MONTHLY_MACD_OK"),
             # 周线大红区间过滤（包含防高位飘逸逻辑）：
             # 1. rw_hist > 0: 必须是金叉红柱状态
             # 2. rw_dif > 0: 必须在水上

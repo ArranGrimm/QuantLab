@@ -53,26 +53,34 @@ def get_adj_factor_frame(conn):
 # ==============================================================================
 # 方法 1: 加载日线数据 (包含复权计算 + 市值计算)
 # ==============================================================================
-def load_daily_data_full(conn):
+def load_daily_data_full(conn, codes: list[str] = None):
     """
     功能：
     1. 读取 stock_daily (Raw)
     2. 动态计算前复权 (Adj)
     3. 关联股本计算市值 (Market Cap)
     4. 保持与旧代码一致的列结构
+
+    Args:
+        conn: DuckDB 连接
+        codes: 股票代码列表 (如 ["sh.600570", "sz.000001"])，为 None 或空列表则加载全部
     """
     
+    code_filter = ""
+    if codes:
+        placeholders = ", ".join(f"'{c}'" for c in codes)
+        code_filter = f" WHERE code IN ({placeholders})"
+
     # --- A. 读取基础数据 ---
     # 1. 日线行情 (Raw Data)
     q_daily = pl.read_database(
-        "SELECT code, date, open, high, low, close, volume, amount FROM stock_daily", 
+        f"SELECT code, date, open, high, low, close, volume, amount FROM stock_daily{code_filter}", 
         conn
     ).lazy().with_columns(pl.col("date").cast(pl.Date))
 
     # 2. 股本数据
-    # 注意：这里使用 circulating_capital 计算流通市值
     q_cap = pl.read_database(
-        "SELECT code, date, circulating_capital FROM finance_capital ORDER BY code, date", 
+        f"SELECT code, date, circulating_capital FROM finance_capital{code_filter} ORDER BY code, date", 
         conn
     ).lazy().with_columns(pl.col("date").cast(pl.Date))
 

@@ -5,7 +5,7 @@ import datetime
 def get_st_blacklist_pl(date_str=None):
     """
     使用 Baostock 获取全市场股票名称，筛选 ST 股，
-    并利用 Polars 高效处理返回适配 QMT 格式的黑名单列表。
+    返回 sh.600000 格式的黑名单列表。
     """
     # 1. 登录 Baostock 系统
     lg = bs.login()
@@ -39,20 +39,14 @@ def get_st_blacklist_pl(date_str=None):
     # rs.fields 通常是: "code", "tradeStatus", "code_name"
     df = pl.DataFrame(data_list, schema=rs.fields, orient="row")
     
-    # 逻辑处理链：
-    # 1. 筛选 code_name 包含 "ST" 的行
-    # 2. 转换 code 格式：Baostock 是 "sh.600000" -> QMT 是 "600000.SH"
+    # 筛选 code_name 包含 "ST" 的行，保留 Baostock 原始格式 (sh.600000)
     st_codes_series = (
         df
-        .lazy() # 开启惰性执行优化
-        .filter(pl.col("code_name").str.contains("ST")) # 同时覆盖 ST 和 *ST
-        .select([
-            # 字符串切片重组：
-            # sh.600000 -> slice(3) 取后6位 + "." + slice(0,2) 取前2位并转大写
-            (pl.col("code").str.slice(3) + "_" + pl.col("code").str.slice(0, 2).str.to_uppercase()).alias("qmt_code")
-        ])
+        .lazy()
+        .filter(pl.col("code_name").str.contains("ST"))
+        .select("code")
         .collect()
-        .get_column("qmt_code")
+        .get_column("code")
     )
     
     result_list = st_codes_series.to_list()

@@ -12,7 +12,7 @@ def _():
     import os
     from datetime import datetime
     from utils import load_daily_data_full
-    from utils import calc_b1_factors_wmacd
+    from utils import calc_b1_factors_opt
     from utils import run_backtest, print_backtest_report, analyze_yearly_intensity
     from utils import get_st_blacklist_pl
     from utils import export_for_rust
@@ -56,7 +56,7 @@ def _():
     config_opt = {"MV_THRESHOLD": 25}
     return (
         analyze_yearly_intensity,
-        calc_b1_factors_wmacd,
+        calc_b1_factors_opt,
         config_opt,
         datetime,
         export_for_rust,
@@ -66,10 +66,10 @@ def _():
 
 
 @app.cell
-def _(calc_b1_factors_wmacd, config_opt, q_full):
+def _(calc_b1_factors_opt, config_opt, q_full):
     # 3. 执行计算
     print("⏳ 计算原始 B1 信号...")
-    df_signals = calc_b1_factors_wmacd(q_full, config_opt)
+    df_signals = calc_b1_factors_opt(q_full, config_opt)
     return (df_signals,)
 
 
@@ -94,7 +94,7 @@ def _(df_signals, export_for_rust):
     # 导出信号供 Rust 使用
     export_for_rust(
         df_signals,
-        output_path="data/signals/market_data_wmacd.parquet",
+        output_path="data/signals/market_data_opt.parquet",
         loose_periods=LOOSE_PERIODS,
         start_date='2019-01-01',
         # extra_sort_cols=['B1_Final_Score']
