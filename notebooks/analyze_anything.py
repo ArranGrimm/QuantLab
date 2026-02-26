@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.18.4"
+__generated_with = "0.20.2"
 app = marimo.App(width="medium")
 
 
@@ -9,20 +9,17 @@ def _():
     import marimo as mo
     import polars as pl
     import plotly.express as px
-    import os
-    import datetime
+    import duckdb
 
     # ==========================================
     # 1. UI 配置与输入区域
     # ==========================================
-    # 这里的路径调整为向上两级（因为文件在 /notebooks 里）
-    # 如果你的数据就在项目隔壁，请根据实际情况调整相对路径
-    DATA_ROOT = r"../QuantData/Ashare" 
+    DB_PATH = r"../QuantData/Ashare/qmt_data.duckdb"
 
     # 创建侧边栏或顶部控件
     stock_input = mo.ui.text(
-        value="600941_SH", 
-        label="🔍 股票代码 (e.g. 600941_SH)",
+        value="sh.600941", 
+        label="🔍 股票代码 (e.g. sh.600941)",
         full_width=True
     )
 
@@ -40,62 +37,85 @@ def _():
     ])
 
     controls
-    return DATA_ROOT, growth_slider, mo, os, pl, px, stock_input
+    return DB_PATH, duckdb, growth_slider, mo, pl, px, stock_input
 
 
 @app.cell
-def _(DATA_ROOT, mo, os, pl, stock_input):
+def _(DB_PATH, duckdb, mo, pl, stock_input):
     # ==========================================
     # 2. 数据加载函数 (响应式)
     # ==========================================
     # 当 stock_input 变化时，这个 cell 会自动重新运行
     code_val = stock_input.value
 
-    def load_data(code, root_path):
-        """加载所有必要的 Parquet 文件"""
+    def load_data(code, db_path):
+        """从 DuckDB 加载所有必要的数据"""
+        conn = duckdb.connect(db_path, read_only=True)
         try:
-            daily_path = os.path.join(root_path, "stock_day_raw", f"{code}.parquet")
-            # 检查文件是否存在，不存在则中断执行并提示
-            if not os.path.exists(daily_path):
-                return None, "数据文件未找到，请检查代码或路径"
+            count = conn.execute(
+                f"SELECT COUNT(*) FROM stock_daily WHERE code = '{code}'"
+            ).fetchone()[0]
+            if count == 0:
+                return None, "数据未找到，请检查股票代码"
 
             # 1. 日线
-            df_d = pl.read_parquet(daily_path).with_columns(
-                pl.from_epoch("time", time_unit="ms").dt.replace_time_zone("UTC")
-                  .dt.convert_time_zone("Asia/Shanghai").dt.date().alias("date")
+            df_d = pl.read_database(
+                f"SELECT date, open, high, low, close, volume, amount "
+                f"FROM stock_daily WHERE code = '{code}' ORDER BY date",
+                conn
+            ).with_columns(
+                pl.col("date").cast(pl.Date)
             ).filter(pl.col("close").is_not_null()).sort("date")
 
-            # 2. 股本
-            df_c = pl.read_parquet(os.path.join(root_path, "finance_capital", f"{code}.parquet")).with_columns(
-                pl.col("m_anntime").str.strptime(pl.Date, "%Y%m%d").alias("date"),
+            # 2. 股本 (pub_date 对应旧逻辑的 m_anntime)
+            df_c = pl.read_database(
+                f"SELECT pub_date, total_capital FROM finance_capital "
+                f"WHERE code = '{code}' AND pub_date IS NOT NULL ORDER BY pub_date",
+                conn
+            ).with_columns(
+                pl.col("pub_date").cast(pl.Date).alias("date"),
                 pl.col("total_capital").cast(pl.Float64)
-            ).sort("date")
+            ).select(["date", "total_capital"]).sort("date")
 
-            # 3. 资产负债
-            df_b = pl.read_parquet(os.path.join(root_path, "finance_balance", f"{code}.parquet")).with_columns(
-                pl.col("m_anntime").str.strptime(pl.Date, "%Y%m%d").alias("date"),
-                pl.col("tot_shrhldr_eqy_excl_min_int").cast(pl.Float64).alias("net_assets")
-            ).sort("date")
+            # 3. 资产负债 (pub_date 对应旧逻辑的 m_anntime)
+            df_b = pl.read_database(
+                f"SELECT pub_date, net_assets FROM finance_balance "
+                f"WHERE code = '{code}' AND pub_date IS NOT NULL ORDER BY pub_date",
+                conn
+            ).with_columns(
+                pl.col("pub_date").cast(pl.Date).alias("date"),
+                pl.col("net_assets").cast(pl.Float64)
+            ).select(["date", "net_assets"]).sort("date")
 
-            # 4. 利润表
-            df_i = pl.read_parquet(os.path.join(root_path, "finance_income", f"{code}.parquet")).with_columns([
-                pl.col("m_anntime").str.strptime(pl.Date, "%Y%m%d").alias("pub_date"),
-                pl.col("m_timetag").str.strptime(pl.Date, "%Y%m%d").alias("report_date"),
-                pl.col("net_profit_excl_min_int_inc").cast(pl.Float64).alias("cum_profit")
+            # 4. 利润表 (pub_date=m_anntime, date=m_timetag 即报告期)
+            df_i = pl.read_database(
+                f"SELECT pub_date, date AS report_date, net_profit AS cum_profit "
+                f"FROM finance_income WHERE code = '{code}' ORDER BY pub_date",
+                conn
+            ).with_columns([
+                pl.col("pub_date").cast(pl.Date),
+                pl.col("report_date").cast(pl.Date),
+                pl.col("cum_profit").cast(pl.Float64)
             ]).sort("pub_date")
 
-            # 5. 分红
-            df_div_raw = pl.read_parquet(os.path.join(root_path, "finance_dividend", f"{code}.parquet")).with_columns(
-                pl.col("date").str.strptime(pl.Date, "%Y%m%d"),
+            # 5. 分红 (从 qmt_factors 提取 interest 字段)
+            df_div_raw = pl.read_database(
+                f"SELECT date, interest FROM qmt_factors "
+                f"WHERE code = '{code}' AND interest IS NOT NULL ORDER BY date",
+                conn
+            ).with_columns(
+                pl.col("date").cast(pl.Date),
                 pl.col("interest").cast(pl.Float64)
             ).group_by("date").agg(pl.col("interest").sum()).sort("date")
 
             return (df_d, df_c, df_b, df_i, df_div_raw), None
         except Exception as e:
             return None, str(e)
+        finally:
+            conn.close()
 
     # 执行加载
-    data_pack, error_msg = load_data(code_val, DATA_ROOT)
+    data_pack, error_msg = load_data(code_val, DB_PATH)
 
     # 如果出错，停止后续运行并显示错误
     if error_msg:
