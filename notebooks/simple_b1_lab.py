@@ -40,16 +40,16 @@ def _():
     ]
 
     print("🚀 [Step 1] 加载原始行情数据...")
-    # st_blacklist = get_st_blacklist_pl('2026-01-27') # 获取ST列表
+    st_blacklist = get_st_blacklist_pl('2026-01-27') # 获取ST列表
     print("🔗 [Step 2] 合并基础数据...")
-    # q_full = (
-    #     load_daily_data_full(conn).filter(
-    #         ~pl.col("code").is_in(st_blacklist)
-    #     )
-    # )
     q_full = (
-        load_daily_data_full(conn)
+        load_daily_data_full(conn).filter(
+            ~pl.col("code").is_in(st_blacklist)
+        )
     )
+    # q_full = (
+        # load_daily_data_full(conn)
+    # )
 
     # ==============================================================================
     # ⚙️ 策略参数配置 V3.0 (Based on 10 Golden Cases)
