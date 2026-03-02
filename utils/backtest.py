@@ -165,6 +165,114 @@ def print_backtest_report(df_result: pl.DataFrame, return_days: List[int]) -> No
     print("-" * 100)
 
 
+def run_backtest_short(
+    df_signals: pl.LazyFrame,
+    signal_col: str = "renko_signal",
+    return_days: List[int] = None,
+    loose_periods: List[Tuple[str, str]] = None,
+    top_n: int = 5,
+    stop_loss_pct: float = 0.03,
+    rank_by: str = "vol_ratio",
+    rank_ascending: bool = True,
+    cooldown_days: int = 5,
+) -> pl.DataFrame:
+    """
+    短线策略回测引擎 (通用版)
+
+    与 run_backtest 的区别:
+    - signal_col 可配置，不限于 b1_signal
+    - 默认持仓更短 (3/5/7/10 天)
+    - 冷却期更短 (5 天 vs 10 天)
+    - 默认选股更多 (top_n=5)
+
+    Args:
+        df_signals: 信号 LazyFrame，需包含 signal_col, code, date, open_adj, low_adj, close_adj, volume
+        signal_col: 信号列名
+        return_days: 持仓天数列表，默认 [3, 5, 7, 10]
+        loose_periods: 择时区间列表，为 None 则不做择时过滤
+        top_n: 每日选股数量上限
+        stop_loss_pct: 止损幅度 (0.03 = 3%)
+        rank_by: 排序依据列名
+        rank_ascending: 排序方向
+        cooldown_days: 冷却期天数 (避免对同一只票连续开仓)
+
+    Returns:
+        回测结果 DataFrame
+    """
+    if return_days is None:
+        return_days = [3, 5, 7, 10]
+
+    print(f"🛠️ [Backtest] 启动短线回测：signal={signal_col}, 止损={stop_loss_pct*100:.1f}%...")
+
+    # 1. 构建择时条件
+    if loose_periods:
+        loose_conditions = []
+        for s_str, e_str in loose_periods:
+            try:
+                s = datetime.strptime(s_str, "%Y-%m-%d").date()
+                e = datetime.strptime(e_str, "%Y-%m-%d").date()
+                loose_conditions.append(pl.col("date").is_between(s, e))
+            except Exception:
+                pass
+        is_loose_expr = pl.any_horizontal(loose_conditions) if loose_conditions else pl.lit(True)
+    else:
+        is_loose_expr = pl.lit(True)
+
+    # 2. 构建计算表达式
+    expr_list = [
+        is_loose_expr.cast(pl.Int32).alias("is_loose"),
+        pl.col("open_adj").shift(-1).over("code").alias("buy_price"),
+        pl.col("low_adj").shift(-1).over("code").alias("buy_price_low"),
+        (pl.col(signal_col).cast(pl.Int32).shift(1).rolling_max(cooldown_days).over("code").fill_null(0) == 0).alias("is_cool"),
+        (pl.col("volume") / pl.col("vol_40_mean")).alias("vol_ratio"),
+    ]
+
+    for rd in return_days:
+        expr_list.append(
+            pl.col("close_adj").shift(-rd).over("code").alias(f"close_{rd}d")
+        )
+        expr_list.append(
+            pl.col("close_adj").rolling_min(rd).shift(-rd).over("code").alias(f"low_min_{rd}d")
+        )
+
+    # 3. 收益计算表达式
+    return_expr_list = []
+    for rd in return_days:
+        return_expr_list.append(
+            pl.when(pl.col(f"low_min_{rd}d") <= pl.col("stop_price_tech"))
+              .then(pl.col("risk_pct"))
+              .otherwise((pl.col(f"close_{rd}d") / pl.col("buy_price")) - 1)
+              .alias(f"ret_{rd}d")
+        )
+        return_expr_list.append(
+            ((pl.col(f"close_{rd}d") / pl.col("buy_price")) - 1).alias(f"ret_{rd}d_raw")
+        )
+
+    # 4. 核心回测逻辑
+    return (
+        df_signals
+        .sort(["code", "date"])
+        .with_columns(
+            pl.col("volume").rolling_mean(40).over("code").alias("vol_40_mean"),
+        )
+        .with_columns(expr_list)
+        .with_columns(
+            (pl.col("buy_price_low") * (1 - stop_loss_pct)).alias("stop_price_tech"),
+        )
+        .filter(pl.col(signal_col))
+        .filter(pl.col("is_loose") == 1)
+        .with_columns(
+            pl.col(rank_by).rank("ordinal", descending=not rank_ascending).over("date").alias("daily_rank")
+        )
+        .filter(pl.col("daily_rank") <= top_n)
+        .with_columns(
+            ((pl.col("stop_price_tech") / pl.col("buy_price")) - 1).alias("risk_pct")
+        )
+        .with_columns(return_expr_list)
+        .collect()
+    )
+
+
 def analyze_yearly_intensity(df_result: pl.DataFrame, target_year: int) -> None:
     """
     年度交易强度分析

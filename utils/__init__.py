@@ -2,9 +2,13 @@
 from .b1_factors import calc_b1_factors_tg
 from .b1_factors_opt import calc_b1_factors_base, calc_b1_factors_opt, calc_b1_factors_dynamic_j, calc_b1_factors_wmacd, DEFAULT_CONFIG
 
+# 砖型图反转因子模块
+from .renko_factors import calc_renko_factors_base, calc_renko_factors, calc_renko_factors_wmacd
+
 # 回测引擎模块
 from .backtest import (
-    run_backtest, 
+    run_backtest,
+    run_backtest_short,
     print_backtest_report, 
     analyze_yearly_intensity
 )
@@ -30,8 +34,13 @@ __all__ = [
     "calc_b1_factors_dynamic_j",
     "calc_b1_factors_wmacd",
     "DEFAULT_CONFIG",
-    # 回测 (简单版)
+    # 砖型图反转因子
+    "calc_renko_factors_base",
+    "calc_renko_factors",
+    "calc_renko_factors_wmacd",
+    # 回测
     "run_backtest",
+    "run_backtest_short",
     "print_backtest_report",
     "analyze_yearly_intensity",
     # Rust 导出
