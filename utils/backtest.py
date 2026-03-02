@@ -58,14 +58,14 @@ def run_backtest(
         (pl.col("volume") / pl.col("vol_40_mean")).alias("vol_ratio")
     ]
 
-    # 动态生成未来收益列
+    # 动态生成未来收益列 (从买入日 T+1 算起，持仓 rd 天 → 看 T+1+rd 收盘)
     for rd in return_days:
         expr_list.append(
-            pl.col("close_adj").shift(-rd).over("code").alias(f"close_{rd}d")
+            pl.col("close_adj").shift(-(rd + 1)).over("code").alias(f"close_{rd}d")
         )
         # 用收盘价判断止损 (而不是最低价，避免过度止损)
         expr_list.append(
-            pl.col("close_adj").rolling_min(rd).shift(-rd).over("code").alias(f"low_min_{rd}d")
+            pl.col("close_adj").rolling_min(rd).shift(-(rd + 1)).over("code").alias(f"low_min_{rd}d")
         )
 
     # 3. 收益计算表达式
@@ -229,10 +229,10 @@ def run_backtest_short(
 
     for rd in return_days:
         expr_list.append(
-            pl.col("close_adj").shift(-rd).over("code").alias(f"close_{rd}d")
+            pl.col("close_adj").shift(-(rd + 1)).over("code").alias(f"close_{rd}d")
         )
         expr_list.append(
-            pl.col("close_adj").rolling_min(rd).shift(-rd).over("code").alias(f"low_min_{rd}d")
+            pl.col("close_adj").rolling_min(rd).shift(-(rd + 1)).over("code").alias(f"low_min_{rd}d")
         )
 
     # 3. 收益计算表达式
