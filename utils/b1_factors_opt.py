@@ -426,6 +426,37 @@ def calc_b1_factors_wmacd(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame
         (2 * (pl.col("w_dif").shift(1).over("code") - pl.col("w_dea").shift(1).over("code"))).alias("prev_w_hist")
     ])
 
+    # --- 周线级别大周期择时 (MA多头排列 + WL>YL) ---
+    df_weekly_trend = (
+        df_weekly
+        .with_columns([
+            pl.col("weekly_close").rolling_mean(60).over("code").alias("w_ma60"),
+            pl.col("weekly_close").rolling_mean(120).over("code").alias("w_ma120"),
+            pl.col("weekly_close").rolling_mean(240).over("code").alias("w_ma240"),
+            pl.col("weekly_close").ewm_mean(span=10, adjust=False).over("code")
+              .ewm_mean(span=10, adjust=False).over("code").alias("w_wl"),
+            ((pl.col("weekly_close").rolling_mean(14).over("code") +
+              pl.col("weekly_close").rolling_mean(28).over("code") +
+              pl.col("weekly_close").rolling_mean(57).over("code") +
+              pl.col("weekly_close").rolling_mean(114).over("code")) / 4).alias("w_yl"),
+        ])
+        .with_columns([
+            # TX1: 周线 MA60 上升 AND MA120 上升
+            (
+                (pl.col("w_ma60") > pl.col("w_ma60").shift(1).over("code")) &
+                (pl.col("w_ma120") > pl.col("w_ma120").shift(1).over("code"))
+            ).alias("w_tx1"),
+            # TX2: 周线 MA60 > MA120 > MA240 (均线多头排列)
+            (
+                (pl.col("w_ma60") > pl.col("w_ma120")) &
+                (pl.col("w_ma120") > pl.col("w_ma240"))
+            ).alias("w_tx2"),
+            # 周线 WL > YL (白线大于黄线)
+            (pl.col("w_wl") > pl.col("w_yl")).alias("w_wl_gt_yl"),
+        ])
+        .select(["code", "week_start", "w_tx1", "w_tx2", "w_wl_gt_yl"])
+    )
+
     # --- 月线级别预计算 ---
     df_monthly = (
         df_with_time.sort(["code", "date"])
@@ -454,6 +485,7 @@ def calc_b1_factors_wmacd(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame
         df_with_time
         .join(df_weekly_prev, on=["code", "week_start"], how="left")
         .join(df_monthly_prev, on=["code", "month_start"], how="left")
+        .join(df_weekly_trend, on=["code", "week_start"], how="left")
         .with_columns([
             # 推算周线
             (a12 * pl.col("close_adj") + (1 - a12) * pl.col("prev_w_ema12")).alias("rw_ema12"),
@@ -485,7 +517,14 @@ def calc_b1_factors_wmacd(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame
             (
                 (pl.col("rw_hist") > 0) & 
                 (pl.col("rw_dif") > 0)
-            ).alias("WEEKLY_MACD_OK")
+            ).alias("WEEKLY_MACD_OK"),
+            # 周线大周期择时：MA多头排列(TX1+TX2)
+            (
+                pl.col("w_tx1").fill_null(False) &
+                pl.col("w_tx2").fill_null(False)
+            ).alias("WEEKLY_TREND_OK"),
+            # 周线 WL > YL
+            pl.col("w_wl_gt_yl").fill_null(False).alias("WEEKLY_WL_YL_OK"),
         ])
     )
 
@@ -591,22 +630,28 @@ def calc_b1_factors_wmacd(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame
         (pl.col("J") <= cfg["J_THRESHOLD"]).alias("J_OK")
     ])
 
-    # ===== Phase 3: 最终信号 (B1 + 周线MACD过滤) =====
+    # ===== Phase 3: 最终信号 (B1 + 周线MACD过滤 + 可选大周期择时) =====
+    signal_expr = (
+        pl.col("TRIGGER") & 
+        pl.col("J_OK") & 
+        pl.col("LQ") & 
+        pl.col("MVOK") & 
+        pl.col("GOOD28") & 
+        pl.col("MAX28_OK") & 
+        pl.col("YANGYIN_OK") &
+        pl.col("SHAPE_OK") & 
+        pl.col("VOL_SHRINK_OK") &
+        pl.col("ZTALK_GENE_OK") &
+        pl.col("WEEKLY_MACD_OK") &
+        pl.col("MONTHLY_MACD_OK")
+    )
+    if cfg.get("WEEKLY_TREND_FILTER", False):
+        signal_expr = signal_expr & pl.col("WEEKLY_TREND_OK")
+    if cfg.get("WEEKLY_WL_YL_FILTER", False):
+        signal_expr = signal_expr & pl.col("WEEKLY_WL_YL_OK")
+
     return df_b1_signals.with_columns([
-        (
-            pl.col("TRIGGER") & 
-            pl.col("J_OK") & 
-            pl.col("LQ") & 
-            pl.col("MVOK") & 
-            pl.col("GOOD28") & 
-            pl.col("MAX28_OK") & 
-            pl.col("YANGYIN_OK") &
-            pl.col("SHAPE_OK") & 
-            pl.col("VOL_SHRINK_OK") &
-            pl.col("ZTALK_GENE_OK") &
-            pl.col("WEEKLY_MACD_OK") &       # 周线大红防飘逸
-            pl.col("MONTHLY_MACD_OK")        # 月线水上保证大趋势
-        ).alias("b1_signal")
+        signal_expr.alias("b1_signal")
     ])
 
 

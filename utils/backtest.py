@@ -112,57 +112,96 @@ def run_backtest(
     )
 
 
+def _calc_metric(df: pl.DataFrame, col_name: str) -> dict | None:
+    """计算单个收益列的统计指标，返回 dict 或 None (无数据时)"""
+    df_valid = df.filter(pl.col(col_name).is_not_null())
+    cnt = df_valid.height
+    if cnt == 0:
+        return None
+
+    win_cnt = df_valid.filter(pl.col(col_name) > 0).height
+    win_rate = win_cnt / cnt
+    avg_ret = df_valid.select(pl.col(col_name).mean()).item()
+    avg_win = df_valid.filter(pl.col(col_name) > 0).select(pl.col(col_name).mean()).item()
+    avg_loss = df_valid.filter(pl.col(col_name) <= 0).select(pl.col(col_name).mean()).item()
+
+    if avg_loss == 0 or avg_loss is None:
+        odds = 99.9
+    else:
+        odds = abs(avg_win / avg_loss) if avg_win else 0
+
+    if avg_win is None:
+        avg_win = 0
+    if avg_loss is None:
+        avg_loss = 0
+
+    expectancy = (win_rate * avg_win) - ((1 - win_rate) * abs(avg_loss))
+    return {"cnt": cnt, "win_rate": win_rate, "avg_ret": avg_ret, "odds": odds, "expectancy": expectancy}
+
+
+def _print_section(df: pl.DataFrame, return_days: List[int], title: str = "") -> None:
+    """打印一组数据的回测报告段落"""
+    total = df.height
+    if title:
+        print(f"\n{'=' * 100}")
+        print(f"  {title}  (信号数: {total})")
+        print(f"{'=' * 100}")
+    else:
+        print(f"\n✅ 交易信号总数: {total}")
+
+    if total == 0:
+        print("  ⚠️ 没有交易信号")
+        return
+
+    header = f"{'策略模式':<12} | {'信号数':<6} | {'胜率':<8} | {'均值':<8} | {'盈亏比(Odds)':<10} | {'期望值(Exp)':<10}"
+    print("-" * 110)
+    print(header)
+    print("-" * 110)
+
+    def print_row(name: str, col_name: str):
+        m = _calc_metric(df, col_name)
+        if m is None:
+            return
+        print(f"{name:<12} | {m['cnt']:<6} | {m['win_rate']*100:>6.1f}% | {m['avg_ret']*100:>6.2f}% | {m['odds']:>10.2f}x  | {m['expectancy']*100:>8.2f}%")
+
+    for rd in return_days:
+        print_row(f"持仓{rd}天", f"ret_{rd}d")
+    print("-" * 110)
+    for rd in return_days:
+        print_row(f"死拿{rd}天(对照)", f"ret_{rd}d_raw")
+    print("-" * 110)
+
+
 def print_backtest_report(df_result: pl.DataFrame, return_days: List[int]) -> None:
     """
-    打印回测报告
-    
+    打印回测报告 (总体 + 按年度拆分)
+
     Args:
-        df_result: 回测结果 DataFrame
+        df_result: 回测结果 DataFrame (需包含 date 列)
         return_days: 持仓天数列表
     """
-    total_trades = df_result.height
     print("\n====== ⚔️ 实战回测报告 ======")
-    print(f"✅ 交易信号总数: {total_trades}")
 
-    if total_trades == 0:
+    if df_result.height == 0:
         print("⚠️ 没有交易信号")
         return
 
-    print("-" * 100)
-    print(f"{'策略模式':<12} | {'胜率':<8} | {'均值':<8} | {'盈亏比(Odds)':<10} | {'期望值(Exp)':<10}")
-    print("-" * 100)
+    # --- 总体 ---
+    _print_section(df_result, return_days)
 
-    def print_metric(name: str, col_name: str):
-        df_valid = df_result.filter(pl.col(col_name).is_not_null())
-        cnt = df_valid.height
-        if cnt == 0:
-            return
+    # --- 按年度 ---
+    try:
+        years = sorted(df_result.select(pl.col("date").dt.year().alias("y")).to_series().unique().to_list())
+    except Exception:
+        years = sorted(df_result.select(pl.col("date").cast(pl.Utf8).str.slice(0, 4).cast(pl.Int32).alias("y")).to_series().unique().to_list())
 
-        win_cnt = df_valid.filter(pl.col(col_name) > 0).height
-        win_rate = win_cnt / cnt
-        avg_ret = df_valid.select(pl.col(col_name).mean()).item()
-        avg_win = df_valid.filter(pl.col(col_name) > 0).select(pl.col(col_name).mean()).item()
-        avg_loss = df_valid.filter(pl.col(col_name) <= 0).select(pl.col(col_name).mean()).item()
-
-        if avg_loss == 0 or avg_loss is None:
-            odds = 99.9
-        else:
-            odds = abs(avg_win / avg_loss) if avg_win else 0
-
-        if avg_win is None:
-            avg_win = 0
-        if avg_loss is None:
-            avg_loss = 0
-
-        expectancy = (win_rate * avg_win) - ((1 - win_rate) * abs(avg_loss))
-        print(f"{name:<12} | {win_rate*100:>6.1f}% | {avg_ret*100:>6.2f}% | {odds:>10.2f}x  | {expectancy*100:>8.2f}%")
-
-    for rd in return_days:
-        print_metric(f"持仓{rd}天", f"ret_{rd}d")
-    print("-" * 100)
-    for rd in return_days:
-        print_metric(f"死拿{rd}天(对照)", f"ret_{rd}d_raw")
-    print("-" * 100)
+    if len(years) > 1:
+        for year in years:
+            try:
+                df_year = df_result.filter(pl.col("date").dt.year() == year)
+            except Exception:
+                df_year = df_result.filter(pl.col("date").cast(pl.Utf8).str.slice(0, 4) == str(year))
+            _print_section(df_year, return_days, title=f"{year} 年度")
 
 
 def run_backtest_short(
