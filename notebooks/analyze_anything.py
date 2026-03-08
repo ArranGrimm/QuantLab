@@ -59,54 +59,37 @@ def _(DB_PATH, duckdb, mo, pl, stock_input):
                 return None, "数据未找到，请检查股票代码"
 
             # 1. 日线
-            df_d = pl.read_database(
+            df_d = conn.sql(
                 f"SELECT date, open, high, low, close, volume, amount "
-                f"FROM stock_daily WHERE code = '{code}' ORDER BY date",
-                conn
-            ).with_columns(
-                pl.col("date").cast(pl.Date)
-            ).filter(pl.col("close").is_not_null()).sort("date")
+                f"FROM stock_daily WHERE code = '{code}' ORDER BY date"
+            ).pl().filter(pl.col("close").is_not_null())
 
             # 2. 股本 (pub_date 对应旧逻辑的 m_anntime)
-            df_c = pl.read_database(
-                f"SELECT pub_date, total_capital FROM finance_capital "
-                f"WHERE code = '{code}' AND pub_date IS NOT NULL ORDER BY pub_date",
-                conn
-            ).with_columns(
-                pl.col("pub_date").cast(pl.Date).alias("date"),
-                pl.col("total_capital").cast(pl.Float64)
-            ).select(["date", "total_capital"]).sort("date")
+            df_c = conn.sql(
+                f"SELECT pub_date AS date, CAST(total_capital AS DOUBLE) AS total_capital "
+                f"FROM finance_capital "
+                f"WHERE code = '{code}' AND pub_date IS NOT NULL ORDER BY pub_date"
+            ).pl()
 
             # 3. 资产负债 (pub_date 对应旧逻辑的 m_anntime)
-            df_b = pl.read_database(
-                f"SELECT pub_date, net_assets FROM finance_balance "
-                f"WHERE code = '{code}' AND pub_date IS NOT NULL ORDER BY pub_date",
-                conn
-            ).with_columns(
-                pl.col("pub_date").cast(pl.Date).alias("date"),
-                pl.col("net_assets").cast(pl.Float64)
-            ).select(["date", "net_assets"]).sort("date")
+            df_b = conn.sql(
+                f"SELECT pub_date AS date, CAST(net_assets AS DOUBLE) AS net_assets "
+                f"FROM finance_balance "
+                f"WHERE code = '{code}' AND pub_date IS NOT NULL ORDER BY pub_date"
+            ).pl()
 
             # 4. 利润表 (pub_date=m_anntime, date=m_timetag 即报告期)
-            df_i = pl.read_database(
-                f"SELECT pub_date, date AS report_date, net_profit AS cum_profit "
-                f"FROM finance_income WHERE code = '{code}' ORDER BY pub_date",
-                conn
-            ).with_columns([
-                pl.col("pub_date").cast(pl.Date),
-                pl.col("report_date").cast(pl.Date),
-                pl.col("cum_profit").cast(pl.Float64)
-            ]).sort("pub_date")
+            df_i = conn.sql(
+                f"SELECT pub_date, date AS report_date, "
+                f"CAST(net_profit AS DOUBLE) AS cum_profit "
+                f"FROM finance_income WHERE code = '{code}' ORDER BY pub_date"
+            ).pl()
 
             # 5. 分红 (从 qmt_factors 提取 interest 字段)
-            df_div_raw = pl.read_database(
-                f"SELECT date, interest FROM qmt_factors "
-                f"WHERE code = '{code}' AND interest IS NOT NULL ORDER BY date",
-                conn
-            ).with_columns(
-                pl.col("date").cast(pl.Date),
-                pl.col("interest").cast(pl.Float64)
-            ).group_by("date").agg(pl.col("interest").sum()).sort("date")
+            df_div_raw = conn.sql(
+                f"SELECT date, CAST(interest AS DOUBLE) AS interest FROM qmt_factors "
+                f"WHERE code = '{code}' AND interest IS NOT NULL ORDER BY date"
+            ).pl().group_by("date").agg(pl.col("interest").sum()).sort("date")
 
             return (df_d, df_c, df_b, df_i, df_div_raw), None
         except Exception as e:
