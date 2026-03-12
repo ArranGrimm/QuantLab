@@ -353,5 +353,10 @@ def _(MA120_DISCOUNT, PE_THRESHOLD, YIELD_THRESHOLD, df_all, mo, pl):
     return
 
 
+@app.cell
+def _():
+    return
+
+
 if __name__ == "__main__":
     app.run()
