@@ -34,6 +34,9 @@ dependencies = [
     "chronos-forecasting>=2.2.2",
     "baostock>=0.8.9",
     "duckdb>=1.4.3",
+    "google-genai>=1.67.0",
+    "kaleido>=1.2.0",
+    "pyyaml>=6.0.3",
 ]
 
 # 1. 定义源：根据截图中的 URL，我们指向 cu130
