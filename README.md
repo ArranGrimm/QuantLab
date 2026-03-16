@@ -1,211 +1,165 @@
 # QuantLab 量化研究实验室
 
-基于 **B1 选股策略** 的量化交易研究平台，集成了 Python 因子计算和 Rust ECS 回测引擎。
+基于 **B1 超跌反转策略** 的量化交易研究平台，集成了 Polars 因子计算、多周期 MACD 过滤、统计学回测、Rust ECS 回测引擎，以及 AI 多模态评审 Agent。
 
-## 🏗️ 架构
+## 架构
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Python 数据层                            │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐        │
-│  │ 数据获取    │ →  │ 因子计算    │ →  │ 信号导出    │        │
-│  │ qmt/baostock│    │ b1_factors  │    │ export_rust │        │
-│  └─────────────┘    └─────────────┘    └─────────────┘        │
-│                              ↓                                  │
-│                     market_data.parquet                        │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                     Rust 回测引擎 (Bevy ECS)                    │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐        │
-│  │ 买入系统    │ →  │ 卖出系统    │ →  │ 统计系统    │        │
-│  │ [开盘]     │    │ [收盘]     │    │ [收盘后]   │        │
-│  └─────────────┘    └─────────────┘    └─────────────┘        │
-│                                                                 │
-│  特性: 动态仓位(复利) | 分批止盈 | 交易成本 | 最大回撤跟踪     │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                          Python 数据层                                    │
+│  ┌──────────────┐   ┌────────────────┐   ┌──────────────┐              │
+│  │ 数据获取     │ → │ 因子计算       │ → │ 信号输出     │              │
+│  │ QMT/Baostock │   │ B1 / Renko     │   │ Parquet/JSON │              │
+│  └──────────────┘   └────────────────┘   └──────────────┘              │
+│                              ↓                                           │
+│               calc_b1_factors_wmacd (周线MACD+WL>YL)                    │
+└──────────────────────────────────────────────────────────────────────────┘
+            ↓                                    ↓
+┌────────────────────────┐       ┌─────────────────────────────────────────┐
+│  Rust 回测引擎 (ECS)    │       │  AI Agent 工作流                        │
+│  动态仓位 | 分批止盈    │       │  Plotly图表 → Gemini多模态评审 → 推荐   │
+│  交易成本 | 最大回撤     │       │  结构化指标 + 视觉分析双通道            │
+└────────────────────────┘       └─────────────────────────────────────────┘
 ```
 
-## 📁 目录结构
+## 目录结构
 
 ```
 QuantLab/
-├── backtest-engine/       # 🦀 Rust 回测引擎 (Bevy ECS)
+├── utils/                     # Python 核心工具模块
+│   ├── b1_factors_opt.py      #   B1 选股因子 (V3.0 + 周月MACD + 周线WL>YL)
+│   ├── renko_factors.py       #   砖型图反转因子
+│   ├── backtest.py            #   统计学回测 (run_backtest / run_backtest_short)
+│   ├── signal_export.py       #   信号导出 (Parquet, 供 Rust 使用)
+│   ├── duckdb_utils.py        #   DuckDB 数据加载 (load_daily_data_full)
+│   ├── get_data.py            #   QMT 数据同步 → DuckDB
+│   ├── baostock_sync.py       #   Baostock 数据同步 → DuckDB
+│   └── ...
+│
+├── agent/                     # AI Agent 每日选股工作流
+│   ├── run.py                 #   主入口: python -m agent.run
+│   ├── chart.py               #   Plotly K线图生成 + PNG导出
+│   ├── context.py             #   结构化指标文本 (供LLM阅读)
+│   ├── prompt.md              #   B1专用评审提示词
+│   ├── config.yaml            #   配置 (数据库/模型/参数)
+│   ├── report.py              #   终端输出 + JSON保存
+│   └── reviewers/             #   AI评审模块 (可插拔)
+│       ├── base.py            #     BaseReviewer 抽象基类
+│       └── gemini.py          #     GeminiReviewer (Gemini多模态)
+│
+├── backtest-engine/           # Rust 回测引擎 (Bevy ECS)
 │   ├── src/
-│   │   ├── main.rs        # 主程序入口
-│   │   ├── components/    # ECS 组件 (Position, ClosedTrade)
-│   │   ├── resources/     # ECS 资源 (Portfolio, MarketData, Config)
-│   │   └── systems/       # ECS 系统 (买入/卖出/统计)
-│   ├── config.toml        # 策略配置文件
-│   └── Cargo.toml
-├── utils/                 # 🐍 Python 工具模块
-│   ├── b1_factors_opt.py  # B1 选股因子计算 (V3.0)
-│   ├── signal_export.py   # 信号导出 (Parquet)
-│   ├── backtest.py        # Python 简易回测
-│   └── data_utils.py      # 数据工具
-├── notebooks/             # 📓 研究 Notebook (Marimo)
-│   └── simple_b1_opt.py   # B1 策略主程序
-├── data/                  # 📊 数据目录 (git ignored)
-│   └── signals/           # 导出的信号文件
-└── strategies/            # 策略脚本
+│   │   ├── main.rs
+│   │   ├── components/        #   ECS 组件 (Position, ClosedTrade)
+│   │   ├── resources/         #   ECS 资源 (Portfolio, MarketData, Config)
+│   │   └── systems/           #   ECS 系统 (买入/卖出/统计)
+│   └── config.toml            #   策略配置 (仓位/止盈止损/成本)
+│
+├── notebooks/                 # Marimo 研究 Notebook
+│   ├── simple_b1_opt.py       #   B1 策略主程序 (因子计算+回测)
+│   ├── simple_renko.py        #   砖型图策略研究
+│   ├── stock_viewer.py        #   单股K线 + WL/YL 看盘
+│   ├── smart_b1_*.py          #   CatBoost 形态学模型
+│   ├── sequence_b1_*.py       #   序列模型
+│   └── ...
+│
+├── strategies/                # 通达信 TDX 策略脚本
+│   └── tdx_scripts/
+│       ├── B1代码3.0.0b.txt   #   B1 日线选股 (当前版本)
+│       ├── B1周线过滤器.txt    #   B1 周线过滤器 (MACD+WL>YL)
+│       ├── B1大周期择时.txt    #   周线MA多头排列择时
+│       └── ...
+│
+└── data/                      # 数据目录 (git ignored)
+    ├── signals/               #   导出的信号 Parquet
+    ├── charts/                #   Agent 导出的K线图
+    └── review/                #   Agent AI评审结果
 ```
 
-## 🚀 快速开始
+## 快速开始
 
 ### 1. Python 环境
 
 ```bash
-# 使用 uv (推荐)
 uv sync
-
-# 或 pip
-pip install polars pandas numpy baostock
+# 或
+pip install polars duckdb plotly kaleido pyyaml google-genai
 ```
 
-### 2. Rust 环境
+### 2. 研究流程 (Notebook)
+
+```python
+from utils import load_daily_data_full, calc_b1_factors_wmacd, run_backtest, print_backtest_report
+
+conn = duckdb.connect("path/to/qmt_data.duckdb", read_only=True)
+df = load_daily_data_full(conn)
+
+# B1 因子计算 (V3.0 + 周月MACD + 周线WL>YL)
+df_signals = calc_b1_factors_wmacd(df, config={"WEEKLY_WL_YL_FILTER": True})
+
+# 统计学回测
+df_result = run_backtest(df_signals, return_days=[5, 10, 15, 20, 25, 30])
+print_backtest_report(df_result, [5, 10, 15, 20, 25, 30])
+```
+
+### 3. AI Agent 每日选股
 
 ```bash
-cd backtest-engine
-cargo build --release
+# 完整流程: 数据加载 → 因子计算 → 图表导出 → AI评审 → 推荐
+python -m agent.run
+
+# 指定日期
+python -m agent.run --date 2026-02-24
+
+# 只生成图表, 跳过AI评审
+python -m agent.run --skip-review
 ```
 
-### 3. 运行流程
+### 4. Rust 回测
 
-**Step 1: 计算因子并导出**
-```python
-from utils import calc_b1_factors_opt, export_for_rust
-
-# 计算 B1 因子
-df_signals = calc_b1_factors_opt(df_raw)
-
-# 导出供 Rust 使用
-LOOSE_PERIODS = [
-    ("2025-04-09", "2025-09-04"),
-    ("2026-01-05", "2026-03-31"),
-]
-
-export_for_rust(
-    df_signals,
-    output_path="data/signals/market_data.parquet",
-    loose_periods=LOOSE_PERIODS,
-    start_date="2025-01-01",
-)
-```
-
-**Step 2: 运行回测**
 ```bash
 cd backtest-engine
 cargo run --release -- --data ../data/signals/market_data.parquet
 ```
 
-## ⚙️ 配置文件
+## B1 策略体系
 
-回测引擎通过 `config.toml` 进行配置，无需重新编译即可调参：
+### 核心信号条件
 
-```toml
-[backtest]
-initial_capital = 100000.0  # 初始资金
-max_positions = 5           # 最大持仓数量
-max_daily_buys = 5          # 每天最多买入数量
-position_size_pct = 0.2     # 单只股票目标仓位 = 总资产 × 20% (动态复利)
-max_hold_days = 30          # 最大持有天数
-start_date = "2025-01-05"   # 回测开始日期 (可选)
-end_date = "2026-01-15"     # 回测结束日期 (可选)
-sort_field = "vol_ratio"    # 买入排序字段 (缩量优先)
-sort_ascending = true       # 升序排序
+| 条件 | 说明 |
+|------|------|
+| J <= 13.8 | KDJ J值超卖 |
+| 倍量柱/关键K | 28天内有资金异动 |
+| WL > YL | 日线知行双线多头 |
+| 形态收敛 + 量能窒息 | 视觉量化严选 |
+| 均线基因指纹 | WL/YL 三重乖离率约束 |
 
-[stop_loss]
-enabled = true
-pct = 0.03                  # 止损比例 (3%)
+### 多周期过滤 (wmacd 版本)
 
-[take_profit]
-tp1_pct = 0.15              # 第一阶段止盈 (15%)
-tp2_pct = 0.30              # 第二阶段止盈 (30%)
-sell_ratio = 0.333          # 每阶段卖出比例 (1/3)
-sell_on_break_wl = true     # Stage2 跌破 WL 清仓
+| 过滤器 | 作用 |
+|--------|------|
+| 周线 MACD: DIF > 0 且红柱 | 中期趋势确认 |
+| 月线 MACD: 红柱 | 大趋势向上 |
+| 周线 WL > YL (可选) | 周级别短期趋势健康 |
 
-[weak_performance]
-enabled = true
-days = 10                   # N 天后检查
-min_gain_pct = 0.05         # 最低涨幅要求 (5%)
-
-[trailing_stop]
-enabled = false             # 移动止损 (可选)
-activation_pct = 0.10
-trailing_pct = 0.05
-
-[costs]
-commission_rate = 0.00025   # 佣金 (万2.5)
-stamp_duty_rate = 0.001     # 印花税 (千1，仅卖出)
-slippage_pct = 0.001        # 滑点 (0.1%)
-```
-
-## 📈 回测策略
-
-### 买入条件
-- `pre_b1_signal = true` (昨日产生 B1 信号)
-- `is_loose = true` (处于活跃期)
-- 按 `vol_ratio` 排序 (缩量优先)
-- 每日最多买入 `max_daily_buys` 只
-
-### 仓位计算 (动态复利)
-```
-目标仓位 = (现金 + 持仓市值) × position_size_pct
-持仓市值 = Σ(持仓股数 × 昨日收盘价)
-```
-- 账户盈利 → 新仓位自动变大 (复利效应)
-- 账户亏损 → 新仓位自动变小 (风险控制)
-- 现金略不足 → 尽量买 (至少目标的 50%)
-
-### 卖出条件 (按优先级)
-1. **止损**: 收盘价跌幅 ≥ 3%
-2. **移动止损**: 涨幅达激活点后，从最高点回撤超阈值 (可选)
-3. **弱势清仓**: 10 天后涨幅不足 5%
-4. **分批止盈**:
-   - 涨 15% → 卖 1/3 (Stage 1)
-   - 涨 30% → 再卖 1/3 (Stage 2)
-   - Stage 2 后跌破 WL → 卖出剩余
-5. **超时**: 持有 ≥ 30 天
-
-### 回测指标 (2025.01 - 2026.01)
+### 统计学回测表现 (wmacd + 周线WL>YL, 2020-2026)
 
 ```
-========================================
-           Backtest Results
-========================================
-Total Trades: ~65
-Win Rate: ~57%
-Total Return: +15% ~ +18%  (动态仓位复利效应)
-Max Drawdown: ~5%
-----------------------------------------
-Trading Costs: ~2500 (佣金+印花税+滑点)
-========================================
+信号总数: 5320
+持仓5天:  53.2% 胜率, 1.49% 均值, 1.84x 盈亏比
+持仓10天: 50.7% 胜率, 2.49% 均值, 2.33x 盈亏比
+持仓20天: 47.5% 胜率, 4.44% 均值, 3.32x 盈亏比
+持仓30天: 43.0% 胜率, 5.56% 均值, 4.29x 盈亏比
 ```
 
-> 注：由于动态仓位机制，盈利时仓位自动放大，收益比固定仓位更高。
+## Rust 回测引擎
 
-## 💡 策略容量发现
+通过 `config.toml` 配置，无需重新编译即可调参：
 
-回测显示该策略存在 **容量天花板**：
-
-| 资金规模 | 持仓数 | 收益率 | 说明 |
-|----------|--------|--------|------|
-| 10万 | 5只 | **+15~18%** | ✅ 最优 (动态复利) |
-| 50万 | 10只 | +6~8% | 信号稀释 |
-
-**结论**: 策略最佳规模为 **10-30万**，资金过大会导致收益稀释。
-
-## 🔧 开发说明
-
-### Rust 编译优化
-
-`Cargo.toml` 配置了三种模式:
-
-| 命令 | 编译速度 | 运行速度 | 用途 |
-|------|---------|---------|------|
-| `cargo run` | ⚡ 最快 | 🐢 较慢 | 日常调试 |
-| `cargo run --release` | ⚡ 快 | 🚀 快 | 开发回测 |
-| `cargo run --profile production` | 🐢 慢 | 🚀🚀 极致 | 正式回测 |
+- 动态仓位 (复利): 盈利时自动加仓，亏损时自动减仓
+- 分批止盈: 15% 卖 1/3 → 30% 卖 1/3 → 跌破 WL 清仓
+- 3% 止损 + 10 天弱势清仓
+- 交易成本: 佣金万 2.5 + 印花税千 1 + 滑点 0.1%
 
 ### 为什么用 Bevy ECS？
 
@@ -213,9 +167,9 @@ Trading Costs: ~2500 (佣金+印花税+滑点)
 - **高性能**: Rust + ECS 架构，毫秒级回测
 - **可扩展**: 新增卖出条件只需添加 System
 
-## 📝 注意事项
+## 注意事项
 
 - `data/` 目录已被 `.gitignore` 忽略
-- Rust 回测引擎需要 `market_data.parquet` 文件
+- 数据存储使用 DuckDB，支持 QMT 和 Baostock 两种数据源
 - 建议使用 Marimo 替代 Jupyter 进行交互式研究
-- 配置文件修改后无需重新编译
+- AI Agent 需要 `GEMINI_API_KEY` 环境变量 (使用 Gemini 评审时)
