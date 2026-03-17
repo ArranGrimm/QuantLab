@@ -131,12 +131,13 @@ def load_daily_data_full(conn, codes: list[str] = None):
         # 5. 过滤停牌/无量数据 (保持旧逻辑)
         .filter(pl.col("volume") > 0)
         
-        # 6. 选择并排序最终列 (严格匹配你的旧结构)
+        # 6. 选择并排序最终列
         .select([
             "code", "date", 
             "open_adj", "high_adj", "low_adj", "close_adj", 
             "volume", "amount", 
-            "close_raw", "market_cap_100m"
+            "close_raw", "market_cap_100m",
+            "circulating_capital",
         ])
         .sort(["code", "date"])
     )

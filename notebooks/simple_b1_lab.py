@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.2"
+__generated_with = "0.20.4"
 app = marimo.App(width="medium")
 
 
@@ -60,9 +60,10 @@ def _():
         analyze_yearly_intensity,
         calc_b1_factors_wmacd,
         datetime,
-        export_for_rust,
         pl,
+        print_backtest_report,
         q_full,
+        run_backtest,
     )
 
 
@@ -70,13 +71,19 @@ def _():
 def _(calc_b1_factors_wmacd, q_full):
     # 3. 执行计算
     print("⏳ 计算原始 B1 信号...")
-    config_opt = {"MV_THRESHOLD": 25, "WEEKLY_WL_YL_FILTER": True}
+    config_opt = {"MV_THRESHOLD": 25, 
+                  "WEEKLY_WL_YL_FILTER": True, 
+                    "WAVE_OVERHEAT_FILTER": True,  # 开关 (默认关闭, 需回测调参)
+                    # "WAVE_MAX_TURNOVER": 30,        # 中长阳累计换手率阈值 (%)
+                    # "WAVE_MAX_GAIN": 0.30,          # 累计涨幅阈值 (30%)
+                    # "WAVE_YANG_THRESHOLD": 0.03,    # 中长阳判定: 实体涨幅 >= 3%
+                 }
     df_signals = calc_b1_factors_wmacd(q_full, config_opt)
     return (df_signals,)
 
 
 @app.cell
-def _(df_signals, export_for_rust):
+def _(df_signals, print_backtest_report, run_backtest):
     return_days = [5, 10, 15, 20, 25, 30]
 
     LOOSE_PERIODS = [
@@ -90,22 +97,22 @@ def _(df_signals, export_for_rust):
         ("2024-02-06", "2024-03-20"),  # 救市后AI反弹
         ("2024-09-24", "2024-10-15"),  # 924 史诗级暴涨
         ("2025-04-09", "2025-09-04"),  # 2025年慢牛行情
-        ("2026-01-05", "2026-03-31"),  # 2025年慢牛行情延续
+        ("2026-01-05", "2026-02-01"),  # 2025年慢牛行情延续
     ]
 
     # 导出信号供 Rust 使用
-    export_for_rust(
-        df_signals,
-        output_path="data/signals/market_data_wmacd.parquet",
-        loose_periods=LOOSE_PERIODS,
-        start_date='2019-01-01',
-        extra_sort_cols=['rw_dif_pct']
-    )
-    print(f"导出完成")
+    # export_for_rust(
+    #     df_signals,
+    #     output_path="data/signals/market_data_wmacd.parquet",
+    #     loose_periods=LOOSE_PERIODS,
+    #     start_date='2019-01-01',
+    #     extra_sort_cols=['rw_dif_pct']
+    # )
+    # print(f"导出完成")
 
-    # df_result_dynamic = run_backtest(df_signals, return_days=return_days, loose_periods=LOOSE_PERIODS, rank_by="rw_dif_pct", rank_ascending=False, top_n=200, stop_loss_pct=0.03)
-    # print_backtest_report(df_result_dynamic, return_days)
-    return
+    df_result_dynamic = run_backtest(df_signals, return_days=return_days, loose_periods=LOOSE_PERIODS, rank_by="rw_dif_pct", rank_ascending=False, top_n=200, stop_loss_pct=0.03)
+    print_backtest_report(df_result_dynamic, return_days)
+    return (df_result_dynamic,)
 
 
 @app.cell

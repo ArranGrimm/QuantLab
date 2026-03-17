@@ -44,6 +44,12 @@ DEFAULT_CONFIG = {
     "BAD_K_OPEN_PCT": 0.925,        # 坏K开盘位置
     "BAD_K_VOL_RATIO": 1.15,        # 坏K量比
     "BAD_K_AMNESTY_RATIO": 0.66,    # 坏K赦免比例
+
+    # === 建仓波过热过滤 ===
+    "WAVE_OVERHEAT_FILTER": False,  # 开关 (默认关闭, 需回测调参)
+    "WAVE_MAX_TURNOVER": 30,        # 中长阳累计换手率阈值 (%)
+    "WAVE_MAX_GAIN": 0.30,          # 累计涨幅阈值 (30%)
+    "WAVE_YANG_THRESHOLD": 0.03,    # 中长阳判定: 实体涨幅 >= 3%
 }
 
 
@@ -630,6 +636,55 @@ def calc_b1_factors_wmacd(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame
         (pl.col("J") <= cfg["J_THRESHOLD"]).alias("J_OK")
     ])
 
+    # ===== Phase 2.5: 建仓波过热过滤 =====
+    # 建仓波 = WL 金叉 YL 起, 累计中长阳换手率 + 累计涨幅超阈值 → 过热
+    if cfg.get("WAVE_OVERHEAT_FILTER", False):
+        yang_thr = cfg.get("WAVE_YANG_THRESHOLD", 0.03)
+        print(f"  [Wave] 建仓波过热过滤: 中长阳>={yang_thr:.0%}, "
+              f"换手>{cfg.get('WAVE_MAX_TURNOVER', 30)}%, "
+              f"涨幅>{cfg.get('WAVE_MAX_GAIN', 0.30):.0%}")
+
+        df_b1_signals = (
+            df_b1_signals
+            .with_columns([
+                # 日换手率 (%): volume / 流通股本
+                (pl.col("volume") / pl.col("circulating_capital").fill_null(1) * 100)
+                    .fill_nan(0.0).alias("turnover_rate"),
+                # 中长阳线: 实体涨幅 >= 阈值
+                ((pl.col("close_adj") / pl.col("open_adj") - 1) >= yang_thr).alias("_is_mid_yang"),
+                # WL 金叉 YL (从下往上穿)
+                (
+                    (pl.col("WL") > pl.col("YL")) &
+                    (pl.col("WL").shift(1).over("code") <= pl.col("YL").shift(1).over("code"))
+                ).fill_null(False).alias("_wl_cross_yl"),
+            ])
+            .with_columns(
+                pl.col("_wl_cross_yl").cast(pl.Int32).cum_sum().over("code").alias("wave_id")
+            )
+            .with_columns([
+                # 波段起点收盘价
+                pl.col("close_adj").first().over(["code", "wave_id"]).alias("_wave_start_close"),
+                # 仅累加中长阳线当天的换手率
+                pl.when(pl.col("_is_mid_yang"))
+                    .then(pl.col("turnover_rate"))
+                    .otherwise(0.0)
+                    .cum_sum()
+                    .over(["code", "wave_id"])
+                    .alias("wave_yang_turnover"),
+            ])
+            .with_columns(
+                ((pl.col("close_adj") - pl.col("_wave_start_close")) / pl.col("_wave_start_close"))
+                    .alias("wave_gain")
+            )
+            .with_columns(
+                (
+                    (pl.col("wave_yang_turnover") > cfg.get("WAVE_MAX_TURNOVER", 30)) &
+                    (pl.col("wave_gain") > cfg.get("WAVE_MAX_GAIN", 0.30)) &
+                    (pl.col("wave_id") > 0)
+                ).alias("WAVE_OVERHEAT")
+            )
+        )
+
     # ===== Phase 3: 最终信号 (B1 + 周线MACD过滤 + 可选大周期择时) =====
     signal_expr = (
         pl.col("TRIGGER") & 
@@ -649,6 +704,8 @@ def calc_b1_factors_wmacd(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame
         signal_expr = signal_expr & pl.col("WEEKLY_TREND_OK")
     if cfg.get("WEEKLY_WL_YL_FILTER", False):
         signal_expr = signal_expr & pl.col("WEEKLY_WL_YL_OK")
+    if cfg.get("WAVE_OVERHEAT_FILTER", False):
+        signal_expr = signal_expr & ~pl.col("WAVE_OVERHEAT")
 
     return df_b1_signals.with_columns([
         signal_expr.alias("b1_signal")
