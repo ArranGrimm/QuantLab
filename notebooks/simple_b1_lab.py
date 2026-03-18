@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.4"
+__generated_with = "0.21.0"
 app = marimo.App(width="medium")
 
 
@@ -72,8 +72,8 @@ def _(calc_b1_factors_wmacd, q_full):
     # 3. 执行计算
     print("⏳ 计算原始 B1 信号...")
     config_opt = {"MV_THRESHOLD": 25, 
-                  "WEEKLY_WL_YL_FILTER": True, 
-                    "WAVE_OVERHEAT_FILTER": True,  # 开关 (默认关闭, 需回测调参)
+                  # "WEEKLY_WL_YL_FILTER": True, 
+                    # "WAVE_OVERHEAT_FILTER": True,  # 开关 (默认关闭, 需回测调参)
                     # "WAVE_MAX_TURNOVER": 30,        # 中长阳累计换手率阈值 (%)
                     # "WAVE_MAX_GAIN": 0.30,          # 累计涨幅阈值 (30%)
                     # "WAVE_YANG_THRESHOLD": 0.03,    # 中长阳判定: 实体涨幅 >= 3%
@@ -97,7 +97,7 @@ def _(df_signals, print_backtest_report, run_backtest):
         ("2024-02-06", "2024-03-20"),  # 救市后AI反弹
         ("2024-09-24", "2024-10-15"),  # 924 史诗级暴涨
         ("2025-04-09", "2025-09-04"),  # 2025年慢牛行情
-        ("2026-01-05", "2026-02-01"),  # 2025年慢牛行情延续
+        ("2026-01-05", "2026-02-02"),  # 2025年慢牛行情延续
     ]
 
     # 导出信号供 Rust 使用
