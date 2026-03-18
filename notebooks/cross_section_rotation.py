@@ -38,10 +38,11 @@ def _():
 
     print("🚀 [Step 1] 加载全量日线数据...")
     st_blacklist = get_st_blacklist_pl("2026-03-17")
+    st_blacklist_df = pl.DataFrame({"code": st_blacklist}).lazy()
 
     q_full = (
         load_daily_data_full(conn)
-        .filter(~pl.col("code").is_in(st_blacklist))
+        .join(st_blacklist_df, on="code", how="anti")
         .filter(pl.col("date") >= pl.lit(START_DATE).str.strptime(pl.Date, "%Y-%m-%d"))
     )
 
@@ -83,7 +84,7 @@ def _(
 ):
     import os
 
-    os.environ['RUST_BACKTRACE']='1'
+    os.environ['RUST_BACKTRACE']='full'
     # ==============================================================================
     # Cell 2: 因子计算 + 截面标准化 + Label
     # ==============================================================================
@@ -91,7 +92,8 @@ def _(
 
     df_factors = calc_rotation_factors(q_universe)
 
-    # Label: T 日买入(收盘价) → T+1 日卖出(收盘价) 的收益
+    # Label: T 日尾盘买入 → T+1 日尾盘卖出
+    # 因子使用 T-1 及更早数据 (shift(1), 无前视), 信号在 T 日盘中计算完毕
     df_with_label = df_factors.with_columns(
         (pl.col("close_adj").shift(-1).over("code") / pl.col("close_adj") - 1)
             .alias("fwd_ret_1d")
@@ -100,9 +102,17 @@ def _(
     # 截面标准化
     df_normalized = cross_section_normalize(df_with_label, FACTOR_COLS)
 
+    # 只保留研究需要的列，避免把中间辅助列一并 collect
+    final_cols = [
+        "code", "date", "open_adj", "high_adj", "low_adj", "close_adj",
+        "volume", "amount", "close_raw", "market_cap_100m",
+        "circulating_capital", "fwd_ret_1d",
+        *FACTOR_COLS,
+    ]
+
     # 收集 (触发计算)
     print("⏳ [Step 2] Collecting... (这一步可能需要几分钟)")
-    df_all = df_normalized.collect()
+    df_all = df_normalized.select(final_cols).collect()
     print(f"✅ 数据集: {df_all.shape[0]:,} 行 x {df_all.shape[1]} 列")
     print(f"   日期范围: {df_all['date'].min()} ~ {df_all['date'].max()}")
     print(f"   股票数量: {df_all['code'].n_unique()}")
@@ -114,81 +124,94 @@ def _(FACTOR_COLS, df_all, go, make_subplots, np, pl, stats):
     # ==============================================================================
     # Cell 3: 因子 IC 分析
     # ==============================================================================
-    print("📊 [Step 3] 计算因子 IC (Spearman 截面相关系数)...")
+    def run_ic_analysis():
+        print("📊 [Step 3] 计算因子 IC (Spearman 截面相关系数)...")
 
-    # 过滤掉没有 label 的行
-    df_valid = df_all.filter(pl.col("fwd_ret_1d").is_not_null() & pl.col("fwd_ret_1d").is_not_nan())
+        df_valid_local = df_all.filter(
+            pl.col("fwd_ret_1d").is_not_null() & pl.col("fwd_ret_1d").is_not_nan()
+        )
 
-    dates = df_valid["date"].unique().sort().to_list()
-    ic_records = []
+        trading_dates = df_valid_local["date"].unique().sort().to_list()
+        ic_records_local = []
 
-    for d in dates:
-        daily = df_valid.filter(pl.col("date") == d)
-        if len(daily) < 30:
-            continue
-        ret = daily["fwd_ret_1d"].to_numpy()
-        row = {"date": d}
-        for f in FACTOR_COLS:
-            fvals = daily[f].to_numpy()
-            mask = np.isfinite(fvals) & np.isfinite(ret)
-            if mask.sum() < 30:
-                row[f] = np.nan
-            else:
-                corr, _ = stats.spearmanr(fvals[mask], ret[mask])
-                row[f] = corr
-        ic_records.append(row)
+        for trade_date in trading_dates:
+            daily_df = df_valid_local.filter(pl.col("date") == trade_date)
+            if len(daily_df) < 30:
+                continue
 
-    df_ic = pl.DataFrame(ic_records)
-    print(f"✅ IC 计算完成: {len(df_ic)} 个交易日")
+            ret_values = daily_df["fwd_ret_1d"].to_numpy()
+            ic_row = {"date": trade_date}
 
-    # IC 汇总统计
-    ic_summary = []
-    for f in FACTOR_COLS:
-        ic_series = df_ic[f].drop_nulls().drop_nans()
-        if len(ic_series) == 0:
-            continue
-        ic_arr = ic_series.to_numpy()
-        ic_mean = np.mean(ic_arr)
-        ic_std = np.std(ic_arr)
-        icir = ic_mean / ic_std if ic_std > 0 else 0
-        ic_pos_ratio = np.mean(ic_arr > 0)
-        ic_summary.append({
-            "factor": f,
-            "IC_mean": round(ic_mean, 4),
-            "IC_std": round(ic_std, 4),
-            "ICIR": round(icir, 4),
-            "IC_pos_ratio": round(ic_pos_ratio, 4),
-            "abs_ICIR": round(abs(icir), 4),
-        })
+            for factor_name in FACTOR_COLS:
+                factor_values = daily_df[factor_name].to_numpy()
+                valid_mask = np.isfinite(factor_values) & np.isfinite(ret_values)
+                if valid_mask.sum() < 30:
+                    ic_row[factor_name] = np.nan
+                else:
+                    corr, _ = stats.spearmanr(factor_values[valid_mask], ret_values[valid_mask])
+                    ic_row[factor_name] = corr
 
-    df_ic_summary = pl.DataFrame(ic_summary).sort("abs_ICIR", descending=True)
-    print("\n" + "=" * 80)
-    print("  因子 IC 排行榜 (按 |ICIR| 降序)")
-    print("=" * 80)
-    print(f"{'因子':<22} {'IC_mean':>10} {'IC_std':>10} {'ICIR':>10} {'IC>0 比例':>10}")
-    print("-" * 80)
-    for row in df_ic_summary.iter_rows(named=True):
-        print(f"{row['factor']:<22} {row['IC_mean']:>10.4f} {row['IC_std']:>10.4f} "
-              f"{row['ICIR']:>10.4f} {row['IC_pos_ratio']:>10.1%}")
-    print("-" * 80)
+            ic_records_local.append(ic_row)
 
-    # Top 6 因子的 IC 累积曲线
-    top_factors = df_ic_summary["factor"].head(6).to_list()
-    fig_ic = make_subplots(rows=1, cols=1)
-    for f in top_factors:
-        ic_cum = df_ic.select(["date", f]).drop_nulls().sort("date")
-        fig_ic.add_trace(go.Scatter(
-            x=ic_cum["date"].to_list(),
-            y=ic_cum[f].cum_sum().to_list(),
-            name=f,
-            mode="lines",
-        ))
-    fig_ic.update_layout(
-        title="Top 6 因子 — IC 累积曲线",
-        xaxis_title="日期", yaxis_title="累积 IC",
-        height=500, template="plotly_dark",
-    )
-    fig_ic.show()
+        df_ic_local = pl.DataFrame(ic_records_local)
+        print(f"✅ IC 计算完成: {len(df_ic_local)} 个交易日")
+
+        ic_summary_local = []
+        for factor_name in FACTOR_COLS:
+            ic_series = df_ic_local[factor_name].drop_nulls().drop_nans()
+            if len(ic_series) == 0:
+                continue
+
+            ic_arr = ic_series.to_numpy()
+            ic_mean = np.mean(ic_arr)
+            ic_std = np.std(ic_arr)
+            icir = ic_mean / ic_std if ic_std > 0 else 0
+            ic_pos_ratio = np.mean(ic_arr > 0)
+            ic_summary_local.append({
+                "factor": factor_name,
+                "IC_mean": round(ic_mean, 4),
+                "IC_std": round(ic_std, 4),
+                "ICIR": round(icir, 4),
+                "IC_pos_ratio": round(ic_pos_ratio, 4),
+                "abs_ICIR": round(abs(icir), 4),
+            })
+
+        df_ic_summary_local = pl.DataFrame(ic_summary_local).sort("abs_ICIR", descending=True)
+        print("\n" + "=" * 80)
+        print("  因子 IC 排行榜 (按 |ICIR| 降序)")
+        print("=" * 80)
+        print(f"{'因子':<22} {'IC_mean':>10} {'IC_std':>10} {'ICIR':>10} {'IC>0 比例':>10}")
+        print("-" * 80)
+        for summary_row in df_ic_summary_local.iter_rows(named=True):
+            print(
+                f"{summary_row['factor']:<22} {summary_row['IC_mean']:>10.4f} "
+                f"{summary_row['IC_std']:>10.4f} {summary_row['ICIR']:>10.4f} "
+                f"{summary_row['IC_pos_ratio']:>10.1%}"
+            )
+        print("-" * 80)
+
+        top_factors_local = df_ic_summary_local["factor"].head(6).to_list()
+        fig_ic_local = make_subplots(rows=1, cols=1)
+        for factor_name in top_factors_local:
+            ic_cum = df_ic_local.select(["date", factor_name]).drop_nulls().sort("date")
+            fig_ic_local.add_trace(go.Scatter(
+                x=ic_cum["date"].to_list(),
+                y=ic_cum[factor_name].cum_sum().to_list(),
+                name=factor_name,
+                mode="lines",
+            ))
+
+        fig_ic_local.update_layout(
+            title="Top 6 因子 — IC 累积曲线",
+            xaxis_title="日期",
+            yaxis_title="累积 IC",
+            height=500,
+            template="plotly_dark",
+        )
+        fig_ic_local.show()
+        return df_ic_local, df_ic_summary_local
+
+    df_ic, df_ic_summary = run_ic_analysis()
     return df_ic, df_ic_summary
 
 
@@ -197,107 +220,118 @@ def _(df_all, df_ic_summary, np, pl):
     # ==============================================================================
     # Cell 4: 简单 Top-N 等权轮动回测
     # ==============================================================================
-    TOP_N = 20
-    COST_RATE = 0.002  # 双边千分之二
+    def run_topn_backtest():
+        top_n = 20
+        cost_rate = 0.002  # 双边千分之二
 
-    # 选择 ICIR 最高的因子作为排序依据
-    best_factor = df_ic_summary["factor"][0]
-    # 根据 IC_mean 的方向决定排序方式
-    best_ic_mean = df_ic_summary.filter(pl.col("factor") == best_factor)["IC_mean"][0]
-    sort_descending = best_ic_mean > 0  # IC>0 → 因子越大收益越高 → 降序
+        best_factor_local = df_ic_summary["factor"][0]
+        best_ic_mean = df_ic_summary.filter(pl.col("factor") == best_factor_local)["IC_mean"][0]
+        sort_desc = best_ic_mean > 0
 
-    print(f"🎯 [Step 4] Top-{TOP_N} 轮动回测")
-    print(f"   排序因子: {best_factor} (IC_mean={best_ic_mean:.4f}, {'降序' if sort_descending else '升序'})")
-    print(f"   双边成本: {COST_RATE:.1%}")
+        print(f"🎯 [Step 4] Top-{top_n} 轮动回测")
+        print(
+            f"   排序因子: {best_factor_local} "
+            f"(IC_mean={best_ic_mean:.4f}, {'降序' if sort_desc else '升序'})"
+        )
+        print(f"   双边成本: {cost_rate:.1%}")
 
-    # 也构建一个多因子等权合成得分做对比
-    # 取 ICIR 最高的 5 个因子, 按 IC 方向对齐后等权求和
-    top5 = df_ic_summary.head(5)
-    score_exprs = []
-    for row in top5.iter_rows(named=True):
-        f = row["factor"]
-        direction = 1 if row["IC_mean"] > 0 else -1
-        score_exprs.append(pl.col(f) * direction)
+        top5_factors = df_ic_summary.head(5)
+        score_exprs = []
+        for factor_row in top5_factors.iter_rows(named=True):
+            factor_name = factor_row["factor"]
+            direction = 1 if factor_row["IC_mean"] > 0 else -1
+            score_exprs.append(pl.col(factor_name) * direction)
 
-    df_scored = df_all.with_columns(
-        (sum(score_exprs) / len(score_exprs)).alias("composite_score")
-    )
+        df_scored_local = df_all.with_columns(
+            (sum(score_exprs) / len(score_exprs)).alias("composite_score")
+        )
 
-    # 逐日回测
-    df_valid_bt = df_scored.filter(
-        pl.col("fwd_ret_1d").is_not_null() & pl.col("fwd_ret_1d").is_not_nan()
-    )
-    dates_bt = df_valid_bt["date"].unique().sort().to_list()
+        df_valid_bt_local = df_scored_local.filter(
+            pl.col("fwd_ret_1d").is_not_null() & pl.col("fwd_ret_1d").is_not_nan()
+        )
+        trading_dates = df_valid_bt_local["date"].unique().sort().to_list()
 
-    results_single = []   # 单因子
-    results_composite = []  # 多因子合成
+        results_single_local = []
+        results_composite_local = []
+        results_bench_local = []
 
-    for d in dates_bt:
-        daily = df_valid_bt.filter(pl.col("date") == d)
-        if len(daily) < TOP_N:
-            continue
+        for trade_date in trading_dates:
+            daily_df = df_valid_bt_local.filter(pl.col("date") == trade_date)
+            if len(daily_df) < top_n:
+                continue
 
-        # 单因子 Top-N
-        top_single = daily.sort(best_factor, descending=sort_descending).head(TOP_N)
-        avg_ret_single = top_single["fwd_ret_1d"].mean()
-        results_single.append({"date": d, "daily_ret": avg_ret_single - COST_RATE})
+            top_single = daily_df.sort(best_factor_local, descending=sort_desc).head(top_n)
+            avg_ret_single = top_single["fwd_ret_1d"].mean()
+            results_single_local.append({"date": trade_date, "daily_ret": avg_ret_single - cost_rate})
 
-        # 多因子合成 Top-N
-        top_composite = daily.sort("composite_score", descending=True).head(TOP_N)
-        avg_ret_composite = top_composite["fwd_ret_1d"].mean()
-        results_composite.append({"date": d, "daily_ret": avg_ret_composite - COST_RATE})
+            top_composite = daily_df.sort("composite_score", descending=True).head(top_n)
+            avg_ret_composite = top_composite["fwd_ret_1d"].mean()
+            results_composite_local.append({"date": trade_date, "daily_ret": avg_ret_composite - cost_rate})
 
-    df_bt_single = pl.DataFrame(results_single).sort("date")
-    df_bt_composite = pl.DataFrame(results_composite).sort("date")
+            avg_ret_bench = daily_df["fwd_ret_1d"].mean()
+            results_bench_local.append({"date": trade_date, "daily_ret": avg_ret_bench})
 
-    # 全 A 等权基准
-    results_bench = []
-    for d in dates_bt:
-        daily = df_valid_bt.filter(pl.col("date") == d)
-        if len(daily) < TOP_N:
-            continue
-        avg_ret = daily["fwd_ret_1d"].mean()
-        results_bench.append({"date": d, "daily_ret": avg_ret})
-    df_bench = pl.DataFrame(results_bench).sort("date")
+        df_bt_single_local = pl.DataFrame(results_single_local).sort("date")
+        df_bt_composite_local = pl.DataFrame(results_composite_local).sort("date")
+        df_bench_local = pl.DataFrame(results_bench_local).sort("date")
 
-    # 计算净值
-    def calc_metrics(df_ret, name):
-        rets = df_ret["daily_ret"].to_numpy()
-        nav = np.cumprod(1 + rets)
-        total_ret = nav[-1] - 1
-        n_years = len(rets) / 242
-        ann_ret = (1 + total_ret) ** (1 / max(n_years, 0.01)) - 1
-        max_dd = np.max(1 - nav / np.maximum.accumulate(nav))
-        sharpe = np.mean(rets) / max(np.std(rets), 1e-8) * np.sqrt(242)
-        avg_daily = np.mean(rets)
-        win_rate = np.mean(rets > 0)
-        skew = float(pl.Series(rets).skew()) if len(rets) > 2 else 0
-        return {
-            "name": name,
-            "total_ret": total_ret,
-            "ann_ret": ann_ret,
-            "max_dd": max_dd,
-            "sharpe": sharpe,
-            "avg_daily": avg_daily,
-            "win_rate": win_rate,
-            "skew": skew,
-            "n_days": len(rets),
-        }
+        def calc_metrics(df_ret, name):
+            rets = df_ret["daily_ret"].to_numpy()
+            nav = np.cumprod(1 + rets)
+            total_ret = nav[-1] - 1
+            n_years = len(rets) / 242
+            ann_ret = (1 + total_ret) ** (1 / max(n_years, 0.01)) - 1
+            max_dd = np.max(1 - nav / np.maximum.accumulate(nav))
+            sharpe = np.mean(rets) / max(np.std(rets), 1e-8) * np.sqrt(242)
+            avg_daily = np.mean(rets)
+            win_rate = np.mean(rets > 0)
+            skew = float(pl.Series(rets).skew()) if len(rets) > 2 else 0
+            return {
+                "name": name,
+                "total_ret": total_ret,
+                "ann_ret": ann_ret,
+                "max_dd": max_dd,
+                "sharpe": sharpe,
+                "avg_daily": avg_daily,
+                "win_rate": win_rate,
+                "skew": skew,
+                "n_days": len(rets),
+            }
 
-    m_single = calc_metrics(df_bt_single, f"单因子({best_factor})")
-    m_composite = calc_metrics(df_bt_composite, "多因子合成(Top5)")
-    m_bench = calc_metrics(df_bench, "全A等权基准")
+        metrics_single = calc_metrics(df_bt_single_local, f"单因子({best_factor_local})")
+        metrics_composite = calc_metrics(df_bt_composite_local, "多因子合成(Top5)")
+        metrics_bench = calc_metrics(df_bench_local, "全A等权基准")
 
-    print("\n" + "=" * 100)
-    print(f"  Top-{TOP_N} 等权轮动回测 (双边成本 {COST_RATE:.1%})")
-    print("=" * 100)
-    print(f"{'策略':<22} {'年化':>8} {'累计':>8} {'最大回撤':>8} {'Sharpe':>8} {'日均':>8} {'胜率':>8} {'偏度':>8} {'天数':>6}")
-    print("-" * 100)
-    for m in [m_single, m_composite, m_bench]:
-        print(f"{m['name']:<22} {m['ann_ret']:>7.1%} {m['total_ret']:>7.1%} "
-              f"{m['max_dd']:>7.1%} {m['sharpe']:>8.2f} {m['avg_daily']:>7.3%} "
-              f"{m['win_rate']:>7.1%} {m['skew']:>8.2f} {m['n_days']:>6d}")
-    print("-" * 100)
+        print("\n" + "=" * 100)
+        print(f"  Top-{top_n} 等权轮动回测 (双边成本 {cost_rate:.1%})")
+        print("=" * 100)
+        print(f"{'策略':<22} {'年化':>8} {'累计':>8} {'最大回撤':>8} {'Sharpe':>8} {'日均':>8} {'胜率':>8} {'偏度':>8} {'天数':>6}")
+        print("-" * 100)
+        for metric in [metrics_single, metrics_composite, metrics_bench]:
+            print(
+                f"{metric['name']:<22} {metric['ann_ret']:>7.1%} {metric['total_ret']:>7.1%} "
+                f"{metric['max_dd']:>7.1%} {metric['sharpe']:>8.2f} {metric['avg_daily']:>7.3%} "
+                f"{metric['win_rate']:>7.1%} {metric['skew']:>8.2f} {metric['n_days']:>6d}"
+            )
+        print("-" * 100)
+
+        return (
+            cost_rate,
+            top_n,
+            best_factor_local,
+            df_bench_local,
+            df_bt_composite_local,
+            df_bt_single_local,
+        )
+
+    (
+        COST_RATE,
+        TOP_N,
+        best_factor,
+        df_bench,
+        df_bt_composite,
+        df_bt_single,
+    ) = run_topn_backtest()
     return (
         COST_RATE,
         TOP_N,
@@ -435,6 +469,236 @@ def _(
             xaxis_title="月份", yaxis_title="因子",
         )
         fig_heat.show()
+    return
+
+
+@app.cell
+def _(FACTOR_COLS, df_all, go, make_subplots, np, pl):
+    # ==============================================================================
+    # Cell 6: LightGBM Walk-Forward 回测
+    # ==============================================================================
+    def run_lgbm_walkforward():
+        import lightgbm as lgb
+        import warnings
+        import sys
+        warnings.filterwarnings("ignore", category=UserWarning)
+
+        TRAIN_WINDOW = 480   # ~2 年训练窗口
+        RETRAIN_FREQ = 20    # 每 20 个交易日重训一次
+        TOP_N = 20
+        COST = 0.002
+
+        feature_cols = list(FACTOR_COLS)
+
+        lgb_params = {
+            "n_estimators": 200,
+            "max_depth": 6,
+            "learning_rate": 0.05,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "reg_alpha": 0.1,
+            "reg_lambda": 1.0,
+            "min_child_samples": 100,
+            "verbose": -1,
+            "n_jobs": -1,
+            "random_state": 42,
+        }
+
+        print(f"🤖 [Phase 2] LightGBM Walk-Forward 回测", flush=True)
+        print(f"   训练窗口: {TRAIN_WINDOW}天, 重训频率: 每{RETRAIN_FREQ}天", flush=True)
+        print(f"   特征数: {len(feature_cols)}, Top-{TOP_N}, 成本: {COST:.1%}", flush=True)
+
+        df_valid_ml = (
+            df_all
+            .filter(pl.col("fwd_ret_1d").is_not_null() & pl.col("fwd_ret_1d").is_not_nan())
+            .sort("date")
+        )
+
+        X_all_np = df_valid_ml.select(feature_cols).to_numpy(allow_copy=True).astype(np.float32)
+        y_all_np = df_valid_ml["fwd_ret_1d"].to_numpy().astype(np.float32)
+        dates_np = df_valid_ml["date"].to_numpy()
+
+        unique_dates_ml = np.unique(dates_np)
+        unique_dates_ml.sort()
+        n_dates = len(unique_dates_ml)
+
+        date_start = np.searchsorted(dates_np, unique_dates_ml, side="left")
+        date_end = np.searchsorted(dates_np, unique_dates_ml, side="right")
+
+        results_ml = []
+        model = None
+        last_train_idx = -RETRAIN_FREQ
+
+        for i in range(TRAIN_WINDOW, n_dates):
+            cur_date = unique_dates_ml[i]
+
+            if i - last_train_idx >= RETRAIN_FREQ or model is None:
+                ts = date_start[i - TRAIN_WINDOW]
+                te = date_end[i - 1]
+                X_tr = X_all_np[ts:te]
+                y_tr = y_all_np[ts:te]
+
+                valid = np.isfinite(y_tr)
+                if valid.sum() < 1000:
+                    continue
+
+                model = lgb.LGBMRegressor(**lgb_params)
+                model.fit(
+                    X_tr[valid], y_tr[valid],
+                    feature_name=feature_cols,
+                )
+                last_train_idx = i
+
+                pct = (i - TRAIN_WINDOW) / (n_dates - TRAIN_WINDOW) * 100
+                print(
+                    f"   [{cur_date}] 重训 ({pct:.0f}%), "
+                    f"样本: {valid.sum():,}",
+                    flush=True,
+                )
+
+            s, e = date_start[i], date_end[i]
+            X_te = X_all_np[s:e]
+            y_te = y_all_np[s:e]
+            n_stocks = e - s
+
+            if n_stocks < TOP_N:
+                continue
+
+            preds = model.predict(X_te)
+            top_idx = np.argsort(preds)[-TOP_N:]
+
+            avg_ret_gross = float(np.nanmean(y_te[top_idx]))
+            bench_ret = float(np.nanmean(y_te))
+
+            results_ml.append({
+                "date": cur_date.astype("datetime64[D]").item(),
+                "daily_ret": avg_ret_gross - COST,
+                "gross": avg_ret_gross,
+                "bench": bench_ret,
+                "n_stocks": n_stocks,
+            })
+
+        df_ml = pl.DataFrame(results_ml).sort("date")
+
+        def calc_perf(rets_arr, name):
+            nav = np.cumprod(1 + rets_arr)
+            total = nav[-1] - 1
+            n_y = len(rets_arr) / 242
+            ann = (1 + total) ** (1 / max(n_y, 0.01)) - 1
+            dd = np.max(1 - nav / np.maximum.accumulate(nav))
+            sh = np.mean(rets_arr) / max(np.std(rets_arr), 1e-8) * np.sqrt(242)
+            wr = np.mean(rets_arr > 0)
+            sk = float(pl.Series(rets_arr).skew()) if len(rets_arr) > 2 else 0
+            return {
+                "name": name, "total": total, "ann": ann, "dd": dd,
+                "sharpe": sh, "avg": np.mean(rets_arr), "wr": wr,
+                "skew": sk, "n": len(rets_arr),
+            }
+
+        m_net = calc_perf(df_ml["daily_ret"].to_numpy(), f"LGB Top-{TOP_N} (净)")
+        m_gross = calc_perf(df_ml["gross"].to_numpy(), f"LGB Top-{TOP_N} (毛)")
+        m_bench = calc_perf(df_ml["bench"].to_numpy(), "全A等权基准")
+
+        print(f"\n{'=' * 110}")
+        print(f"  LightGBM Walk-Forward Top-{TOP_N}")
+        print(f"{'=' * 110}")
+        hdr = f"{'策略':<24} {'年化':>8} {'累计':>8} {'最大回撤':>8} {'Sharpe':>8} {'日均':>8} {'胜率':>8} {'偏度':>8} {'天数':>6}"
+        print(hdr)
+        print("-" * 110)
+        for m in [m_net, m_gross, m_bench]:
+            print(
+                f"{m['name']:<24} {m['ann']:>7.1%} {m['total']:>7.1%} "
+                f"{m['dd']:>7.1%} {m['sharpe']:>8.2f} {m['avg']:>7.3%} "
+                f"{m['wr']:>7.1%} {m['skew']:>8.2f} {m['n']:>6d}"
+            )
+        print("-" * 110)
+
+        # Feature importance
+        if model is not None:
+            imp_vals = model.feature_importances_
+            imp_max = max(imp_vals) if max(imp_vals) > 0 else 1
+            imp_df = pl.DataFrame({
+                "factor": feature_cols,
+                "importance": imp_vals.tolist(),
+            }).sort("importance", descending=True)
+
+            print("\n" + "=" * 55)
+            print("  LightGBM 特征重要性 Top 15")
+            print("=" * 55)
+            for imp_row in imp_df.head(15).iter_rows(named=True):
+                bar_len = int(imp_row["importance"] / imp_max * 30)
+                bar = "█" * bar_len
+                print(f"  {imp_row['factor']:<22} {imp_row['importance']:>6} {bar}")
+            print("=" * 55)
+
+        # Yearly breakdown
+        df_ml_yr = df_ml.with_columns(pl.col("date").dt.year().alias("year"))
+        print(f"\n{'=' * 80}")
+        print("  年度收益拆解 (LightGBM)")
+        print(f"{'=' * 80}")
+        print(f"{'年份':>6} | {'净收益':>10} {'毛收益':>10} {'最大回撤':>10} | {'基准':>10} {'超额(毛)':>10} | {'天数':>6}")
+        print("-" * 80)
+        for yr in sorted(df_ml_yr["year"].unique().to_list()):
+            yr_data = df_ml_yr.filter(pl.col("year") == yr)
+            net_rets = yr_data["daily_ret"].to_numpy()
+            gross_rets = yr_data["gross"].to_numpy()
+            bench_rets = yr_data["bench"].to_numpy()
+            nav_n = np.cumprod(1 + net_rets)
+            nav_g = np.cumprod(1 + gross_rets)
+            nav_b = np.cumprod(1 + bench_rets)
+            dd_n = np.max(1 - nav_n / np.maximum.accumulate(nav_n))
+            print(
+                f"{yr:>6} | {nav_n[-1]-1:>9.1%} {nav_g[-1]-1:>9.1%} {dd_n:>9.1%} "
+                f"| {nav_b[-1]-1:>9.1%} {nav_g[-1]-1 - (nav_b[-1]-1):>9.1%} | {len(net_rets):>6}"
+            )
+        print("-" * 80)
+
+        # NAV chart
+        nav_net = np.cumprod(1 + df_ml["daily_ret"].to_numpy())
+        nav_gross = np.cumprod(1 + df_ml["gross"].to_numpy())
+        nav_bench = np.cumprod(1 + df_ml["bench"].to_numpy())
+
+        fig_ml = make_subplots(
+            rows=2, cols=1, row_heights=[0.7, 0.3],
+            shared_xaxes=True, vertical_spacing=0.05,
+            subplot_titles=["LightGBM 净值曲线", "日收益率"],
+        )
+        dates_list = df_ml["date"].to_list()
+        fig_ml.add_trace(go.Scatter(
+            x=dates_list, y=nav_net.tolist(),
+            name="LGB Net", mode="lines",
+            line=dict(color="#00d4aa", width=2),
+        ), row=1, col=1)
+        fig_ml.add_trace(go.Scatter(
+            x=dates_list, y=nav_gross.tolist(),
+            name="LGB Gross", mode="lines",
+            line=dict(color="#ffaa00", width=1.5, dash="dot"),
+        ), row=1, col=1)
+        fig_ml.add_trace(go.Scatter(
+            x=dates_list, y=nav_bench.tolist(),
+            name="全A等权基准", mode="lines",
+            line=dict(color="#888888", width=1),
+        ), row=1, col=1)
+        fig_ml.add_trace(go.Bar(
+            x=dates_list, y=df_ml["daily_ret"].to_list(),
+            marker_color="#00d4aa", opacity=0.3, showlegend=False,
+        ), row=2, col=1)
+        fig_ml.update_layout(
+            title=f"LightGBM Walk-Forward Top-{TOP_N} (成本 {COST:.1%})",
+            height=700, template="plotly_dark",
+        )
+        fig_ml.update_yaxes(title_text="净值", row=1, col=1)
+        fig_ml.update_yaxes(title_text="日收益率", row=2, col=1)
+        fig_ml.show()
+
+        return df_ml
+
+    df_lgbm_result = run_lgbm_walkforward()
+    return
+
+
+@app.cell
+def _():
     return
 
 

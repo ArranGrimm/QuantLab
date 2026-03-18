@@ -37,6 +37,7 @@ dependencies = [
     "google-genai>=1.67.0",
     "kaleido>=1.2.0",
     "pyyaml>=6.0.3",
+    "lightgbm>=4.6.0",
 ]
 
 # 1. 定义源：根据截图中的 URL，我们指向 cu130

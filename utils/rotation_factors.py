@@ -1,34 +1,49 @@
 """
 截面轮动因子工程模块
 
-基于 128 个交易日的日K线量价数据, 计算截面排序所需的全部因子。
-所有因子使用 shift(1) 确保不包含当日数据 (防未来函数)。
+严格复刻 "T+1 尾盘轮动" 策略:
+  - 信号日 T: 基于 T-1 及更早数据计算因子 (shift(1), 零前视)
+  - 执行: T 日 14:30-15:00 买入 → T+1 日尾盘卖出
+  - Label: fwd_ret_1d = close_T+1 / close_T - 1
 
-因子大类:
+基于 128 个交易日的日K线量价数据。
+
+因子大类 (6 类 41 个):
   1. 动量/反转  — 多周期收益率、skip-1-month 动量
-  2. 波动率    — 已实现波动率、波动率变化率、最大回撤
-  3. 成交量    — 换手率、量价相关、异常放量
+  2. 波动率    — 已实现波动率、波动率变化率、最大回撤、波动压缩
+  3. 成交量    — 换手率、量价相关、异常放量、换手加速度
   4. 技术指标  — RSI, MACD, 布林带, ATR, 均线偏离
   5. 微观结构  — 振幅、影线、缺口、日内位置
+  6. A股T+1短线 — 隔夜/日内收益分解、冲高探底、价格位置、Amihud
 """
 import polars as pl
 
 
 FACTOR_COLS = [
-    # 动量/反转
+    # ── 1. 动量/反转 ──
     "ret_1d", "ret_5d", "ret_10d", "ret_20d", "ret_60d", "ret_120d",
     "mom_skip1m", "ret_max_5d", "ret_min_5d",
-    # 波动率
+    # ── 2. 波动率 ──
     "vol_20d", "vol_60d", "vol_ratio", "max_drawdown_20d",
-    # 成交量
+    "vol_compress",
+    # ── 3. 成交量 ──
     "turnover_rate", "turnover_ma_ratio", "vol_price_corr_20d",
-    "vol_std_20d", "abnormal_vol",
-    # 技术指标
+    "vol_std_20d", "abnormal_vol", "turnover_accel",
+    # ── 4. 技术指标 ──
     "rsi_14", "macd_hist", "bb_position", "atr_14_pct",
     "ma_bias_20", "ma_bias_60", "close_to_high_20d",
-    # 微观结构
+    # ── 5. 微观结构 ──
     "amplitude", "upper_shadow", "lower_shadow", "body_ratio",
-    "gap", "intraday_pos",
+    "intraday_pos",
+    # ── 6. A股T+1短线因子 ──
+    "overnight_ret",       # 隔夜收益 (prev_close → open)
+    "intraday_ret",        # 日内收益 (open → close)
+    "overnight_ret_ma5",   # 5日隔夜收益均值
+    "intraday_ret_ma5",    # 5日日内收益均值
+    "high_open_pct",       # 日内冲高幅度 (high - open) / open
+    "open_low_pct",        # 日内探底幅度 (open - low) / open
+    "price_pos_20d",       # 20日收盘价位置 (0=最低 1=最高)
+    "amihud_illiq_20d",    # Amihud非流动性 20日均值
 ]
 
 
@@ -43,7 +58,7 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
         lookback: 最大回溯窗口 (默认 128 天, 仅用于文档说明)
 
     Returns:
-        LazyFrame, 在原始列基础上新增 ~30 个因子列
+        LazyFrame, 在原始列基础上新增 ~41 个因子列
     """
     print("[Rotation] 计算截面轮动因子...")
 
@@ -57,6 +72,7 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
             pl.col("high_adj").shift(1).over("code").alias("_h1"),        # T-1 high
             pl.col("low_adj").shift(1).over("code").alias("_l1"),         # T-1 low
             pl.col("volume").shift(1).over("code").alias("_v1"),          # T-1 volume
+            pl.col("amount").shift(1).over("code").alias("_amt1"),        # T-1 amount
             pl.col("close_adj").shift(2).over("code").alias("_c2"),       # T-2 close
         ])
 
@@ -99,6 +115,7 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
             pl.col("_ret_lag1").rolling_min(5).over("code").alias("ret_min_5d"),
             pl.col("_ret_lag1").rolling_std(20).over("code").alias("vol_20d"),
             pl.col("_ret_lag1").rolling_std(60).over("code").alias("vol_60d"),
+            pl.col("_ret_lag1").rolling_std(5).over("code").alias("_vol_5d"),
         ])
 
         # ── Step 5: 波动率衍生 + 最大回撤 ───────────────────────────
@@ -107,6 +124,8 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
                 .alias("vol_ratio"),
             (1 - pl.col("_c1") / pl.col("_c1").rolling_max(20).over("code"))
                 .alias("max_drawdown_20d"),
+            (pl.col("_vol_5d") / pl.max_horizontal(pl.col("vol_20d"), pl.lit(1e-8)))
+                .alias("vol_compress"),
         ])
 
         # ── Step 6: 成交量因子 ──────────────────────────────────────
@@ -115,6 +134,7 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
             pl.col("_v1").rolling_mean(20).over("code").alias("_v1_ma20"),
             pl.col("_v1").rolling_std(20).over("code").alias("_v1_std20"),
             pl.col("turnover_rate").rolling_mean(20).over("code").alias("_tr_ma20"),
+            pl.col("turnover_rate").rolling_mean(5).over("code").alias("_tr_ma5"),
         ])
         .with_columns([
             (pl.col("_v1") / pl.max_horizontal(pl.col("_v1_ma20"), pl.lit(1.0)))
@@ -123,6 +143,8 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
                 .alias("vol_std_20d"),
             (pl.col("turnover_rate") / pl.max_horizontal(pl.col("_tr_ma20"), pl.lit(1e-8)))
                 .alias("turnover_ma_ratio"),
+            (pl.col("_tr_ma5") / pl.max_horizontal(pl.col("_tr_ma20"), pl.lit(1e-8)))
+                .alias("turnover_accel"),
         ])
 
         # ── Step 7: 量价相关系数 ────────────────────────────────────
@@ -197,12 +219,47 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
                 (pl.col("_c1") - pl.col("_o1")).abs()
                 / pl.max_horizontal(pl.col("_h1") - pl.col("_l1"), pl.lit(1e-8))
             ).alias("body_ratio"),
-            (pl.col("_o1") / pl.max_horizontal(pl.col("_c2"), pl.lit(0.01)) - 1)
-                .alias("gap"),
             (
                 (pl.col("_c1") - pl.col("_l1"))
                 / pl.max_horizontal(pl.col("_h1") - pl.col("_l1"), pl.lit(1e-8))
             ).alias("intraday_pos"),
+        ])
+
+        # ── Step 10: A股T+1短线 — 隔夜/日内分解 + 微观 ─────────────
+        .with_columns([
+            (pl.col("_o1") / pl.max_horizontal(pl.col("_c2"), pl.lit(0.01)) - 1)
+                .alias("overnight_ret"),
+            (pl.col("_c1") / pl.max_horizontal(pl.col("_o1"), pl.lit(0.01)) - 1)
+                .alias("intraday_ret"),
+            ((pl.col("_h1") - pl.col("_o1"))
+             / pl.max_horizontal(pl.col("_o1"), pl.lit(0.01)))
+                .alias("high_open_pct"),
+            ((pl.col("_o1") - pl.col("_l1"))
+             / pl.max_horizontal(pl.col("_o1"), pl.lit(0.01)))
+                .alias("open_low_pct"),
+            (pl.col("_ret_lag1").abs()
+             / pl.max_horizontal(pl.col("_amt1"), pl.lit(1.0)))
+                .alias("_amihud_raw"),
+        ])
+
+        # ── Step 11: rolling on Step 10 物化列 ──────────────────────
+        .with_columns([
+            pl.col("overnight_ret").rolling_mean(5).over("code")
+                .alias("overnight_ret_ma5"),
+            pl.col("intraday_ret").rolling_mean(5).over("code")
+                .alias("intraday_ret_ma5"),
+            pl.col("_amihud_raw").rolling_mean(20).over("code")
+                .alias("amihud_illiq_20d"),
+            pl.col("_c1").rolling_min(20).over("code").alias("_c1_min_20"),
+            pl.col("_c1").rolling_max(20).over("code").alias("_c1_max_20"),
+        ])
+
+        # ── Step 12: 价格位置衍生 ──────────────────────────────────
+        .with_columns([
+            ((pl.col("_c1") - pl.col("_c1_min_20"))
+             / pl.max_horizontal(
+                 pl.col("_c1_max_20") - pl.col("_c1_min_20"), pl.lit(0.01)))
+                .alias("price_pos_20d"),
         ])
     )
 
