@@ -480,12 +480,12 @@ def _(FACTOR_COLS, df_all, go, make_subplots, np, pl):
     def run_lgbm_walkforward():
         import lightgbm as lgb
         import warnings
-        import sys
         warnings.filterwarnings("ignore", category=UserWarning)
 
         TRAIN_WINDOW = 480   # ~2 年训练窗口
         RETRAIN_FREQ = 20    # 每 20 个交易日重训一次
         TOP_N = 20
+        HOLD_BUFFER = 150     # 持仓缓冲: 进入要 Top-20, 保留只需 Top-50
         COST = 0.002
 
         feature_cols = list(FACTOR_COLS)
@@ -506,7 +506,7 @@ def _(FACTOR_COLS, df_all, go, make_subplots, np, pl):
 
         print(f"🤖 [Phase 2] LightGBM Walk-Forward 回测", flush=True)
         print(f"   训练窗口: {TRAIN_WINDOW}天, 重训频率: 每{RETRAIN_FREQ}天", flush=True)
-        print(f"   特征数: {len(feature_cols)}, Top-{TOP_N}, 成本: {COST:.1%}", flush=True)
+        print(f"   特征数: {len(feature_cols)}, Top-{TOP_N}, 缓冲: Top-{HOLD_BUFFER}, 成本: {COST:.1%}", flush=True)
 
         df_valid_ml = (
             df_all
@@ -517,6 +517,7 @@ def _(FACTOR_COLS, df_all, go, make_subplots, np, pl):
         X_all_np = df_valid_ml.select(feature_cols).to_numpy(allow_copy=True).astype(np.float32)
         y_all_np = df_valid_ml["fwd_ret_1d"].to_numpy().astype(np.float32)
         dates_np = df_valid_ml["date"].to_numpy()
+        codes_np = df_valid_ml["code"].to_numpy()
 
         unique_dates_ml = np.unique(dates_np)
         unique_dates_ml.sort()
@@ -528,6 +529,7 @@ def _(FACTOR_COLS, df_all, go, make_subplots, np, pl):
         results_ml = []
         model = None
         last_train_idx = -RETRAIN_FREQ
+        prev_holdings = set()
 
         for i in range(TRAIN_WINDOW, n_dates):
             cur_date = unique_dates_ml[i]
@@ -559,26 +561,63 @@ def _(FACTOR_COLS, df_all, go, make_subplots, np, pl):
             s, e = date_start[i], date_end[i]
             X_te = X_all_np[s:e]
             y_te = y_all_np[s:e]
+            codes_te = codes_np[s:e]
             n_stocks = e - s
 
             if n_stocks < TOP_N:
                 continue
 
             preds = model.predict(X_te)
-            top_idx = np.argsort(preds)[-TOP_N:]
 
-            avg_ret_gross = float(np.nanmean(y_te[top_idx]))
+            rank_order = np.argsort(-preds)
+            ranks = np.empty(n_stocks, dtype=int)
+            ranks[rank_order] = np.arange(n_stocks)
+
+            if not prev_holdings:
+                selected_idx = rank_order[:TOP_N]
+            else:
+                keep_idx = [
+                    j for j in range(n_stocks)
+                    if codes_te[j] in prev_holdings and ranks[j] < HOLD_BUFFER
+                ]
+                n_keep = len(keep_idx)
+
+                if n_keep >= TOP_N:
+                    keep_idx.sort(key=lambda j: ranks[j])
+                    selected_idx = np.array(keep_idx[:TOP_N])
+                else:
+                    n_fill = TOP_N - n_keep
+                    keep_set = set(keep_idx)
+                    new_candidates = [j for j in rank_order if j not in keep_set]
+                    selected_idx = np.array(keep_idx + new_candidates[:n_fill])
+
+            cur_holdings = set(codes_te[selected_idx])
+
+            if prev_holdings:
+                n_new = len(cur_holdings - prev_holdings)
+                turnover = n_new / TOP_N
+            else:
+                turnover = 1.0
+
+            actual_cost = COST * turnover
+            prev_holdings = cur_holdings
+
+            avg_ret_gross = float(np.mean(y_te[selected_idx]))
             bench_ret = float(np.nanmean(y_te))
 
             results_ml.append({
                 "date": cur_date.astype("datetime64[D]").item(),
-                "daily_ret": avg_ret_gross - COST,
+                "daily_ret": avg_ret_gross - actual_cost,
+                "daily_ret_full_cost": avg_ret_gross - COST,
                 "gross": avg_ret_gross,
                 "bench": bench_ret,
+                "turnover": turnover,
                 "n_stocks": n_stocks,
             })
 
         df_ml = pl.DataFrame(results_ml).sort("date")
+        avg_turnover = df_ml["turnover"].mean()
+        print(f"\n   📊 平均日换手率: {avg_turnover:.1%} (日均成本: {COST * avg_turnover:.3%})", flush=True)
 
         def calc_perf(rets_arr, name):
             nav = np.cumprod(1 + rets_arr)
@@ -595,23 +634,24 @@ def _(FACTOR_COLS, df_all, go, make_subplots, np, pl):
                 "skew": sk, "n": len(rets_arr),
             }
 
-        m_net = calc_perf(df_ml["daily_ret"].to_numpy(), f"LGB Top-{TOP_N} (净)")
-        m_gross = calc_perf(df_ml["gross"].to_numpy(), f"LGB Top-{TOP_N} (毛)")
+        m_net = calc_perf(df_ml["daily_ret"].to_numpy(), f"LGB (真实成本)")
+        m_full = calc_perf(df_ml["daily_ret_full_cost"].to_numpy(), f"LGB (100%换手成本)")
+        m_gross = calc_perf(df_ml["gross"].to_numpy(), f"LGB (毛收益)")
         m_bench = calc_perf(df_ml["bench"].to_numpy(), "全A等权基准")
 
-        print(f"\n{'=' * 110}")
-        print(f"  LightGBM Walk-Forward Top-{TOP_N}")
-        print(f"{'=' * 110}")
-        hdr = f"{'策略':<24} {'年化':>8} {'累计':>8} {'最大回撤':>8} {'Sharpe':>8} {'日均':>8} {'胜率':>8} {'偏度':>8} {'天数':>6}"
+        print(f"\n{'=' * 120}")
+        print(f"  LightGBM Walk-Forward Top-{TOP_N}  |  平均日换手率: {avg_turnover:.1%}")
+        print(f"{'=' * 120}")
+        hdr = f"{'策略':<28} {'年化':>8} {'累计':>8} {'最大回撤':>8} {'Sharpe':>8} {'日均':>8} {'胜率':>8} {'偏度':>8} {'天数':>6}"
         print(hdr)
-        print("-" * 110)
-        for m in [m_net, m_gross, m_bench]:
+        print("-" * 120)
+        for m in [m_net, m_full, m_gross, m_bench]:
             print(
-                f"{m['name']:<24} {m['ann']:>7.1%} {m['total']:>7.1%} "
+                f"{m['name']:<28} {m['ann']:>7.1%} {m['total']:>7.1%} "
                 f"{m['dd']:>7.1%} {m['sharpe']:>8.2f} {m['avg']:>7.3%} "
                 f"{m['wr']:>7.1%} {m['skew']:>8.2f} {m['n']:>6d}"
             )
-        print("-" * 110)
+        print("-" * 120)
 
         # Feature importance
         if model is not None:
@@ -633,25 +673,26 @@ def _(FACTOR_COLS, df_all, go, make_subplots, np, pl):
 
         # Yearly breakdown
         df_ml_yr = df_ml.with_columns(pl.col("date").dt.year().alias("year"))
-        print(f"\n{'=' * 80}")
+        print(f"\n{'=' * 95}")
         print("  年度收益拆解 (LightGBM)")
-        print(f"{'=' * 80}")
-        print(f"{'年份':>6} | {'净收益':>10} {'毛收益':>10} {'最大回撤':>10} | {'基准':>10} {'超额(毛)':>10} | {'天数':>6}")
-        print("-" * 80)
+        print(f"{'=' * 95}")
+        print(f"{'年份':>6} | {'真实净收益':>10} {'毛收益':>10} {'最大回撤':>10} {'换手率':>8} | {'基准':>10} {'超额(净)':>10} | {'天数':>6}")
+        print("-" * 95)
         for yr in sorted(df_ml_yr["year"].unique().to_list()):
             yr_data = df_ml_yr.filter(pl.col("year") == yr)
             net_rets = yr_data["daily_ret"].to_numpy()
             gross_rets = yr_data["gross"].to_numpy()
             bench_rets = yr_data["bench"].to_numpy()
+            yr_turnover = yr_data["turnover"].mean()
             nav_n = np.cumprod(1 + net_rets)
             nav_g = np.cumprod(1 + gross_rets)
             nav_b = np.cumprod(1 + bench_rets)
             dd_n = np.max(1 - nav_n / np.maximum.accumulate(nav_n))
             print(
-                f"{yr:>6} | {nav_n[-1]-1:>9.1%} {nav_g[-1]-1:>9.1%} {dd_n:>9.1%} "
-                f"| {nav_b[-1]-1:>9.1%} {nav_g[-1]-1 - (nav_b[-1]-1):>9.1%} | {len(net_rets):>6}"
+                f"{yr:>6} | {nav_n[-1]-1:>9.1%} {nav_g[-1]-1:>9.1%} {dd_n:>9.1%} {yr_turnover:>7.1%} "
+                f"| {nav_b[-1]-1:>9.1%} {nav_n[-1]-1 - (nav_b[-1]-1):>9.1%} | {len(net_rets):>6}"
             )
-        print("-" * 80)
+        print("-" * 95)
 
         # NAV chart
         nav_net = np.cumprod(1 + df_ml["daily_ret"].to_numpy())
