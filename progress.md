@@ -1,5 +1,24 @@
 # Progress
 
+## 2026-03-22
+
+### 因子扩展: 处置效应因子 (Disposition Effect)
+- 新增 2 个行为金融因子至 `utils/rotation_factors.py`，因子库扩展为 7 类 42 个
+  - `disp_bias_20`: 20日 EWM 估算持仓成本偏离度 (短期处置效应)
+  - `disp_bias_60`: 60日 EWM 估算持仓成本偏离度 (中期处置效应)
+- 底层算法: EHC = EWM(TypicalPrice × Volume) / EWM(Volume)，用 EWM 指数衰减近似换手率驱动的筹码替换
+- 无需额外数据源，仅依赖现有 OHLCV + 换手率
+- 完全嵌入现有 Polars lazy chain，零额外 collect 开销
+
+#### A/B 对比结果
+- **毛收益年化**: 41.0% → 50.3% (+9.3pp), Sharpe 1.32 → 1.52
+- **净收益年化**: 1.2% → 8.2% (+7.0pp), Sharpe 0.19 → 0.41
+- **最大回撤**: 51.1% → 44.2% (-6.9pp)
+- **偏度**: -0.01 → +0.28 (从负偏转正偏)
+- 2025 年超额(净)从 -9.6% 翻正至 +19.8%
+- 因子本身未进 Top 15 特征重要性，通过 GBM 交互效应提升整体表达力
+- 详见 `results/disposition_effect_ab_test.md`
+
 ## 2026-02-24
 
 ### 截面轮动策略 Phase 1-2 完整研究

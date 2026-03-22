@@ -8,13 +8,14 @@
 
 基于 128 个交易日的日K线量价数据。
 
-因子大类 (6 类 41 个):
+因子大类 (7 类 42 个):
   1. 动量/反转  — 多周期收益率、skip-1-month 动量
   2. 波动率    — 已实现波动率、波动率变化率、最大回撤、波动压缩
   3. 成交量    — 换手率、量价相关、异常放量、换手加速度
   4. 技术指标  — RSI, MACD, 布林带, ATR, 均线偏离
   5. 微观结构  — 振幅、影线、缺口、日内位置
   6. A股T+1短线 — 隔夜/日内收益分解、冲高探底、价格位置、Amihud
+  7. 处置效应   — 换手率衰减成本线偏离 (EWM近似)
 """
 import polars as pl
 
@@ -44,6 +45,9 @@ FACTOR_COLS = [
     "open_low_pct",        # 日内探底幅度 (open - low) / open
     "price_pos_20d",       # 20日收盘价位置 (0=最低 1=最高)
     "amihud_illiq_20d",    # Amihud非流动性 20日均值
+    # ── 7. 处置效应/行为金融 ──
+    "disp_bias_20",        # 20日EWM估算成本偏离 (disposition effect)
+    "disp_bias_60",        # 60日EWM估算成本偏离 (disposition effect)
 ]
 
 
@@ -58,7 +62,7 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
         lookback: 最大回溯窗口 (默认 128 天, 仅用于文档说明)
 
     Returns:
-        LazyFrame, 在原始列基础上新增 ~41 个因子列
+        LazyFrame, 在原始列基础上新增 ~42 个因子列
     """
     print("[Rotation] 计算截面轮动因子...")
 
@@ -260,6 +264,36 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
              / pl.max_horizontal(
                  pl.col("_c1_max_20") - pl.col("_c1_min_20"), pl.lit(0.01)))
                 .alias("price_pos_20d"),
+        ])
+
+        # ── Step 13: 处置效应 — EWM 估算持仓成本线 (EHC) ─────────
+        # EHC = EWM(TypicalPrice × Volume) / EWM(Volume)
+        # 用 EWM 指数衰减近似换手率驱动的筹码替换过程:
+        #   ehc_T ≈ (1-α)·ehc_{T-1} + α·P_T, α = 2/(span+1)
+        # span=20 → α≈0.095 (对应~10%日换手), span=60 → α≈0.033 (对应~3%日换手)
+        .with_columns([
+            ((pl.col("_c1") + pl.col("_h1") + pl.col("_l1")) / 3 * pl.col("_v1"))
+                .alias("_tp_v1"),
+        ])
+        .with_columns([
+            pl.col("_tp_v1").ewm_mean(span=20, adjust=False).over("code").alias("_ewm_pv_20"),
+            pl.col("_v1").ewm_mean(span=20, adjust=False).over("code").alias("_ewm_v_20"),
+            pl.col("_tp_v1").ewm_mean(span=60, adjust=False).over("code").alias("_ewm_pv_60"),
+            pl.col("_v1").ewm_mean(span=60, adjust=False).over("code").alias("_ewm_v_60"),
+        ])
+        .with_columns([
+            (pl.col("_ewm_pv_20") / pl.max_horizontal(pl.col("_ewm_v_20"), pl.lit(1e-10)))
+                .alias("_ehc_20"),
+            (pl.col("_ewm_pv_60") / pl.max_horizontal(pl.col("_ewm_v_60"), pl.lit(1e-10)))
+                .alias("_ehc_60"),
+        ])
+
+        # ── Step 14: 处置效应偏离度 ──────────────────────────────
+        .with_columns([
+            (pl.col("_c1") / pl.max_horizontal(pl.col("_ehc_20"), pl.lit(0.01)) - 1)
+                .alias("disp_bias_20"),
+            (pl.col("_c1") / pl.max_horizontal(pl.col("_ehc_60"), pl.lit(0.01)) - 1)
+                .alias("disp_bias_60"),
         ])
     )
 
