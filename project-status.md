@@ -4,12 +4,13 @@
 
 ### 已完成
 - `utils/rotation_factors.py`: 42 个日线截面因子 (动量/波动/成交量/技术/微观/A股T+1/处置效应)
-- `notebooks/cross_section_rotation.py`: 完整研究 notebook (6 个 cell)
+- `utils/signal_export.py`: 信号导出 (B1 事件信号 + 截面轮动打分), Parquet 格式供 Rust 消费
+- `notebooks/cross_section_rotation.py`: 研究 notebook (6 个 cell)
   - Cell 1-2: 数据加载 + 因子计算 + 截面标准化
   - Cell 3: Spearman IC 分析 + 排行榜 + 累积 IC 曲线
-  - Cell 4: 线性排名 Top-N 回测 (baseline)
-  - Cell 5: 可视化 (净值/年度/热力图)
-  - Cell 6: LightGBM Walk-Forward 回测 (hold buffer)
+  - Cell 3b: Alpha Decay 分析 (因子预测力随持仓天数衰减)
+  - Cell 4-5: (已清空, 旧线性回测)
+  - Cell 6: LightGBM Walk-Forward 打分 → Parquet 导出 (回测交给 Rust)
 
 ### 我们的核心数据 (2026-03-22 更新, +处置效应因子)
 | 指标 | 值 | vs Baseline |
@@ -62,9 +63,22 @@
 - **原策略**: 额外有 1 分钟级别的日内择时系统
 - **影响**: 实盘年化比回测高 10-20%
 
+### 当前架构 (2026-02-24)
+```
+Python (信号层)                    Rust (回测/执行层)
+┌────────────────────┐            ┌─────────────────────────┐
+│ rotation_factors   │            │ Rust ECS Backtest Engine │
+│   42 因子          │            │  - Top-N 选股            │
+│ LightGBM 1d/1d    │──Parquet──→│  - 止损/止盈             │
+│   Walk-Forward     │            │  - 动态仓位管理          │
+│ signal_export      │            │  - 交易成本              │
+└────────────────────┘            └─────────────────────────┘
+```
+
 ### 后续方向 (按优先级)
-1. **多策略架构**: 不要试图用 1 个模型做所有事, 拆分为多个独立子策略
-2. **持仓周期优化**: 不再强制 T+1, 允许持仓 2-5 天, 降低换手成本
-3. **因子扩展**: 日内分时特征、行业轮动、资金流向
-4. **模型工程**: 超参搜索、多模型 ensemble、LambdaRank
-5. **日内 T+0**: 独立项目, 需要分钟级数据
+1. **Rust 回测适配**: 改造 Rust 引擎支持截面轮动信号 (每日 score/rank Parquet)
+2. **持仓周期优化**: Rust 端实现智能止损止盈, 替代 Python 侧固定 N 天持仓
+3. **多策略架构**: 拆分为多个独立子策略, 分散化降回撤
+4. **因子扩展**: 日内分时特征、行业轮动、资金流向
+5. **模型工程**: 超参搜索、多模型 ensemble、LambdaRank
+6. **日内 T+0**: 独立项目, 需要分钟级数据

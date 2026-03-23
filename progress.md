@@ -1,5 +1,26 @@
 # Progress
 
+## 2026-02-24 (续)
+
+### 架构重构: Python 打分 + Rust 回测分离
+- **核心决策**: Python 模型只负责截面打分 (1d/1d), 回测/风控/持仓管理全部交给 Rust ECS 引擎
+- 依据:
+  - LightGBM 1d/1d 模型偏度已为正 (+0.28), 天然适合日频信号
+  - Python 固定持仓 N 天 (3d/3d, 1d/3d) 效果均一般, 无法灵活止损止盈
+  - Rust 回测框架已支持 B1 策略的 Parquet 导入, 可复用架构
+
+#### 代码变更
+- **`utils/signal_export.py`**: 新增 `export_rotation_scores()` 函数
+  - 输入: `df_scores` (date, code, score + OHLCV + market_cap)
+  - 输出: Parquet 含 score, rank, is_top_n, pre_close_adj 等列
+  - Rust 端可直接读取, 每日选 Top-N 候选, 自行决策买卖
+- **`notebooks/cross_section_rotation.py`**:
+  - Cell 6: 从"LightGBM Walk-Forward 回测"重构为"打分 → Parquet 导出"
+    - 移除: 所有 Python 侧回测逻辑 (HOLD_BUFFER/COST/HOLD_DAYS/portfolio 模拟/净值曲线/年度拆解)
+    - 保留: Walk-Forward 训练循环、特征重要性输出
+    - 新增: 每日全 universe 打分 → join 价格 → export_rotation_scores
+  - Cell 4/5: 清空 (线性排名回测 + 旧可视化, 已被 LightGBM + Rust 替代)
+
 ## 2026-03-22
 
 ### 因子扩展: 处置效应因子 (Disposition Effect)

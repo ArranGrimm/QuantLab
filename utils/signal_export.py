@@ -1,10 +1,14 @@
-﻿"""
-Signal Export Tool - Export complete stock data with B1 signals for Rust backtesting
+"""
+Signal Export Tool - Export stock signals for Rust backtesting
+
+支持两种策略:
+1. B1 超跌反转 — 事件驱动信号 (b1_signal)
+2. 截面轮动模型 — 日频截面打分 (score + rank)
 
 设计理念：
-- 导出完整数据（所有股票所有日期），不做任何 filter
-- 只做标记（b1_signal, pre_b1_signal, is_loose）
-- Rust 端根据标记进行回测逻辑判断
+- 导出完整数据, Rust 端负责回测逻辑
+- B1: 标记信号日, Rust 做买入/止损/止盈
+- 截面模型: 导出每日全 universe 打分, Rust 做 Top-N 选股/持仓管理
 """
 import polars as pl
 from pathlib import Path
@@ -127,6 +131,100 @@ def export_for_rust(
     print(f"Date range: {date_range[0]} ~ {date_range[1]}")
     print(f"B1 signals: {signal_rows}")
     print(f"B1 signals in loose periods: {loose_signal_rows}")
+
+    return str(output_file)
+
+
+def export_rotation_scores(
+    df_scores: pl.DataFrame,
+    output_path: str = "data/signals/rotation_scores.parquet",
+    top_n: int = 20,
+) -> str:
+    """
+    Export cross-section rotation model scores for Rust backtesting.
+
+    Python 端只负责打分, Rust 端负责:
+      - 每日读取 Top-N 候选
+      - 买入/卖出决策 (止损/止盈/排名退出)
+      - 仓位管理、交易成本
+
+    Args:
+        df_scores: DataFrame, 必须包含:
+            date, code, score, open_adj, high_adj, low_adj, close_adj
+            可选: volume, market_cap_100m
+        output_path: 输出 Parquet 路径
+        top_n: 每日 Top-N 标记 (is_top_n 列, 供 Rust 参考)
+
+    Returns:
+        Exported file path
+
+    Output schema:
+        date, code, score, rank, is_top_n,
+        open_adj, high_adj, low_adj, close_adj, pre_close_adj,
+        [volume, market_cap_100m]
+    """
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    required = ["date", "code", "score", "open_adj", "high_adj", "low_adj", "close_adj"]
+    missing = [c for c in required if c not in df_scores.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    print("Processing rotation scores...")
+
+    df_valid = df_scores.filter(
+        pl.col("score").is_not_null() & pl.col("score").is_not_nan()
+    )
+
+    df_export = (
+        df_valid
+        .sort(["code", "date"])
+        .with_columns(
+            pl.col("close_adj").shift(1).over("code")
+                .fill_null(pl.col("close_adj"))
+                .alias("pre_close_adj"),
+        )
+        .with_columns(
+            pl.col("score")
+                .rank(method="ordinal", descending=True)
+                .over("date")
+                .cast(pl.UInt16)
+                .alias("rank"),
+        )
+        .with_columns(
+            (pl.col("rank") <= top_n).alias("is_top_n"),
+        )
+    )
+
+    out_cols = [
+        "date", "code", "score", "rank", "is_top_n",
+        "open_adj", "high_adj", "low_adj", "close_adj", "pre_close_adj",
+    ]
+    for opt_col in ["volume", "market_cap_100m"]:
+        if opt_col in df_scores.columns:
+            out_cols.append(opt_col)
+
+    df_final = df_export.select(out_cols)
+    df_final.write_parquet(output_file)
+
+    total_rows = df_final.height
+    unique_dates = df_final.select(pl.col("date").n_unique()).item()
+    unique_codes = df_final.select(pl.col("code").n_unique()).item()
+    top_n_rows = df_final.filter(pl.col("is_top_n")).height
+    date_range = (
+        df_final.select(pl.col("date").min()).item(),
+        df_final.select(pl.col("date").max()).item(),
+    )
+
+    print(f"\n=== Rotation Scores Export ===")
+    print(f"File: {output_file}")
+    print(f"Size: {output_file.stat().st_size / 1024 / 1024:.1f} MB")
+    print(f"Total rows: {total_rows:,}")
+    print(f"Trading days: {unique_dates}")
+    print(f"Unique stocks: {unique_codes}")
+    print(f"Date range: {date_range[0]} ~ {date_range[1]}")
+    print(f"Top-{top_n} signals: {top_n_rows:,} ({top_n_rows/unique_dates:.1f}/day avg)")
 
     return str(output_file)
 
