@@ -1,0 +1,15 @@
+[package]
+name = "bt-rotation"
+version = "0.1.0"
+edition = "2021"
+description = "截面轮动策略回测"
+
+[dependencies]
+bt-core = { path = "../core" }
+bevy_ecs = { workspace = true }
+bevy_app = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+polars = { workspace = true }
+clap = { workspace = true }

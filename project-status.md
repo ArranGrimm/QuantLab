@@ -63,22 +63,25 @@
 - **原策略**: 额外有 1 分钟级别的日内择时系统
 - **影响**: 实盘年化比回测高 10-20%
 
-### 当前架构 (2026-02-24)
+### 当前架构 (2026-02-24 已实现)
 ```
 Python (信号层)                    Rust (回测/执行层)
-┌────────────────────┐            ┌─────────────────────────┐
-│ rotation_factors   │            │ Rust ECS Backtest Engine │
-│   42 因子          │            │  - Top-N 选股            │
-│ LightGBM 1d/1d    │──Parquet──→│  - 止损/止盈             │
-│   Walk-Forward     │            │  - 动态仓位管理          │
-│ signal_export      │            │  - 交易成本              │
-└────────────────────┘            └─────────────────────────┘
+┌────────────────────┐            ┌──────────────────────────────┐
+│ rotation_factors   │            │ Cargo Workspace              │
+│   42 因子          │            │ ├─ bt-core (共享)             │
+│ LightGBM 1d/1d    │──Parquet──→│ ├─ bt-b1   (B1 超跌反转)     │
+│   Walk-Forward     │            │ └─ bt-rotation (截面轮动) ✅  │
+│ signal_export      │            │    - Top-N / hold_buffer 选股 │
+└────────────────────┘            │    - 止损 / 移动止损          │
+                                  │    - 排名退出 / 最大持仓天数   │
+                                  └──────────────────────────────┘
 ```
 
 ### 后续方向 (按优先级)
-1. **Rust 回测适配**: 改造 Rust 引擎支持截面轮动信号 (每日 score/rank Parquet)
-2. **持仓周期优化**: Rust 端实现智能止损止盈, 替代 Python 侧固定 N 天持仓
-3. **多策略架构**: 拆分为多个独立子策略, 分散化降回撤
-4. **因子扩展**: 日内分时特征、行业轮动、资金流向
-5. **模型工程**: 超参搜索、多模型 ensemble、LambdaRank
-6. **日内 T+0**: 独立项目, 需要分钟级数据
+1. ~~**Rust 回测适配**~~ ✅ 已完成: workspace + bt-rotation crate
+2. **首次 Rust 回测**: 运行 Python notebook 生成 Parquet → `cargo run -p bt-rotation` 验证
+3. **参数调优**: 调整 top_n, hold_buffer, stop_loss_pct 等 TOML 配置, 对比 Python 端基线
+4. **多策略架构**: 拆分为多个独立子策略, 分散化降回撤
+5. **因子扩展**: 日内分时特征、行业轮动、资金流向
+6. **模型工程**: 超参搜索、多模型 ensemble、LambdaRank
+7. **日内 T+0**: 独立项目, 需要分钟级数据

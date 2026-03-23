@@ -9,7 +9,7 @@
   - Python 固定持仓 N 天 (3d/3d, 1d/3d) 效果均一般, 无法灵活止损止盈
   - Rust 回测框架已支持 B1 策略的 Parquet 导入, 可复用架构
 
-#### 代码变更
+#### Python 端代码变更
 - **`utils/signal_export.py`**: 新增 `export_rotation_scores()` 函数
   - 输入: `df_scores` (date, code, score + OHLCV + market_cap)
   - 输出: Parquet 含 score, rank, is_top_n, pre_close_adj 等列
@@ -20,6 +20,20 @@
     - 保留: Walk-Forward 训练循环、特征重要性输出
     - 新增: 每日全 universe 打分 → join 价格 → export_rotation_scores
   - Cell 4/5: 清空 (线性排名回测 + 旧可视化, 已被 LightGBM + Rust 替代)
+
+#### Rust 引擎重构: 单 crate → Cargo workspace
+- **改造原因**: 原引擎为 B1 单策略设计, PriceBar/信号/退出逻辑全部硬编码 B1 语义, 无法复用于轮动策略
+- **新结构**: `backtest-engine/` 改为 Cargo workspace, 三个 crate:
+  - `bt-core`: 共享类型 — Portfolio, BacktestStats, CostModel, 工具函数
+  - `bt-b1`: B1 超跌反转策略 (从旧代码迁移, 功能不变)
+  - `bt-rotation`: 截面轮动策略 (新建)
+- **轮动策略回测逻辑**:
+  - 读取 `rotation_scores.parquet` (Python LightGBM 打分结果)
+  - 每日系统: check_exit_conditions → fill_positions → update_stats
+  - 退出条件: 排名跌出 hold_buffer / 固定止损 / 移动止损 / 最大持仓天数
+  - 入场条件: Top-N 买入 (尾盘收盘价), 等权仓位
+  - TOML 配置: top_n, hold_buffer, stop_loss, trailing_stop, costs
+- **运行方式**: `cargo run -p bt-rotation --release` (从 backtest-engine/ 目录)
 
 ## 2026-03-22
 

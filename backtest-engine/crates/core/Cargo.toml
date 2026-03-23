@@ -1,0 +1,10 @@
+[package]
+name = "bt-core"
+version = "0.1.0"
+edition = "2021"
+description = "Shared types for QuantLab backtesting engine"
+
+[dependencies]
+bevy_ecs = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
