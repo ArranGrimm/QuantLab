@@ -181,8 +181,8 @@ fn build_market_data(
     let close_adj = df.column("close_adj")?.f64()?;
     let pre_close_adj = df.column("pre_close_adj")?.f64()?;
     let score = df.column("score")?.f64()?;
-    let rank_casted = df.column("rank")?.cast(&DataType::UInt16)?;
-    let rank = rank_casted.u16()?;
+    let rank_casted = df.column("rank")?.cast(&DataType::UInt32)?;
+    let rank = rank_casted.u32()?;
     let is_top_n = df.column("is_top_n")?.bool()?;
 
     for i in 0..df.height() {
@@ -197,7 +197,7 @@ fn build_market_data(
             close: close_adj.get(i).unwrap_or(0.0),
             pre_close: pre_close_adj.get(i).unwrap_or(0.0),
             score: score.get(i).unwrap_or(0.0),
-            rank: rank.get(i).unwrap_or(9999),
+            rank: rank.get(i).unwrap_or(9999u32),
             is_top_n: is_top_n.get(i).unwrap_or(false),
         };
 

@@ -68,7 +68,7 @@ pub fn check_exit_conditions(
             }
         }
         // 3. 排名跌出 hold_buffer
-        else if bar.rank > config.hold_buffer as u16 {
+        else if bar.rank > config.hold_buffer as u32 {
             should_sell = true;
             exit_reason = ExitReason::RankDrop;
         }

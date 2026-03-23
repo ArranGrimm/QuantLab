@@ -148,7 +148,7 @@ pub struct PriceBar {
     pub close: f64,
     pub pre_close: f64,
     pub score: f64,
-    pub rank: u16,
+    pub rank: u32,
     pub is_top_n: bool,
 }
 
