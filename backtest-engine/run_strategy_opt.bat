@@ -1,6 +1,6 @@
 @echo off
 
 :: 执行命令
-cargo run --release -- --config config.toml --data ../data/signals/market_data_opt.parquet
+cargo run -p bt-b1 --release -- --config crates/b1/config.toml --data ../data/signals/market_data_opt.parquet
 
 pause
