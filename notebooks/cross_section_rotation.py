@@ -383,7 +383,7 @@ def _(FACTOR_COLS, df_all, np, pl, q_full):
         RETRAIN_FREQ = 20
         TOP_N = 20
         LABEL = "fwd_ret_1d"
-        EMA_ALPHA = 0.2  # Score 时序平滑 (1.0 = 不平滑)
+        EMA_ALPHA = 0.15  # Score 时序平滑 (1.0 = 不平滑)
 
         feature_cols = list(FACTOR_COLS)
 
@@ -563,7 +563,7 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
     #   7c. Prediction Turnover (Top-20 日间重叠率)
     # ==============================================================================
     def run_signal_quality():
-        EMA_ALPHA = 0.2  # Score 时序平滑 (1.0 = 不平滑, 仅影响分析, 不影响训练)
+        EMA_ALPHA = 0.15  # Score 时序平滑 (1.0 = 不平滑, 仅影响分析, 不影响训练)
 
         # ── 合并原始 score 与 forward return ──
         df_signal = (

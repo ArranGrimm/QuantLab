@@ -1,62 +1,109 @@
-import baostock as bs
+import akshare as ak
 import polars as pl
 import datetime
+import json
+from pathlib import Path
 
-def get_st_blacklist_pl(date_str=None):
+_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / ".cache"
+_ST_CACHE = _CACHE_DIR / "st_blacklist.json"
+_CACHE_MAX_AGE_DAYS = 1
+
+
+def _code_to_baostock(code: str) -> str:
+    """纯数字代码 → sh.600000 / sz.000001 格式"""
+    code = str(code).zfill(6)
+    if code.startswith(("6", "9")):
+        return f"sh.{code}"
+    return f"sz.{code}"
+
+
+def _load_cache() -> list[str] | None:
+    """读取本地缓存，过期则返回 None"""
+    if not _ST_CACHE.exists():
+        return None
+    try:
+        data = json.loads(_ST_CACHE.read_text())
+        cached_date = datetime.date.fromisoformat(data["date"])
+        if (datetime.date.today() - cached_date).days <= _CACHE_MAX_AGE_DAYS:
+            return data["codes"]
+    except (json.JSONDecodeError, KeyError, ValueError):
+        pass
+    return None
+
+
+def _save_cache(codes: list[str]):
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _ST_CACHE.write_text(
+        json.dumps({"date": datetime.date.today().isoformat(), "codes": codes},
+                   ensure_ascii=False)
+    )
+
+
+def get_st_blacklist_pl(date_str=None) -> list[str]:
     """
-    使用 Baostock 获取全市场股票名称，筛选 ST 股，
-    返回 sh.600000 格式的黑名单列表。
+    获取 ST 黑名单 (sh.600000 格式)。
+
+    优先使用 AKShare stock_zh_a_st_em (东方财富，单次 HTTP)，
+    结果缓存到 data/.cache/st_blacklist.json，1 天内复用。
+    网络失败时回退到缓存；缓存也没有时回退到 Baostock。
+    date_str 参数保留向后兼容，但 AKShare 接口不需要。
     """
-    # 1. 登录 Baostock 系统
+    cached = _load_cache()
+    if cached is not None:
+        print(f"[ST] 使用本地缓存，共 {len(cached)} 只")
+        return cached
+
+    # ── 方案 A: AKShare (快，推荐) ──
+    try:
+        df = ak.stock_zh_a_st_em()
+        codes = [_code_to_baostock(c) for c in df["代码"].tolist()]
+        _save_cache(codes)
+        print(f"[ST] AKShare 获取成功，共 {len(codes)} 只 (已缓存)")
+        return codes
+    except Exception as e:
+        print(f"[ST] AKShare 失败: {e}，尝试 Baostock...")
+
+    # ── 方案 B: Baostock 兜底 ──
+    return _get_st_baostock(date_str)
+
+
+def _get_st_baostock(date_str=None) -> list[str]:
+    """Baostock 兜底方案 (慢但稳)"""
+    import baostock as bs
+
     lg = bs.login()
-    if lg.error_code != '0':
+    if lg.error_code != "0":
         print(f"Baostock 登录失败: {lg.error_msg}")
         return []
 
-    # 2. 获取当前日期 (或者指定最近的一个交易日)
-    # 注意：如果是周末或节假日，建议往前推几天，确保能取到数据
     if date_str is None:
         date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    # 3. 获取全市场证券信息 (包含 code, code_name 等)
+
     rs = bs.query_all_stock(day=date_str)
-    
-    # 4. 收集数据 (Baostock 这一步必须循环，无法避免)
     data_list = []
-    while (rs.error_code == '0') & rs.next():
+    while (rs.error_code == "0") & rs.next():
         data_list.append(rs.get_row_data())
-    
     bs.logout()
 
     if not data_list:
         print("未获取到 Baostock 数据，请检查日期是否为交易日")
         return []
 
-    # ==============================================================================
-    # 5. Polars 介入：高性能处理
-    # ==============================================================================
-    
-    # 直接将 List 转为 Polars DataFrame
-    # rs.fields 通常是: "code", "tradeStatus", "code_name"
     df = pl.DataFrame(data_list, schema=rs.fields, orient="row")
-    
-    # 筛选 code_name 包含 "ST" 的行，保留 Baostock 原始格式 (sh.600000)
-    st_codes_series = (
-        df
-        .lazy()
+    codes = (
+        df.lazy()
         .filter(pl.col("code_name").str.contains("ST"))
         .select("code")
         .collect()
         .get_column("code")
+        .to_list()
     )
-    
-    result_list = st_codes_series.to_list()
-    print(f"✅ 已获取 ST 黑名单，共 {len(result_list)} 只。")
-    return result_list
+
+    _save_cache(codes)
+    print(f"[ST] Baostock 获取成功，共 {len(codes)} 只 (已缓存)")
+    return codes
 
 
-
-# --- 测试运行 ---
 if __name__ == "__main__":
     st_list = get_st_blacklist_pl()
-    # 打印前5个看看格式对不对
     print("样例:", st_list[:5])
