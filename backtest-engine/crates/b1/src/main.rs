@@ -29,6 +29,10 @@ struct Args {
 
     #[arg(short, long, default_value = "crates/b1/config.toml")]
     config: PathBuf,
+
+    /// 结果输出目录 (留空则不保存)
+    #[arg(short, long, default_value = "../results")]
+    output_dir: String,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -139,6 +143,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let portfolio = app.world().resource::<Portfolio>();
     bt_core::print_results(stats, portfolio);
 
+    // 9. Save report
+    if !args.output_dir.is_empty() {
+        let config = app.world().resource::<BacktestConfig>();
+        let config_text = format_config(config, trading_dates.len());
+        bt_core::write_report("b1", &config_text, stats, portfolio, trading_dates.len(), &args.output_dir)?;
+    }
+
     Ok(())
 }
 
@@ -166,6 +177,47 @@ fn print_config(config: &BacktestConfig) {
         config.slippage_pct * 100.0
     );
     println!("------------------------");
+}
+
+fn format_config(config: &BacktestConfig, trading_days: usize) -> String {
+    use std::fmt::Write;
+    let mut s = String::new();
+
+    writeln!(s, "--- Configuration ---").unwrap();
+    writeln!(s, "Initial Capital:  {:.0}", config.initial_capital).unwrap();
+    writeln!(s, "Max Positions:    {} (Daily: {})", config.max_positions, config.max_daily_buys).unwrap();
+    writeln!(s, "Position Size:    {:.0}%", config.position_size_pct * 100.0).unwrap();
+    writeln!(s, "Max Hold Days:    {}", config.max_hold_days).unwrap();
+    let start_str = config.start_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".into());
+    let end_str = config.end_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".into());
+    writeln!(s, "Date Range:       {} ~ {}", start_str, end_str).unwrap();
+    writeln!(s, "Trading Days:     {}", trading_days).unwrap();
+    writeln!(s, "Sort Field:       {} ({})", config.sort_field, if config.sort_ascending { "ASC" } else { "DESC" }).unwrap();
+    writeln!(s, "Stop Loss:        {:.1}% ({})",
+        config.stop_loss_pct * 100.0,
+        if config.stop_loss_enabled { "ON" } else { "OFF" }
+    ).unwrap();
+    writeln!(s, "Take Profit:      TP1={:.0}%, TP2={:.0}%, Sell Ratio={:.1}%",
+        config.tp1_pct * 100.0, config.tp2_pct * 100.0, config.tp_sell_ratio * 100.0
+    ).unwrap();
+    writeln!(s, "Break WL/YL:      WL={}, YL={}",
+        if config.sell_on_break_wl { "ON" } else { "OFF" },
+        if config.sell_on_break_yl { "ON" } else { "OFF" }
+    ).unwrap();
+    writeln!(s, "Weak Filter:      {} days @ {:.0}% ({})",
+        config.weak_days, config.weak_min_gain_pct * 100.0,
+        if config.weak_enabled { "ON" } else { "OFF" }
+    ).unwrap();
+    writeln!(s, "Trailing Stop:    Activate={:.0}%, Trail={:.0}% ({})",
+        config.trailing_activation_pct * 100.0,
+        config.trailing_pct * 100.0,
+        if config.trailing_enabled { "ON" } else { "OFF" }
+    ).unwrap();
+    writeln!(s, "Commission:       {:.4}%", config.commission_rate * 100.0).unwrap();
+    writeln!(s, "Stamp Duty:       {:.3}%", config.stamp_duty_rate * 100.0).unwrap();
+    writeln!(s, "Slippage:         {:.2}%", config.slippage_pct * 100.0).unwrap();
+
+    s
 }
 
 fn build_market_data(

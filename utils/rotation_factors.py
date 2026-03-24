@@ -15,7 +15,7 @@
   4. 技术指标  — RSI, MACD, 布林带, ATR, 均线偏离
   5. 微观结构  — 振幅、影线、缺口、日内位置
   6. A股T+1短线 — 隔夜/日内收益分解、冲高探底、价格位置、Amihud
-  7. 处置效应   — 换手率衰减成本线偏离 (EWM近似)
+  7. 处置效应   — 换手率衰减成本线偏离 (EWM近似, 20/60d)
 """
 import polars as pl
 
@@ -268,9 +268,7 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
 
         # ── Step 13: 处置效应 — EWM 估算持仓成本线 (EHC) ─────────
         # EHC = EWM(TypicalPrice × Volume) / EWM(Volume)
-        # 用 EWM 指数衰减近似换手率驱动的筹码替换过程:
-        #   ehc_T ≈ (1-α)·ehc_{T-1} + α·P_T, α = 2/(span+1)
-        # span=20 → α≈0.095 (对应~10%日换手), span=60 → α≈0.033 (对应~3%日换手)
+        # span=20 → α≈0.095, span=60 → α≈0.033
         .with_columns([
             ((pl.col("_c1") + pl.col("_h1") + pl.col("_l1")) / 3 * pl.col("_v1"))
                 .alias("_tp_v1"),

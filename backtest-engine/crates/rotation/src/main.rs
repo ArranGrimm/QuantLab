@@ -31,6 +31,10 @@ struct Args {
 
     #[arg(short, long, default_value = "crates/rotation/config.toml")]
     config: PathBuf,
+
+    /// 结果输出目录 (留空则不保存)
+    #[arg(short, long, default_value = "../results")]
+    output_dir: String,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -83,6 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
     let initial_capital = config.initial_capital;
     let top_n = config.top_n;
+    let min_score = config.min_score;
     app.insert_resource(config);
     app.insert_resource(Portfolio::new(initial_capital));
     app.insert_resource(BacktestStats::default());
@@ -105,17 +110,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let world = app.world_mut();
         world.resource_mut::<Portfolio>().current_date = Some(*date);
 
-        // 构建当日候选: score 前 top_n 的股票
         let market_data = world.resource::<MarketData>();
         let mut candidates: Vec<_> = market_data
             .prices
             .iter()
             .filter_map(|(code, dates)| {
-                dates.get(date).map(|bar| (code.clone(), bar.score, bar.close))
+                dates.get(date).and_then(|bar| {
+                    if bar.score >= min_score {
+                        Some((code.clone(), bar.score, bar.close))
+                    } else {
+                        None
+                    }
+                })
             })
             .collect();
 
-        // 按 score 降序
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         candidates.truncate(top_n);
 
@@ -133,6 +142,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let portfolio = app.world().resource::<Portfolio>();
     bt_core::print_results(stats, portfolio);
 
+    // 9. Save report
+    if !args.output_dir.is_empty() {
+        let config = app.world().resource::<RotationConfig>();
+        let config_text = format_config(config, trading_dates.len());
+        bt_core::write_report("rotation", &config_text, stats, portfolio, trading_dates.len(), &args.output_dir)?;
+    }
+
     Ok(())
 }
 
@@ -146,6 +162,7 @@ fn print_config(config: &RotationConfig) {
     let end_str = config.end_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".to_string());
     println!("Date Range: {} ~ {}", start_str, end_str);
     println!("Top-N: {} (Hold Buffer: {})", config.top_n, config.hold_buffer);
+    println!("Min Score: {}", config.min_score);
     println!(
         "Stop Loss: {:.1}% ({})",
         config.stop_loss_pct * 100.0,
@@ -213,6 +230,39 @@ fn build_market_data(
     all_dates.sort();
     all_dates.dedup();
     Ok((market_data, all_dates))
+}
+
+fn format_config(config: &RotationConfig, trading_days: usize) -> String {
+    use std::fmt::Write;
+    let mut s = String::new();
+
+    writeln!(s, "--- Configuration ---").unwrap();
+    writeln!(s, "Initial Capital:  {:.0}", config.initial_capital).unwrap();
+    writeln!(s, "Max Positions:    {}", config.max_positions).unwrap();
+    writeln!(s, "Position Size:    {:.1}%", config.position_size_pct * 100.0).unwrap();
+    writeln!(s, "Max Hold Days:    {}", config.max_hold_days).unwrap();
+    let start_str = config.start_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".into());
+    let end_str = config.end_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".into());
+    writeln!(s, "Date Range:       {} ~ {}", start_str, end_str).unwrap();
+    writeln!(s, "Trading Days:     {}", trading_days).unwrap();
+    writeln!(s, "Top-N:            {}", config.top_n).unwrap();
+    writeln!(s, "Hold Buffer:      {}", config.hold_buffer).unwrap();
+    writeln!(s, "Min Score:        {}", config.min_score).unwrap();
+    writeln!(s, "Stop Loss:        {:.1}% ({})",
+        config.stop_loss_pct * 100.0,
+        if config.stop_loss_enabled { "ON" } else { "OFF" }
+    ).unwrap();
+    writeln!(s, "Trailing Stop:    Activate={:.0}%, Trail={:.0}% ({})",
+        config.trailing_activation_pct * 100.0,
+        config.trailing_pct * 100.0,
+        if config.trailing_enabled { "ON" } else { "OFF" }
+    ).unwrap();
+    let cm = &config.cost_model;
+    writeln!(s, "Commission:       {:.4}%", cm.commission_rate * 100.0).unwrap();
+    writeln!(s, "Stamp Duty:       {:.3}%", cm.stamp_duty_rate * 100.0).unwrap();
+    writeln!(s, "Slippage:         {:.2}%", cm.slippage_pct * 100.0).unwrap();
+
+    s
 }
 
 fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {

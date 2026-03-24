@@ -41,6 +41,8 @@ fn default_min_position_ratio() -> f64 { 0.5 }
 pub struct EntrySection {
     pub top_n: usize,
     pub hold_buffer: usize,
+    #[serde(default)]
+    pub min_score: f64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -81,6 +83,7 @@ pub struct RotationConfig {
 
     pub top_n: usize,
     pub hold_buffer: usize,
+    pub min_score: f64,
 
     pub stop_loss_enabled: bool,
     pub stop_loss_pct: f64,
@@ -104,6 +107,7 @@ impl Default for RotationConfig {
             min_position_ratio: 0.5,
             top_n: 20,
             hold_buffer: 50,
+            min_score: 0.0,
             stop_loss_enabled: true,
             stop_loss_pct: 0.05,
             trailing_enabled: false,
@@ -126,6 +130,7 @@ impl From<ConfigFile> for RotationConfig {
             min_position_ratio: cfg.backtest.min_position_ratio,
             top_n: cfg.entry.top_n,
             hold_buffer: cfg.entry.hold_buffer,
+            min_score: cfg.entry.min_score,
             stop_loss_enabled: cfg.stop_loss.enabled,
             stop_loss_pct: cfg.stop_loss.pct,
             trailing_enabled: cfg.trailing_stop.enabled,

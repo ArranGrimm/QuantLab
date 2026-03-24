@@ -162,7 +162,38 @@ pub fn round_to_lot(shares_f64: f64) -> u32 {
     ((shares_f64 / LOT_SIZE as f64).floor() as u32) * LOT_SIZE
 }
 
-/// Print backtest results summary
+/// Format backtest results as text (strategy-agnostic)
+pub fn format_results(stats: &BacktestStats, portfolio: &Portfolio, trading_days: usize) -> String {
+    use std::fmt::Write;
+    let mut s = String::new();
+
+    let total_return = (portfolio.cash / portfolio.initial_capital - 1.0) * 100.0;
+    let gross_pnl = stats.total_pnl + stats.total_costs();
+    let gross_return = gross_pnl / portfolio.initial_capital * 100.0;
+
+    writeln!(s, "--- Results ---").unwrap();
+    writeln!(s, "Total Trades:     {}", stats.total_trades).unwrap();
+    writeln!(s, "Win Rate:         {:.1}%", stats.win_rate() * 100.0).unwrap();
+    writeln!(s, "Total PnL:        {:+.2}", stats.total_pnl).unwrap();
+    writeln!(s, "Final Portfolio:   {:.2}", portfolio.cash).unwrap();
+    writeln!(s, "Total Return:     {:+.2}%", total_return).unwrap();
+    writeln!(s, "Max Drawdown:     {:.2}%", stats.max_drawdown * 100.0).unwrap();
+    writeln!(s).unwrap();
+    writeln!(s, "--- Trading Costs ---").unwrap();
+    writeln!(s, "Commission:       {:.2}", stats.total_commission).unwrap();
+    writeln!(s, "Stamp Duty:       {:.2}", stats.total_stamp_duty).unwrap();
+    writeln!(s, "Slippage:         {:.2}", stats.total_slippage).unwrap();
+    writeln!(s, "Total Costs:      {:.2}", stats.total_costs()).unwrap();
+    writeln!(s).unwrap();
+    writeln!(s, "--- Derived ---").unwrap();
+    writeln!(s, "Gross PnL:        {:+.2}", gross_pnl).unwrap();
+    writeln!(s, "Gross Return:     {:+.2}%", gross_return).unwrap();
+    writeln!(s, "Avg Trades/Day:   {:.1}", stats.total_trades as f64 / trading_days.max(1) as f64).unwrap();
+
+    s
+}
+
+/// Print backtest results summary to stdout
 pub fn print_results(stats: &BacktestStats, portfolio: &Portfolio) {
     println!("\n========================================");
     println!("           Backtest Results");
@@ -183,4 +214,38 @@ pub fn print_results(stats: &BacktestStats, portfolio: &Portfolio) {
     println!("  Slippage:   {:.2}", stats.total_slippage);
     println!("  Total:      {:.2}", stats.total_costs());
     println!("========================================");
+}
+
+/// Save a backtest report file. Each strategy provides its own config text.
+pub fn write_report(
+    strategy_name: &str,
+    config_text: &str,
+    stats: &BacktestStats,
+    portfolio: &Portfolio,
+    trading_days: usize,
+    output_dir: &str,
+) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    use chrono::Local;
+    use std::io::Write;
+
+    std::fs::create_dir_all(output_dir)?;
+
+    let now = Local::now();
+    let filename = format!("{}_{}.txt", strategy_name, now.format("%Y%m%d_%H%M%S"));
+    let filepath = std::path::Path::new(output_dir).join(&filename);
+
+    let mut f = std::fs::File::create(&filepath)?;
+
+    writeln!(f, "========================================")?;
+    writeln!(f, "   {} Backtest Report", strategy_name)?;
+    writeln!(f, "   {}", now.format("%Y-%m-%d %H:%M:%S"))?;
+    writeln!(f, "========================================")?;
+    writeln!(f)?;
+    write!(f, "{}", config_text)?;
+    writeln!(f)?;
+    write!(f, "{}", format_results(stats, portfolio, trading_days))?;
+    writeln!(f, "========================================")?;
+
+    println!("\n📄 Report saved: {}", filepath.display());
+    Ok(filepath)
 }
