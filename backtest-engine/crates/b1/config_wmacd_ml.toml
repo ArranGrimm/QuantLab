@@ -14,7 +14,7 @@ start_date = "2023-01-05"             # 开始日期, 格式: "2025-01-01"
 end_date = "2026-03-31"               # 结束日期, 格式: "2025-12-31"
 
 # 买入排序字段 (候选股票的优先级排序)
-sort_field = "rw_dif_pct"              # 排序字段名 (parquet 中的列名)
+sort_field = "score"              # 排序字段名 (parquet 中的列名)
 sort_ascending = false                 # true=升序 (值小优先), false=降序 (值大优先)
 
 # 最小仓位比例 (现金不足时，至少能买目标仓位的 X% 才执行买入)

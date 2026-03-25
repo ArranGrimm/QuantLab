@@ -1,5 +1,33 @@
 # Progress
 
+## 2026-03-25
+
+### [B1] ML 排序替代手搓因子探索
+
+#### 全市场模型 (`b1_ml_explore.py`)
+- 新建 notebook, 56 特征 (42 rotation + 14 B1 专属), 标签 MFE-10
+- 全市场训练 LightGBM, 对 B1 候选排序
+- 信号质量: IC +0.137, L/S +3.95%, t-stat +32.38 — 极显著
+- Rust 回测: 近期 +36.63% (手搓 +30.49%), 长周期 +78.36% (手搓 +81.05%)
+- **近期跑赢手搓 +6pp, 长周期持平, 但回撤更大**
+
+#### B1 专属模型 (`b1_ml_dedicated.py`)
+- 仅用 B1 信号日样本 (14,242 条) 训练, 38 特征 (IC 筛选)
+- 发现: B1 子集 IC 排序与全市场完全不同 — `amihud_illiq_20d` 全市场 #1 但 B1 无效, `vol_60d` 在 B1 中最强
+- 信号质量: IC +0.009, t-stat +0.54 (不显著) — 每天仅 10~17 只 B1 候选, 截面太窄
+- Rust 回测: 近期 +21.38%, 长周期 +43.83% — **全面跑输**
+- **结论: B1 专属模型不可行, 最佳方案仍是全市场 ML 排序**
+
+#### Bug 修复
+- 修复 `b1_ml_explore.py` Quintile 标签方向 (Q1/Q5 含义反了)
+- 修复 Top-N Overlap 计算 (对比数组索引改为对比股票代码)
+- 添加 LightGBM 训练进度打印 (对齐 rotation notebook)
+
+### 文档结构优化
+- 新建 `experiments/` 目录, 每个实验独立 markdown
+- `project-status.md` 按策略分节 (Rotation / B1 / 共享基础设施)
+- 迁移旧 `experiments.md` 内容到 `experiments/rotation-benchmark.md` + `rotation-factors.md`
+
 ## 2026-03-24
 
 ### 因子实验: 128 天长周期因子 (失败, 已回退)

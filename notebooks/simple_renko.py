@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.2"
+__generated_with = "0.21.1"
 app = marimo.App(width="medium")
 
 
@@ -63,21 +63,22 @@ def _():
         datetime,
         pl,
         print_backtest_report,
+        q_full,
         run_backtest_short,
     )
 
 
 @app.cell
-def _(calc_renko_factors_wmacd, df_b1):
+def _(calc_renko_factors_wmacd, q_full):
     # 3. 执行计算
     print("⏳ 计算原始 Renko 信号...")
-    df_signals = calc_renko_factors_wmacd(df_b1, require_b1=False)
+    df_signals = calc_renko_factors_wmacd(q_full, require_b1=False)
     return (df_signals,)
 
 
 @app.cell
 def _(df_signals, print_backtest_report, run_backtest_short):
-    return_days = [3, 5, 7, 10, 15]
+    return_days = [1, 3, 5]
 
     LOOSE_PERIODS = [
     ]
