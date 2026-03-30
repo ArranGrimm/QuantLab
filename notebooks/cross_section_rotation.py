@@ -132,75 +132,54 @@ def _(
 
 
 @app.cell
-def _(FACTOR_COLS, df_all, go, make_subplots, np, pl, stats):
+def _(FACTOR_COLS, df_all, go, make_subplots, np, pl):
     # ==============================================================================
-    # Cell 3: 因子 IC 分析
+    # Cell 3: 因子 IC 分析 (Polars 原生加速)
     # ==============================================================================
+    from utils.ic_analysis import calc_factor_ic
+
     def run_ic_analysis():
-        print("📊 [Step 3] 计算因子 IC (Spearman 截面相关系数)...")
+        LABEL = "fwd_ret_1d"
 
         df_valid_local = df_all.filter(
-            pl.col("fwd_ret_1d").is_not_null() & pl.col("fwd_ret_1d").is_not_nan()
+            pl.col(LABEL).is_not_null() & pl.col(LABEL).is_not_nan()
         )
 
-        trading_dates = df_valid_local["date"].unique().sort().to_list()
-        ic_records_local = []
+        ic_results = calc_factor_ic(
+            df_valid_local,
+            factor_cols=list(FACTOR_COLS),
+            label=LABEL,
+            min_samples=30,
+        )
 
-        for trade_date in trading_dates:
-            daily_df = df_valid_local.filter(pl.col("date") == trade_date)
-            if len(daily_df) < 30:
-                continue
-
-            ret_values = daily_df["fwd_ret_1d"].to_numpy()
-            ic_row = {"date": trade_date}
-
-            for factor_name in FACTOR_COLS:
-                factor_values = daily_df[factor_name].to_numpy()
-                valid_mask = np.isfinite(factor_values) & np.isfinite(ret_values)
-                if valid_mask.sum() < 30:
-                    ic_row[factor_name] = np.nan
-                else:
-                    corr, _ = stats.spearmanr(factor_values[valid_mask], ret_values[valid_mask])
-                    ic_row[factor_name] = corr
-
-            ic_records_local.append(ic_row)
-
-        df_ic_local = pl.DataFrame(ic_records_local)
-        print(f"✅ IC 计算完成: {len(df_ic_local)} 个交易日")
-
+        # 构建 df_ic_summary 供 Cell 3b 使用
         ic_summary_local = []
-        for factor_name in FACTOR_COLS:
-            ic_series = df_ic_local[factor_name].drop_nulls().drop_nans()
-            if len(ic_series) == 0:
-                continue
-
-            ic_arr = ic_series.to_numpy()
-            ic_mean = np.mean(ic_arr)
-            ic_std = np.std(ic_arr)
-            icir = ic_mean / ic_std if ic_std > 0 else 0
-            ic_pos_ratio = np.mean(ic_arr > 0)
+        for factor_name, r in ic_results.items():
             ic_summary_local.append({
                 "factor": factor_name,
-                "IC_mean": round(ic_mean, 4),
-                "IC_std": round(ic_std, 4),
-                "ICIR": round(icir, 4),
-                "IC_pos_ratio": round(ic_pos_ratio, 4),
-                "abs_ICIR": round(abs(icir), 4),
+                "IC_mean": round(r["ic_mean"], 4),
+                "IC_std": round(r["ic_std"], 4),
+                "ICIR": round(r["icir"], 4),
+                "IC_pos_ratio": 0.0,
+                "abs_ICIR": round(abs(r["icir"]), 4),
             })
-
         df_ic_summary_local = pl.DataFrame(ic_summary_local).sort("abs_ICIR", descending=True)
-        print("\n" + "=" * 80)
-        print("  因子 IC 排行榜 (按 |ICIR| 降序)")
-        print("=" * 80)
-        print(f"{'因子':<22} {'IC_mean':>10} {'IC_std':>10} {'ICIR':>10} {'IC>0 比例':>10}")
-        print("-" * 80)
-        for summary_row in df_ic_summary_local.iter_rows(named=True):
-            print(
-                f"{summary_row['factor']:<22} {summary_row['IC_mean']:>10.4f} "
-                f"{summary_row['IC_std']:>10.4f} {summary_row['ICIR']:>10.4f} "
-                f"{summary_row['IC_pos_ratio']:>10.1%}"
-            )
-        print("-" * 80)
+
+        # 逐日 IC DataFrame (用于累积 IC 图)
+        date_counts = df_valid_local.group_by("date").agg(pl.len().alias("n"))
+        valid_dates = date_counts.filter(pl.col("n") >= 30)["date"]
+        df_filtered = df_valid_local.filter(pl.col("date").is_in(valid_dates))
+
+        available = [f for f in FACTOR_COLS if f in df_filtered.columns]
+        df_ic_local = (
+            df_filtered
+            .group_by("date")
+            .agg([
+                pl.corr(f, LABEL, method="spearman").alias(f)
+                for f in available
+            ])
+            .sort("date")
+        )
 
         top_factors_local = df_ic_summary_local["factor"].head(6).to_list()
         fig_ic_local = make_subplots(rows=1, cols=1)
@@ -221,9 +200,9 @@ def _(FACTOR_COLS, df_all, go, make_subplots, np, pl, stats):
             template="plotly_dark",
         )
         fig_ic_local.show()
-        return df_ic_local, df_ic_summary_local
+        return df_ic_summary_local
 
-    df_ic, df_ic_summary = run_ic_analysis()
+    df_ic_summary = run_ic_analysis()
     return (df_ic_summary,)
 
 

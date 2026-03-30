@@ -248,77 +248,29 @@ def _(
 
 
 @app.cell
-def _(ALL_FACTORS, df_all, np, pl, stats):
+def _(ALL_FACTORS, df_all, pl):
     # ==============================================================================
-    # Cell 3: 单因子 IC 分析 (仅 B1 信号日样本 vs MFE-10)
-    #
-    # 在 B1 子集上哪些因子有预测力?
+    # Cell 3: 单因子 IC 分析 (Polars 原生, 仅 B1 信号日样本 vs MFE-10)
     # ==============================================================================
-    def run_ic_analysis_b1():
-        LABEL = "fwd_mfe_10d"
-        print(f"📊 [Step 3] B1 样本单因子 IC (Spearman vs {LABEL})...")
+    from utils.ic_analysis import calc_factor_ic, select_factors_by_ic
 
-        df_b1 = df_all.filter(
-            pl.col("is_b1") &
-            pl.col(LABEL).is_not_null() & pl.col(LABEL).is_not_nan()
-        )
-        print(f"   B1 有效样本: {df_b1.shape[0]:,} 条")
+    LABEL = "fwd_mfe_10d"
 
-        dates_np = df_b1["date"].to_numpy()
-        unique_dates = np.unique(dates_np)
-        unique_dates.sort()
+    df_b1 = df_all.filter(
+        pl.col("is_b1") &
+        pl.col(LABEL).is_not_null() & pl.col(LABEL).is_not_nan()
+    )
+    print(f"   B1 有效样本: {df_b1.shape[0]:,} 条")
 
-        ic_results = {}
-        for factor in ALL_FACTORS:
-            factor_np = df_b1[factor].to_numpy().astype(np.float64)
-            ret_np = df_b1[LABEL].to_numpy().astype(np.float64)
+    ic_results = calc_factor_ic(
+        df_b1,
+        factor_cols=ALL_FACTORS,
+        label=LABEL,
+        min_samples=5,
+        prefix_highlight="b1_",
+    )
 
-            daily_ics = []
-            for d in unique_dates:
-                mask = dates_np == d
-                f_day = factor_np[mask]
-                r_day = ret_np[mask]
-                valid = np.isfinite(f_day) & np.isfinite(r_day)
-                if valid.sum() >= 5:
-                    ic, _ = stats.spearmanr(f_day[valid], r_day[valid])
-                    if np.isfinite(ic):
-                        daily_ics.append(ic)
-
-            if len(daily_ics) >= 10:
-                arr = np.array(daily_ics)
-                ic_mean = arr.mean()
-                ic_std = arr.std()
-                icir = ic_mean / ic_std if ic_std > 1e-8 else 0
-                t = ic_mean / (ic_std / np.sqrt(len(arr))) if ic_std > 1e-8 else 0
-                ic_results[factor] = {
-                    "ic_mean": ic_mean, "ic_std": ic_std,
-                    "icir": icir, "t_stat": t, "n_days": len(arr),
-                }
-
-        sorted_factors = sorted(ic_results.items(), key=lambda x: abs(x[1]["icir"]), reverse=True)
-
-        print(f"\n{'因子':<25} {'IC_Mean':>8} {'IC_Std':>8} {'ICIR':>8} {'t-stat':>8} {'显著':>4}")
-        print("-" * 75)
-        for name, r in sorted_factors:
-            sig = "✅" if abs(r["t_stat"]) > 2 else ""
-            prefix = "🔵" if name.startswith("b1_") else "  "
-            print(f"{prefix}{name:<23} {r['ic_mean']:>+8.4f} {r['ic_std']:>8.4f} "
-                  f"{r['icir']:>+8.4f} {r['t_stat']:>+8.2f} {sig:>4}")
-        print("-" * 75)
-
-        n_sig = sum(1 for _, r in sorted_factors if abs(r["t_stat"]) > 2)
-        print(f"\n   显著因子: {n_sig} / {len(sorted_factors)}")
-
-        # 自动筛选: abs(t_stat) > 1.5 的因子
-        selected = [name for name, r in sorted_factors if abs(r["t_stat"]) > 1.5]
-        print(f"   自动入选 (|t|>1.5): {len(selected)} 个")
-        for name in selected:
-            prefix = "🔵" if name.startswith("b1_") else "  "
-            print(f"     {prefix}{name}")
-
-        return ic_results, selected
-
-    ic_results, selected_factors = run_ic_analysis_b1()
+    selected_factors = select_factors_by_ic(ic_results, t_threshold=1.5)
     return (selected_factors,)
 
 
