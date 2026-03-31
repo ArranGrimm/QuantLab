@@ -131,10 +131,15 @@ def load_daily_data_full(conn, codes: list[str] = None):
         # 5. 过滤停牌/无量数据 (保持旧逻辑)
         .filter(pl.col("volume") > 0)
         
-        # 6. 选择并排序最终列
+        # 6. 前一日复权收盘价 (涨跌停判断、收益计算等通用需求)
+        .with_columns(
+            pl.col("close_adj").shift(1).over("code").alias("pre_close_adj")
+        )
+        
+        # 7. 选择并排序最终列
         .select([
             "code", "date", 
-            "open_adj", "high_adj", "low_adj", "close_adj", 
+            "open_adj", "high_adj", "low_adj", "close_adj", "pre_close_adj",
             "volume", "amount", 
             "close_raw", "market_cap_100m",
             "circulating_capital",
@@ -291,3 +296,34 @@ def load_daily_data_single(conn, code):
     )
     
     return q_single.collect()
+
+
+# ==============================================================================
+# A股涨跌停标记 (与 Rust bt-core 保持一致的判定逻辑)
+# ==============================================================================
+
+_LIMIT_TOLERANCE = 0.001  # 0.1% 容差, 覆盖四舍五入精度误差
+
+def add_price_limit_cols(df: pl.LazyFrame) -> pl.LazyFrame:
+    """
+    为 DataFrame 添加 is_limit_up / is_limit_down 标记列.
+
+    要求输入含 code, close_adj, pre_close_adj 列.
+    规则与 Rust bt-core 完全一致:
+      主板 (60/00) → ±10%, 创业板 (300/301) → ±20%, 科创板 (688/689) → ±20%
+
+    不删除任何行, 仅打标记.
+    """
+    is_gem_star = (
+        pl.col("code").str.starts_with("300")
+        | pl.col("code").str.starts_with("301")
+        | pl.col("code").str.starts_with("688")
+        | pl.col("code").str.starts_with("689")
+    )
+    limit_pct = pl.when(is_gem_star).then(0.20).otherwise(0.10)
+    daily_ret = pl.col("close_adj") / pl.col("pre_close_adj") - 1
+
+    return df.with_columns([
+        (daily_ret >= (limit_pct - _LIMIT_TOLERANCE)).alias("is_limit_up"),
+        (daily_ret <= -(limit_pct - _LIMIT_TOLERANCE)).alias("is_limit_down"),
+    ])

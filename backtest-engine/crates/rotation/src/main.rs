@@ -106,6 +106,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         trading_dates.len()
     );
 
+    let mut limit_up_blocked: u32 = 0;
+    let mut limit_up_days: u32 = 0;
+
     for date in &trading_dates {
         let world = app.world_mut();
         world.resource_mut::<Portfolio>().current_date = Some(*date);
@@ -116,17 +119,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .iter()
             .filter_map(|(code, dates)| {
                 dates.get(date).and_then(|bar| {
-                    if bar.score >= min_score {
-                        Some((code.clone(), bar.score, bar.close))
-                    } else {
-                        None
+                    if bar.score < min_score {
+                        return None;
                     }
+                    Some((code.clone(), bar.score, bar.close, bar.pre_close))
                 })
             })
             .collect();
 
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         candidates.truncate(top_n);
+
+        let before = candidates.len();
+        candidates.retain(|(code, _score, close, pre_close)| {
+            let limit = bt_core::price_limit_pct(code);
+            !bt_core::is_limit_up(*close, *pre_close, limit)
+        });
+        let blocked = (before - candidates.len()) as u32;
+        if blocked > 0 {
+            limit_up_blocked += blocked;
+            limit_up_days += 1;
+        }
+
+        let candidates: Vec<(String, f64, f64)> = candidates
+            .into_iter()
+            .map(|(code, score, close, _)| (code, score, close))
+            .collect();
 
         world.resource_mut::<DailyData>().candidates = candidates;
         app.update();
@@ -138,6 +156,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 8. Print results
+    println!("\n--- 涨停过滤统计 ---");
+    println!("Top-{} 中被涨停过滤: {} 次 ({} 天有过滤, 日均 {:.1})",
+        top_n, limit_up_blocked, limit_up_days,
+        if limit_up_days > 0 { limit_up_blocked as f64 / limit_up_days as f64 } else { 0.0 }
+    );
+
     let stats = app.world().resource::<BacktestStats>();
     let portfolio = app.world().resource::<Portfolio>();
     bt_core::print_results(stats, portfolio);

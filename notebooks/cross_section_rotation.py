@@ -16,7 +16,7 @@ def _():
     from datetime import datetime
     from scipy import stats
 
-    from utils import load_daily_data_full
+    from utils import load_daily_data_full, add_price_limit_cols
     from utils import get_st_blacklist_pl
     from utils.rotation_factors import (
         calc_rotation_factors,
@@ -35,9 +35,10 @@ def _():
     MV_MAX = 500     # 最大流通市值 (亿)
     MIN_LIST_DAYS = 60  # 最少上市天数
     START_DATE = "2020-09-01"  # 创业板注册制后
+    LABEL = "fwd_ret_1d"  # 可选: fwd_ret_{1/2/3/5}d 或 fwd_ret_{1/2/3/5}d_excess
 
     print("🚀 [Step 1] 加载全量日线数据...")
-    st_blacklist = get_st_blacklist_pl("2026-03-17")
+    st_blacklist = get_st_blacklist_pl("2026-03-31")
     st_blacklist_df = pl.DataFrame({"code": st_blacklist}).lazy()
 
     q_full = (
@@ -49,9 +50,11 @@ def _():
     print(f"✅ 参数: 流通市值 {MV_MIN}~{MV_MAX} 亿, 上市>{MIN_LIST_DAYS}天, 起始={START_DATE}")
     return (
         FACTOR_COLS,
+        LABEL,
         MIN_LIST_DAYS,
         MV_MAX,
         MV_MIN,
+        add_price_limit_cols,
         calc_rotation_factors,
         cross_section_normalize,
         go,
@@ -69,6 +72,7 @@ def _(
     MIN_LIST_DAYS,
     MV_MAX,
     MV_MIN,
+    add_price_limit_cols,
     calc_rotation_factors,
     cross_section_normalize,
     pl,
@@ -99,6 +103,9 @@ def _(
         (pl.col("close_adj").shift(-5).over("code") / pl.col("close_adj") - 1).alias("fwd_ret_5d"),
     ])
 
+    # 涨跌停标记 (不删行, 仅打标记; 与 Rust bt-core 判定逻辑一致)
+    df_with_label = add_price_limit_cols(df_with_label)
+
     # 市值 + 上市天数过滤 → 确定每日可交易 universe
     df_universe = (
         df_with_label
@@ -115,31 +122,45 @@ def _(
     # 在可交易 universe 内做截面标准化
     df_normalized = cross_section_normalize(df_universe, FACTOR_COLS)
 
+    # 超额收益标签: 截面去均值 (在 universe 内计算, 消除市场 beta)
+    df_normalized = df_normalized.with_columns([
+        (pl.col("fwd_ret_1d") - pl.col("fwd_ret_1d").mean().over("date")).alias("fwd_ret_1d_excess"),
+        (pl.col("fwd_ret_2d") - pl.col("fwd_ret_2d").mean().over("date")).alias("fwd_ret_2d_excess"),
+        (pl.col("fwd_ret_3d") - pl.col("fwd_ret_3d").mean().over("date")).alias("fwd_ret_3d_excess"),
+        (pl.col("fwd_ret_5d") - pl.col("fwd_ret_5d").mean().over("date")).alias("fwd_ret_5d_excess"),
+    ])
+
     final_cols = [
         "code", "date", "open_adj", "high_adj", "low_adj", "close_adj",
+        "pre_close_adj",
         "volume", "amount", "close_raw", "market_cap_100m",
         "circulating_capital",
         "fwd_ret_1d", "fwd_ret_2d", "fwd_ret_3d", "fwd_ret_5d",
+        "fwd_ret_1d_excess", "fwd_ret_2d_excess", "fwd_ret_3d_excess", "fwd_ret_5d_excess",
+        "is_limit_up", "is_limit_down",
         *FACTOR_COLS,
     ]
 
     print("⏳ [Step 2] Collecting... (全量因子计算, 可能需要更长时间)")
     df_all = df_normalized.select(final_cols).collect()
+    n_limit_up = df_all.filter(pl.col("is_limit_up")).height
+    n_limit_down = df_all.filter(pl.col("is_limit_down")).height
     print(f"✅ 数据集: {df_all.shape[0]:,} 行 x {df_all.shape[1]} 列")
     print(f"   日期范围: {df_all['date'].min()} ~ {df_all['date'].max()}")
     print(f"   股票数量: {df_all['code'].n_unique()}")
+    print(f"   涨停样本: {n_limit_up:,} ({n_limit_up/df_all.shape[0]*100:.2f}%)")
+    print(f"   跌停样本: {n_limit_down:,} ({n_limit_down/df_all.shape[0]*100:.2f}%)")
     return (df_all,)
 
 
 @app.cell
-def _(FACTOR_COLS, df_all, go, make_subplots, np, pl):
+def _(FACTOR_COLS, LABEL, df_all, go, make_subplots, pl):
     # ==============================================================================
     # Cell 3: 因子 IC 分析 (Polars 原生加速)
     # ==============================================================================
     from utils.ic_analysis import calc_factor_ic
 
     def run_ic_analysis():
-        LABEL = "fwd_ret_1d"
 
         df_valid_local = df_all.filter(
             pl.col(LABEL).is_not_null() & pl.col(LABEL).is_not_nan()
@@ -343,7 +364,7 @@ def _():
 
 
 @app.cell
-def _(FACTOR_COLS, df_all, np, pl, q_full):
+def _(FACTOR_COLS, LABEL, df_all, np, pl, q_full):
     # ==============================================================================
     # Cell 6: LightGBM Walk-Forward 打分 → Parquet 导出
     # 模型只负责打分, 回测交给 Rust ECS 引擎
@@ -361,7 +382,6 @@ def _(FACTOR_COLS, df_all, np, pl, q_full):
         TRAIN_WINDOW = 480
         RETRAIN_FREQ = 20
         TOP_N = 20
-        LABEL = "fwd_ret_1d"
         EMA_ALPHA = 0.15  # Score 时序平滑 (1.0 = 不平滑)
 
         feature_cols = list(FACTOR_COLS)
@@ -394,6 +414,7 @@ def _(FACTOR_COLS, df_all, np, pl, q_full):
         y_all_np = df_valid_ml[LABEL].to_numpy().astype(np.float32)
         dates_np = df_valid_ml["date"].to_numpy()
         codes_np = df_valid_ml["code"].to_numpy()
+        is_limit_up_np = df_valid_ml["is_limit_up"].fill_null(False).to_numpy()
 
         unique_dates_ml = np.unique(dates_np)
         unique_dates_ml.sort()
@@ -417,7 +438,7 @@ def _(FACTOR_COLS, df_all, np, pl, q_full):
                 X_tr = X_all_np[ts:te]
                 y_tr = y_all_np[ts:te]
 
-                valid = np.isfinite(y_tr)
+                valid = np.isfinite(y_tr) & ~is_limit_up_np[ts:te]
                 if valid.sum() < 1000:
                     continue
 

@@ -44,4 +44,4 @@ trailing_pct = 0.05
 [costs]
 commission_rate = 0.00025   # 佣金 (万2.5)
 stamp_duty_rate = 0.001     # 印花税 (千1，仅卖出)
-slippage_pct = 0.001        # 滑点 (0.1%)
+slippage_pct = 0.001        # 滑点 (0.3%, 含14:45~15:00快照误差)

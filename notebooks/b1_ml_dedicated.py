@@ -82,8 +82,16 @@ def _(
     df_factors = calc_rotation_factors(q_full)
 
     # ── B) B1 原始连续值指标 ──
+    # B1 需要 T-1 数据 (shift(1)), rotation_factors 已改为 T 日数据, 此处自行计算
     df_with_b1 = (
         df_factors
+        .with_columns([
+            pl.col("close_adj").shift(1).over("code").alias("_c1"),
+            pl.col("open_adj").shift(1).over("code").alias("_o1"),
+            pl.col("high_adj").shift(1).over("code").alias("_h1"),
+            pl.col("low_adj").shift(1).over("code").alias("_l1"),
+            pl.col("volume").shift(1).over("code").alias("_v1"),
+        ])
 
         # B1-1: 知行双线 (WL/YL)
         .with_columns([

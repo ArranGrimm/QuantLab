@@ -1,25 +1,27 @@
 # QuantLab 量化研究实验室
 
-基于 **B1 超跌反转策略** 的量化交易研究平台，集成了 Polars 因子计算、多周期 MACD 过滤、统计学回测、Rust ECS 回测引擎，以及 AI 多模态评审 Agent。
+A 股多策略量化研究平台，集成 Polars 因子工程、LightGBM Walk-Forward 模型、Rust ECS 回测引擎。当前研究两条策略线：**截面轮动**（日频 ML 选股）和 **B1 超跌反转**（事件驱动）。
 
 ## 架构
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                          Python 数据层                                    │
-│  ┌──────────────┐   ┌────────────────┐   ┌──────────────┐              │
-│  │ 数据获取     │ → │ 因子计算       │ → │ 信号输出     │              │
-│  │ QMT/Baostock │   │ B1 / Renko     │   │ Parquet/JSON │              │
-│  └──────────────┘   └────────────────┘   └──────────────┘              │
-│                              ↓                                           │
-│               calc_b1_factors_wmacd (周线MACD+WL>YL)                    │
-└──────────────────────────────────────────────────────────────────────────┘
-            ↓                                    ↓
-┌────────────────────────┐       ┌─────────────────────────────────────────┐
-│  Rust 回测引擎 (ECS)    │       │  AI Agent 工作流                        │
-│  动态仓位 | 分批止盈    │       │  Plotly图表 → Gemini多模态评审 → 推荐   │
-│  交易成本 | 最大回撤     │       │  结构化指标 + 视觉分析双通道            │
-└────────────────────────┘       └─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Python 信号层                                    │
+│  ┌──────────────┐   ┌────────────────┐   ┌──────────────────────────┐  │
+│  │ 数据加载      │ → │ 因子计算       │ → │ LightGBM Walk-Forward   │  │
+│  │ DuckDB       │   │ 42因子 (T日)   │   │ 打分 → Parquet 导出     │  │
+│  │ + 涨跌停标记  │   │ + 涨跌停过滤   │   │ (训练排除涨停样本)      │  │
+│  └──────────────┘   └────────────────┘   └──────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+                               ↓ Parquet
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      Rust 回测引擎 (Bevy ECS)                            │
+│  ┌──────────────────┐  ┌───────────────────┐  ┌─────────────────────┐  │
+│  │ bt-core (共享)    │  │ bt-rotation       │  │ bt-b1               │  │
+│  │ Portfolio/Stats   │  │ 截面轮动策略      │  │ B1 超跌反转策略     │  │
+│  │ 涨跌停判定       │  │ 涨停过滤/跌停锁仓 │  │ 止损/止盈/弱势出场  │  │
+│  └──────────────────┘  └───────────────────┘  └─────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## 目录结构
@@ -27,53 +29,43 @@
 ```
 QuantLab/
 ├── utils/                     # Python 核心工具模块
+│   ├── rotation_factors.py    #   截面轮动因子 (42个, T日数据版)
 │   ├── b1_factors_opt.py      #   B1 选股因子 (V3.0 + 周月MACD + 周线WL>YL)
 │   ├── renko_factors.py       #   砖型图反转因子
-│   ├── backtest.py            #   统计学回测 (run_backtest / run_backtest_short)
+│   ├── ic_analysis.py         #   Polars 原生 IC 分析 (Spearman 秩相关)
+│   ├── duckdb_utils.py        #   DuckDB 数据加载 + 涨跌停标记
 │   ├── signal_export.py       #   信号导出 (Parquet, 供 Rust 使用)
-│   ├── duckdb_utils.py        #   DuckDB 数据加载 (load_daily_data_full)
+│   ├── backtest.py            #   统计学回测 (run_backtest / run_backtest_short)
 │   ├── get_data.py            #   QMT 数据同步 → DuckDB
 │   ├── baostock_sync.py       #   Baostock 数据同步 → DuckDB
 │   └── ...
 │
+├── notebooks/                 # Marimo 研究 Notebook
+│   ├── cross_section_rotation.py  # 截面轮动策略 (因子→IC→LightGBM→导出)
+│   ├── b1_ml_explore.py       #   B1 全市场 ML 排序探索
+│   ├── b1_ml_dedicated.py     #   B1 专属模型 (结论: 不如全市场)
+│   ├── renko_ml_explore.py    #   砖型图 ML 探索
+│   ├── simple_b1_opt.py       #   B1 统计学回测
+│   └── ...
+│
+├── backtest-engine/           # Rust 回测引擎 (Bevy ECS, Cargo Workspace)
+│   └── crates/
+│       ├── core/              #   bt-core: 共享类型 (Portfolio/Stats/涨跌停)
+│       ├── rotation/          #   bt-rotation: 截面轮动 (涨停过滤/跌停锁仓)
+│       └── b1/                #   bt-b1: B1 超跌反转 (止损/止盈/弱势出场)
+│
 ├── agent/                     # AI Agent 每日选股工作流
 │   ├── run.py                 #   主入口: python -m agent.run
-│   ├── chart.py               #   Plotly K线图生成 + PNG导出
-│   ├── context.py             #   结构化指标文本 (供LLM阅读)
-│   ├── prompt.md              #   B1专用评审提示词
-│   ├── config.yaml            #   配置 (数据库/模型/参数)
-│   ├── report.py              #   终端输出 + JSON保存
-│   └── reviewers/             #   AI评审模块 (可插拔)
-│       ├── base.py            #     BaseReviewer 抽象基类
-│       └── gemini.py          #     GeminiReviewer (Gemini多模态)
-│
-├── backtest-engine/           # Rust 回测引擎 (Bevy ECS)
-│   ├── src/
-│   │   ├── main.rs
-│   │   ├── components/        #   ECS 组件 (Position, ClosedTrade)
-│   │   ├── resources/         #   ECS 资源 (Portfolio, MarketData, Config)
-│   │   └── systems/           #   ECS 系统 (买入/卖出/统计)
-│   └── config.toml            #   策略配置 (仓位/止盈止损/成本)
-│
-├── notebooks/                 # Marimo 研究 Notebook
-│   ├── simple_b1_opt.py       #   B1 策略主程序 (因子计算+回测)
-│   ├── simple_renko.py        #   砖型图策略研究
-│   ├── stock_viewer.py        #   单股K线 + WL/YL 看盘
-│   ├── smart_b1_*.py          #   CatBoost 形态学模型
-│   ├── sequence_b1_*.py       #   序列模型
-│   └── ...
+│   └── reviewers/             #   AI 评审模块 (Gemini 多模态)
 │
 ├── strategies/                # 通达信 TDX 策略脚本
 │   └── tdx_scripts/
-│       ├── B1代码3.0.0b.txt   #   B1 日线选股 (当前版本)
-│       ├── B1周线过滤器.txt    #   B1 周线过滤器 (MACD+WL>YL)
-│       ├── B1大周期择时.txt    #   周线MA多头排列择时
-│       └── ...
 │
+├── results/                   # 回测报告 (自动保存, 带时间戳)
+├── experiments/               # 实验记录 (markdown)
 └── data/                      # 数据目录 (git ignored)
     ├── signals/               #   导出的信号 Parquet
-    ├── charts/                #   Agent 导出的K线图
-    └── review/                #   Agent AI评审结果
+    └── sector_map_em.csv      #   东方财富行业分类
 ```
 
 ## 快速开始
@@ -82,94 +74,52 @@ QuantLab/
 
 ```bash
 uv sync
-# 或
-pip install polars duckdb plotly kaleido pyyaml google-genai
 ```
 
-### 2. 研究流程 (Notebook)
-
-```python
-from utils import load_daily_data_full, calc_b1_factors_wmacd, run_backtest, print_backtest_report
-
-conn = duckdb.connect("path/to/qmt_data.duckdb", read_only=True)
-df = load_daily_data_full(conn)
-
-# B1 因子计算 (V3.0 + 周月MACD + 周线WL>YL)
-df_signals = calc_b1_factors_wmacd(df, config={"WEEKLY_WL_YL_FILTER": True})
-
-# 统计学回测
-df_result = run_backtest(df_signals, return_days=[5, 10, 15, 20, 25, 30])
-print_backtest_report(df_result, [5, 10, 15, 20, 25, 30])
-```
-
-### 3. AI Agent 每日选股
+### 2. 截面轮动策略 (主要研究方向)
 
 ```bash
-# 完整流程: 数据加载 → 因子计算 → 图表导出 → AI评审 → 推荐
-python -m agent.run
+# 1. Marimo notebook: 因子计算 → IC 分析 → LightGBM 训练 → Parquet 导出
+marimo edit notebooks/cross_section_rotation.py
 
-# 指定日期
-python -m agent.run --date 2026-02-24
-
-# 只生成图表, 跳过AI评审
-python -m agent.run --skip-review
-```
-
-### 4. Rust 回测
-
-```bash
+# 2. Rust 回测
 cd backtest-engine
-cargo run --release -- --data ../data/signals/market_data.parquet
+cargo run -p bt-rotation --release
 ```
 
-## B1 策略体系
+### 3. B1 超跌反转策略
 
-### 核心信号条件
+```bash
+# Marimo notebook: B1 信号 + ML 排序
+marimo edit notebooks/b1_ml_explore.py
 
-| 条件 | 说明 |
-|------|------|
-| J <= 13.8 | KDJ J值超卖 |
-| 倍量柱/关键K | 28天内有资金异动 |
-| WL > YL | 日线知行双线多头 |
-| 形态收敛 + 量能窒息 | 视觉量化严选 |
-| 均线基因指纹 | WL/YL 三重乖离率约束 |
-
-### 多周期过滤 (wmacd 版本)
-
-| 过滤器 | 作用 |
-|--------|------|
-| 周线 MACD: DIF > 0 且红柱 | 中期趋势确认 |
-| 月线 MACD: 红柱 | 大趋势向上 |
-| 周线 WL > YL (可选) | 周级别短期趋势健康 |
-
-### 统计学回测表现 (wmacd + 周线WL>YL, 2020-2026)
-
+# Rust 回测
+cd backtest-engine
+cargo run -p bt-b1 --release
 ```
-信号总数: 5320
-持仓5天:  53.2% 胜率, 1.49% 均值, 1.84x 盈亏比
-持仓10天: 50.7% 胜率, 2.49% 均值, 2.33x 盈亏比
-持仓20天: 47.5% 胜率, 4.44% 均值, 3.32x 盈亏比
-持仓30天: 43.0% 胜率, 5.56% 均值, 4.29x 盈亏比
+
+### 4. AI Agent 每日选股
+
+```bash
+python -m agent.run              # 完整流程
+python -m agent.run --date 2026-02-24  # 指定日期
 ```
 
 ## Rust 回测引擎
 
-通过 `config.toml` 配置，无需重新编译即可调参：
+Cargo Workspace 架构，三个 crate：
 
-- 动态仓位 (复利): 盈利时自动加仓，亏损时自动减仓
-- 分批止盈: 15% 卖 1/3 → 30% 卖 1/3 → 跌破 WL 清仓
-- 3% 止损 + 10 天弱势清仓
-- 交易成本: 佣金万 2.5 + 印花税千 1 + 滑点 0.1%
+| Crate | 功能 |
+|-------|------|
+| `bt-core` | 共享: Portfolio, BacktestStats, CostModel, 涨跌停判定 |
+| `bt-rotation` | 截面轮动: Top-N 选股, 涨停过滤, 跌停锁仓, 排名/止损退出 |
+| `bt-b1` | B1 超跌反转: 信号买入, 分批止盈, 止损, 弱势出场 |
 
-### 为什么用 Bevy ECS？
-
-- **模块化**: 买入/卖出/统计逻辑完全解耦
-- **高性能**: Rust + ECS 架构，毫秒级回测
-- **可扩展**: 新增卖出条件只需添加 System
+通过 `config.toml` 配置，无需重新编译即可调参。
 
 ## 注意事项
 
 - `data/` 目录已被 `.gitignore` 忽略
 - 数据存储使用 DuckDB，支持 QMT 和 Baostock 两种数据源
 - 建议使用 Marimo 替代 Jupyter 进行交互式研究
-- AI Agent 需要 `GEMINI_API_KEY` 环境变量 (使用 Gemini 评审时)
+- AI Agent 需要 `GEMINI_API_KEY` 环境变量

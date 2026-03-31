@@ -19,7 +19,7 @@ from .backtest import (
 # 数据工具
 from .baostock_utils import get_st_blacklist_pl
 from .akshare_utils import generate_sector_file
-from .duckdb_utils import get_adj_factor_frame, load_daily_data_full, load_60m_data_adj, load_daily_data_single
+from .duckdb_utils import get_adj_factor_frame, load_daily_data_full, load_60m_data_adj, load_daily_data_single, add_price_limit_cols
 
 # IC 分析工具
 from .ic_analysis import calc_factor_ic, select_factors_by_ic
@@ -33,6 +33,7 @@ __all__ = [
     "load_daily_data_full",
     "load_60m_data_adj",
     "load_daily_data_single",
+    "add_price_limit_cols",
     # 因子计算
     "calc_b1_factors_tg",
     "calc_b1_factors_base",

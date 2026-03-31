@@ -96,8 +96,14 @@ def _(
     ])
 
     # ── C) Renko 专属连续值指标 ──
+    # Renko 因子暂用 T-1 数据 (shift(1)), 时序对齐待后续讨论
     df_with_renko = (
         df_factors
+        .with_columns([
+            pl.col("close_adj").shift(1).over("code").alias("_c1"),
+            pl.col("open_adj").shift(1).over("code").alias("_o1"),
+            pl.col("volume").shift(1).over("code").alias("_v1"),
+        ])
         .join(renko_cols, on=["code", "date"], how="left")
 
         .with_columns([

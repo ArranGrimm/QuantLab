@@ -142,6 +142,43 @@ impl BacktestStats {
 }
 
 // ============================================================================
+// A-Share Price Limits (涨跌停)
+// ============================================================================
+
+/// 根据股票代码判断涨跌幅限制
+/// 主板 (60/00) → 10%, 创业板 (300/301) → 20%, 科创板 (688/689) → 20%
+pub fn price_limit_pct(code: &str) -> f64 {
+    if code.starts_with("300")
+        || code.starts_with("301")
+        || code.starts_with("688")
+        || code.starts_with("689")
+    {
+        0.20
+    } else {
+        0.10
+    }
+}
+
+/// 涨停容差: 复权价四舍五入精度误差, 0.1% 足以覆盖绝大多数股价
+const LIMIT_TOLERANCE: f64 = 0.001;
+
+/// 判断是否涨停 (无法买入)
+pub fn is_limit_up(close: f64, pre_close: f64, limit_pct: f64) -> bool {
+    if pre_close <= 0.0 {
+        return false;
+    }
+    close / pre_close - 1.0 >= limit_pct - LIMIT_TOLERANCE
+}
+
+/// 判断是否跌停 (无法卖出)
+pub fn is_limit_down(close: f64, pre_close: f64, limit_pct: f64) -> bool {
+    if pre_close <= 0.0 {
+        return false;
+    }
+    close / pre_close - 1.0 <= -(limit_pct - LIMIT_TOLERANCE)
+}
+
+// ============================================================================
 // Utilities
 // ============================================================================
 

@@ -79,6 +79,14 @@ pub fn check_exit_conditions(
         }
 
         if should_sell && position.shares > 0 {
+            let limit = bt_core::price_limit_pct(&position.code);
+            if bt_core::is_limit_down(bar.close, bar.pre_close, limit) {
+                println!(
+                    "[{}] [LOCKED] {} 跌停 {:.2}, 无法卖出",
+                    current_date, position.code, bar.close
+                );
+                continue;
+            }
             let gross = position.shares as f64 * bar.close;
             let commission = gross * cost_model.commission_rate;
             let stamp_duty = gross * cost_model.stamp_duty_rate;

@@ -1,5 +1,60 @@
 # Progress
 
+## 2026-03-31
+
+### [Rotation] 涨跌停幻觉修复 + 训练管线重构
+
+#### 发现: 涨停幻觉 (幻觉 1)
+- 之前 +400% 收益中, 大量 alpha 来自"买入涨停股" — 实操中根本买不进
+- 统计: Top-20 中日均 4.8 只是涨停股 (88% 的交易日有过滤), 占候选的 ~24%
+- 过滤涨停后, 旧模型 Gross 从 +586% 暴跌至 +5.7%, 证实 alpha 几乎全是幻觉
+
+#### Rust 回测引擎: 涨跌停过滤 (bt-core 抽象)
+- `bt-core/src/lib.rs`: 新增 `price_limit_pct()`, `is_limit_up()`, `is_limit_down()` 共享函数
+  - 主板 (60/00) → ±10%, 创业板 (300/301) / 科创板 (688/689) → ±20%
+  - 容差 0.1% (覆盖复权价四舍五入精度)
+- `bt-rotation/main.rs`: 候选股过滤 — 先选 Top-N 再剔除涨停, 并统计被过滤数量
+- `bt-rotation/systems.rs`: 跌停锁仓 — 持仓跌停时跳过卖出, 打印 [LOCKED] 日志
+
+#### Python 训练管线: 排除涨停样本
+- `utils/duckdb_utils.py`:
+  - `load_daily_data_full()` 新增 `pre_close_adj` 输出列
+  - 新增 `add_price_limit_cols()` 共享函数 (与 Rust 判定逻辑一致)
+- `utils/__init__.py`: 导出 `add_price_limit_cols`
+- `notebooks/cross_section_rotation.py`:
+  - Cell 2: 调用 `add_price_limit_cols()` 打标记, 统计涨跌停样本数
+  - Cell 6: 训练时 `valid = np.isfinite(y_tr) & ~is_limit_up_np[ts:te]`
+  - 打分: 全量打分 (不过滤), Rust 兜底
+
+#### 修复后真实 alpha (fwd_ret_1d, 0.1% 滑点)
+| 指标 | 修复前 (含涨停幻觉) | 修复后 (排除涨停) |
+|---|---|---|
+| Gross Return | +586% (幻觉) | **+48%** |
+| Total Return | +64% | **+10.5%** |
+| Win Rate | 41.9% | **45.6%** |
+| Max Drawdown | 27.5% | **21.3%** |
+| 涨停过滤 (日均) | 4.8 只 | **2.0 只** |
+
+### [Rotation] LABEL 参数化 + 超额收益标签实验
+
+#### LABEL 参数化
+- Cell 1 配置区新增 `LABEL` 参数, Cell 3 (IC) 和 Cell 6 (训练) 自动引用
+- 可选: `fwd_ret_{1/2/3/5}d` 或 `fwd_ret_{1/2/3/5}d_excess`
+
+#### 超额收益标签 (excess) 实验 — 失败
+- 标签: `fwd_ret_1d - mean(fwd_ret_1d).over("date")`, 截面去均值
+- 结果: 五分位单调性崩塌 (Q4 ≈ Q1), Top-20 选股退化为随机, Gross ≈ 0%
+- 原因: 去均值后上半区信号区分度丢失
+
+#### fwd_ret_2d 实验
+- Gross +54% (高于 1d 的 +48%), 但换手反而增加 (3406 vs 2202 笔)
+- 额外成本吞掉了额外 alpha, 净效果不如 fwd_ret_1d
+
+### [Rotation] 因子时序对齐 (Route B: 滑点吸收法)
+- `utils/rotation_factors.py` 重写: 去掉 `shift(1)`, 所有因子直接用 T 日 OHLCV
+- `notebooks/b1_ml_explore.py`, `b1_ml_dedicated.py`, `renko_ml_explore.py`: 自行计算 `_c1` 等 shift 列
+- Rust config.toml: slippage 调整为 0.3% (含 14:45~15:00 快照误差)
+
 ## 2026-03-25
 
 ### [B1] ML 排序替代手搓因子探索
