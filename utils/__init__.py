@@ -21,8 +21,8 @@ from .baostock_utils import get_st_blacklist_pl
 from .akshare_utils import generate_sector_file
 from .duckdb_utils import get_adj_factor_frame, load_daily_data_full, load_60m_data_adj, load_daily_data_single, add_price_limit_cols
 
-# IC 分析工具
-from .ic_analysis import calc_factor_ic, select_factors_by_ic
+# IC 分析 + 因子相关性工具
+from .ic_analysis import calc_factor_ic, select_factors_by_ic, calc_factor_corr, print_corr_clusters, find_redundant_factors
 
 # 信号导出 (for Rust)
 from .signal_export import export_for_rust, validate_export
@@ -54,9 +54,12 @@ __all__ = [
     "run_backtest_short",
     "print_backtest_report",
     "analyze_yearly_intensity",
-    # IC 分析
+    # IC 分析 + 因子相关性
     "calc_factor_ic",
     "select_factors_by_ic",
+    "calc_factor_corr",
+    "print_corr_clusters",
+    "find_redundant_factors",
     # Rust 导出
     "export_for_rust",
     "validate_export",

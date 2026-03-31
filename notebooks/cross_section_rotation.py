@@ -36,6 +36,7 @@ def _():
     MIN_LIST_DAYS = 60  # 最少上市天数
     START_DATE = "2020-09-01"  # 创业板注册制后
     LABEL = "fwd_ret_1d"  # 可选: fwd_ret_{1/2/3/5}d 或 fwd_ret_{1/2/3/5}d_excess
+    FEATURE_MODE = "pruned"  # "all" = 全部 FACTOR_COLS, "pruned" = 相关性剪枝后 (Cell 3c)
 
     print("🚀 [Step 1] 加载全量日线数据...")
     st_blacklist = get_st_blacklist_pl("2026-03-31")
@@ -50,6 +51,7 @@ def _():
     print(f"✅ 参数: 流通市值 {MV_MIN}~{MV_MAX} 亿, 上市>{MIN_LIST_DAYS}天, 起始={START_DATE}")
     return (
         FACTOR_COLS,
+        FEATURE_MODE,
         LABEL,
         MIN_LIST_DAYS,
         MV_MAX,
@@ -221,10 +223,10 @@ def _(FACTOR_COLS, LABEL, df_all, go, make_subplots, pl):
             template="plotly_dark",
         )
         fig_ic_local.show()
-        return df_ic_summary_local
+        return df_ic_summary_local, ic_results
 
-    df_ic_summary = run_ic_analysis()
-    return (df_ic_summary,)
+    df_ic_summary, ic_results = run_ic_analysis()
+    return df_ic_summary, ic_results
 
 
 @app.cell
@@ -352,6 +354,39 @@ def _(df_all, df_ic_summary, go, make_subplots, np, stats):
 
 
 @app.cell
+def _(FACTOR_COLS, df_all, ic_results, px):
+    # ==============================================================================
+    # Cell 3c: 因子相关性分析 + 基于 ICIR 的冗余剪枝
+    # ==============================================================================
+    from utils.ic_analysis import calc_factor_corr, print_corr_clusters, find_redundant_factors
+
+    def run_corr_analysis():
+        corr_mat, factor_names = calc_factor_corr(df_all, list(FACTOR_COLS))
+
+        pairs = print_corr_clusters(corr_mat, factor_names, threshold=0.7)
+
+        keep, drop, decisions = find_redundant_factors(
+            corr_mat, factor_names, ic_results=ic_results, threshold=0.85
+        )
+
+        fig = px.imshow(
+            corr_mat,
+            x=factor_names,
+            y=factor_names,
+            color_continuous_scale="RdBu_r",
+            zmin=-1, zmax=1,
+            title=f"因子 Spearman 相关矩阵 ({len(factor_names)} 因子)",
+        )
+        fig.update_layout(height=800, width=900, template="plotly_dark")
+        fig.show()
+
+        return corr_mat, factor_names, keep, drop
+
+    corr_matrix, corr_names, factors_keep, factors_drop = run_corr_analysis()
+    return
+
+
+@app.cell
 def _():
     # Cell 4: (已移除 — 线性排名回测已被 LightGBM + Rust 架构替代)
     return
@@ -364,10 +399,12 @@ def _():
 
 
 @app.cell
-def _(FACTOR_COLS, LABEL, df_all, np, pl, q_full):
+def _(FACTOR_COLS, FEATURE_MODE, LABEL, df_all, factors_keep, np, pl, q_full):
     # ==============================================================================
     # Cell 6: LightGBM Walk-Forward 打分 → Parquet 导出
     # 模型只负责打分, 回测交给 Rust ECS 引擎
+    #
+    # FEATURE_MODE: "all" = 全部 FACTOR_COLS, "pruned" = 相关性剪枝后
     #
     # 关键: Parquet 必须包含所有"曾被评分"股票在整个回测期间的价格数据,
     # 即使某天该股票不在 universe 内 (市值越界等), 也要保留价格行,
@@ -384,7 +421,10 @@ def _(FACTOR_COLS, LABEL, df_all, np, pl, q_full):
         TOP_N = 20
         EMA_ALPHA = 0.15  # Score 时序平滑 (1.0 = 不平滑)
 
-        feature_cols = list(FACTOR_COLS)
+        if FEATURE_MODE == "pruned":
+            feature_cols = list(factors_keep)
+        else:
+            feature_cols = list(FACTOR_COLS)
 
         lgb_params = {
             "n_estimators": 200,
@@ -400,9 +440,10 @@ def _(FACTOR_COLS, LABEL, df_all, np, pl, q_full):
             "random_state": 42,
         }
 
-        print("🤖 LightGBM Walk-Forward 打分 → Parquet", flush=True)
+        mode_desc = f"pruned ({len(feature_cols)})" if FEATURE_MODE == "pruned" else f"all ({len(feature_cols)})"
+        print(f"🤖 LightGBM Walk-Forward 打分 → Parquet", flush=True)
         print(f"   训练窗口: {TRAIN_WINDOW}天, 重训: 每{RETRAIN_FREQ}天, 标签: {LABEL}", flush=True)
-        print(f"   特征数: {len(feature_cols)}, Top-{TOP_N}", flush=True)
+        print(f"   特征模式: {mode_desc}, Top-{TOP_N}", flush=True)
 
         df_valid_ml = (
             df_all

@@ -9,7 +9,7 @@
 
 基于 128 个交易日的日K线量价数据。
 
-因子大类 (7 类 42 个):
+因子大类 (8 类 46 个):
   1. 动量/反转  — 多周期收益率、skip-1-month 动量
   2. 波动率    — 已实现波动率、波动率变化率、最大回撤、波动压缩
   3. 成交量    — 换手率、量价相关、异常放量、换手加速度
@@ -17,6 +17,7 @@
   5. 微观结构  — 振幅、影线、缺口、日内位置
   6. A股T+1短线 — 隔夜/日内收益分解、冲高探底、价格位置、Amihud
   7. 处置效应   — 换手率衰减成本线偏离 (EWM近似, 20/60d)
+  8. 下行风险   — 下行半方差、恐慌量比、收阴天数、波动不对称
 """
 import polars as pl
 
@@ -49,6 +50,11 @@ FACTOR_COLS = [
     # ── 7. 处置效应/行为金融 ──
     "disp_bias_20",        # 20日EWM估算成本偏离 (disposition effect)
     "disp_bias_60",        # 60日EWM估算成本偏离 (disposition effect)
+    # ── 8. 下行风险 ──
+    "downside_vol_20d",    # 下行半标准差 (仅负收益日波动)
+    "panic_vol_ratio_20d", # 恐慌量比 (下跌日成交量占比, >0.5=卖压主导)
+    "neg_ret_streak",      # 10日内收阴天数 (close < open)
+    "vol_down_asymmetry",  # 下行波动不对称 (downside_vol / total_vol)
 ]
 
 
@@ -64,7 +70,7 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
         lookback: 最大回溯窗口 (默认 128 天, 仅用于文档说明)
 
     Returns:
-        LazyFrame, 在原始列基础上新增 ~42 个因子列
+        LazyFrame, 在原始列基础上新增 ~46 个因子列
     """
     print("[Rotation] 计算截面轮动因子...")
 
@@ -111,6 +117,34 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
             pl.col("_ret").rolling_std(20).over("code").alias("vol_20d"),
             pl.col("_ret").rolling_std(60).over("code").alias("vol_60d"),
             pl.col("_ret").rolling_std(5).over("code").alias("_vol_5d"),
+        ])
+
+        # ── Step 4b: 下行风险因子 — 识别恐慌抛售 vs 阴跌 ────────────
+        .with_columns([
+            pl.min_horizontal(pl.col("_ret"), pl.lit(0.0))
+                .pow(2).rolling_mean(20).over("code")
+                .sqrt()
+                .alias("downside_vol_20d"),
+            pl.when(pl.col("_ret") < 0)
+                .then(pl.col("volume"))
+                .otherwise(0.0)
+                .rolling_sum(20).over("code")
+                .alias("_down_vol_sum_20"),
+            pl.col("volume").rolling_sum(20).over("code")
+                .alias("_total_vol_sum_20"),
+            pl.when(pl.col("close_adj") < pl.col("open_adj"))
+                .then(1.0)
+                .otherwise(0.0)
+                .rolling_sum(10).over("code")
+                .alias("neg_ret_streak"),
+        ])
+        .with_columns([
+            (pl.col("_down_vol_sum_20")
+             / pl.max_horizontal(pl.col("_total_vol_sum_20"), pl.lit(1.0)))
+                .alias("panic_vol_ratio_20d"),
+            (pl.col("downside_vol_20d")
+             / pl.max_horizontal(pl.col("vol_20d"), pl.lit(1e-8)))
+                .alias("vol_down_asymmetry"),
         ])
 
         # ── Step 5: 波动率衍生 + 最大回撤 ───────────────────────────
