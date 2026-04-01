@@ -1,12 +1,11 @@
 import marimo
 
-__generated_with = "0.21.1"
+__generated_with = "0.22.0"
 app = marimo.App(width="full")
 
 
 @app.cell
 def _():
-    import marimo as mo
     import duckdb
     import polars as pl
     import numpy as np
@@ -15,9 +14,9 @@ def _():
     from utils import load_daily_data_full
     from utils import get_st_blacklist_pl
     from utils import calc_renko_factors_wmacd
-    from utils.signal_export import export_for_rust
+    from utils.signal_export import export_renko_scores
     from utils.rotation_factors import calc_rotation_factors, FACTOR_COLS as ROTATION_FACTORS
-    from utils.ic_analysis import calc_factor_ic, select_factors_by_ic
+    from utils.ic_analysis import calc_factor_ic
 
     # ==============================================================================
     # Cell 1: 配置与数据加载
@@ -29,9 +28,13 @@ def _():
     MV_MAX = 1500
     MIN_LIST_DAYS = 60
     START_DATE = "2020-09-01"
+    LABEL = "fwd_ret_open_2d"  # 可选: fwd_ret_open_2d / fwd_ret_close_2d / fwd_ret_close_3d
+    ANALYSIS_EMA_ALPHAS = [1.0, 0.2, 0.1, 0.05]
+    ANALYSIS_TOP_NS = [20, 50, 100]
+    ANALYSIS_SCORE_QUANTILES = [0.99, 0.97, 0.95, 0.90]
 
     print("🚀 [Step 1] 加载全量日线数据...")
-    st_blacklist = get_st_blacklist_pl("2026-03-17")
+    st_blacklist = get_st_blacklist_pl()
     st_blacklist_df = pl.DataFrame({"code": st_blacklist}).lazy()
 
     q_full = (
@@ -42,6 +45,10 @@ def _():
 
     print(f"✅ 参数: 流通市值 {MV_MIN}~{MV_MAX}亿, 上市>{MIN_LIST_DAYS}天, 起始={START_DATE}")
     return (
+        ANALYSIS_EMA_ALPHAS,
+        ANALYSIS_SCORE_QUANTILES,
+        ANALYSIS_TOP_NS,
+        LABEL,
         MIN_LIST_DAYS,
         MV_MAX,
         MV_MIN,
@@ -49,6 +56,7 @@ def _():
         calc_factor_ic,
         calc_renko_factors_wmacd,
         calc_rotation_factors,
+        export_renko_scores,
         np,
         pl,
         q_full,
@@ -68,10 +76,15 @@ def _(
     q_full,
 ):
     # ==============================================================================
-    # Cell 2: 因子计算 (通用因子 + Renko 专属指标 + MFE-5 标签)
+    # Cell 2: 因子计算 (通用因子 + Renko 专属指标 + 入场对齐标签)
+    #
+    # 统一时钟:
+    #   T 日收盘确认信号 / 计算特征
+    #   T+1 日开盘买入
+    #   标签一律以 T+1 open 为基准
     #
     # 两条管线:
-    #   A) rotation 42 通用因子 + Renko 10 专属指标 + MFE-5 标签
+    #   A) rotation 通用因子 (T 日) + Renko 10 专属指标 (T 日)
     #   B) calc_renko_factors_wmacd() → renko_signal + 中间变量
     # ==============================================================================
     print("⏳ [Step 2] 计算因子 (rotation通用 + Renko指标)...")
@@ -96,14 +109,9 @@ def _(
     ])
 
     # ── C) Renko 专属连续值指标 ──
-    # Renko 因子暂用 T-1 数据 (shift(1)), 时序对齐待后续讨论
+    # 与交易时钟统一: 全部使用 T 日收盘可确认的数据
     df_with_renko = (
         df_factors
-        .with_columns([
-            pl.col("close_adj").shift(1).over("code").alias("_c1"),
-            pl.col("open_adj").shift(1).over("code").alias("_o1"),
-            pl.col("volume").shift(1).over("code").alias("_v1"),
-        ])
         .join(renko_cols, on=["code", "date"], how="left")
 
         .with_columns([
@@ -117,25 +125,25 @@ def _(
 
         # WL/YL 相关
         .with_columns([
-            ((pl.col("_c1") - pl.col("WL").fill_null(pl.col("_c1")))
-             / pl.max_horizontal(pl.col("WL").fill_null(pl.col("_c1")), pl.lit(0.01)) * 100)
+            ((pl.col("close_adj") - pl.col("WL").fill_null(pl.col("close_adj")))
+             / pl.max_horizontal(pl.col("WL").fill_null(pl.col("close_adj")), pl.lit(0.01)) * 100)
                 .alias("rk_bias_wl"),
-            ((pl.col("WL").fill_null(pl.col("_c1")) - pl.col("YL").fill_null(pl.col("_c1")))
-             / pl.max_horizontal(pl.col("YL").fill_null(pl.col("_c1")), pl.lit(0.01)) * 100)
+            ((pl.col("WL").fill_null(pl.col("close_adj")) - pl.col("YL").fill_null(pl.col("close_adj")))
+             / pl.max_horizontal(pl.col("YL").fill_null(pl.col("close_adj")), pl.lit(0.01)) * 100)
                 .alias("rk_wl_yl_spread"),
         ])
 
         # K 线形态
         .with_columns(
-            ((pl.col("_c1") - pl.col("_o1")).abs()
-             / pl.max_horizontal(pl.col("_o1"), pl.lit(0.01)))
+            ((pl.col("close_adj") - pl.col("open_adj")).abs()
+             / pl.max_horizontal(pl.col("open_adj"), pl.lit(0.01)))
                 .alias("rk_shape"),
         )
 
         # 周/月 MACD
         .with_columns([
             (pl.col("rw_dif").fill_null(0.0)
-             / pl.max_horizontal(pl.col("_c1"), pl.lit(0.01)) * 100)
+             / pl.max_horizontal(pl.col("close_adj"), pl.lit(0.01)) * 100)
                 .alias("rk_rw_dif_pct"),
             pl.col("rw_hist").fill_null(0.0).alias("rk_rw_hist"),
             pl.col("rm_hist").fill_null(0.0).alias("rk_rm_hist"),
@@ -143,31 +151,45 @@ def _(
 
         # 量能萎缩
         .with_columns(
-            pl.col("_v1").rolling_max(20).over("code").alias("_v_max_20_rk"),
+            pl.col("volume").rolling_max(20).over("code").alias("_v_max_20_rk"),
         )
         .with_columns(
-            (pl.col("_v1") / pl.max_horizontal(pl.col("_v_max_20_rk"), pl.lit(1.0)))
+            (pl.col("volume") / pl.max_horizontal(pl.col("_v_max_20_rk"), pl.lit(1.0)))
                 .alias("rk_vol_shrink"),
         )
     )
 
-    # ── D) 前向 MFE-5 标签 ──
-    fwd_cols = [
-        pl.col("close_adj").shift(-i).over("code").alias(f"_fwd_{i}")
+    # ── D) 入场对齐标签: 信号 T -> 买入 T+1 open ──
+    fwd_high_cols = [
+        pl.col("high_adj").shift(-i).over("code").alias(f"_fwd_high_{i}")
         for i in range(1, MFE_WINDOW + 1)
     ]
     df_with_label = (
         df_with_renko
-        .with_columns(fwd_cols)
+        .with_columns([
+            pl.col("open_adj").shift(-1).over("code").alias("buy_open_t1"),
+            pl.col("open_adj").shift(-2).over("code").alias("open_t2"),
+            pl.col("close_adj").shift(-1).over("code").alias("close_t1"),
+            pl.col("close_adj").shift(-2).over("code").alias("close_t2"),
+            pl.col("close_adj").shift(-3).over("code").alias("close_t3"),
+            pl.col("close_adj").shift(-MFE_WINDOW).over("code").alias(f"close_t{MFE_WINDOW}"),
+            *fwd_high_cols,
+        ])
         .with_columns(
-            pl.max_horizontal([f"_fwd_{i}" for i in range(1, MFE_WINDOW + 1)])
-              .alias("_fwd_max")
+            pl.max_horizontal([f"_fwd_high_{i}" for i in range(1, MFE_WINDOW + 1)])
+              .alias("_fwd_high_max")
         )
         .with_columns([
-            (pl.col("_fwd_max") / pl.col("close_adj") - 1).alias("fwd_mfe_5d"),
-            (pl.col("close_adj").shift(-1).over("code") / pl.col("close_adj") - 1)
+            (pl.col("_fwd_high_max") / pl.col("buy_open_t1") - 1).alias("fwd_mfe_5d"),
+            (pl.col("close_t1") / pl.col("buy_open_t1") - 1)
                 .alias("fwd_ret_1d"),
-            (pl.col("close_adj").shift(-MFE_WINDOW).over("code") / pl.col("close_adj") - 1)
+            (pl.col("open_t2") / pl.col("buy_open_t1") - 1)
+                .alias("fwd_ret_open_2d"),
+            (pl.col("close_t2") / pl.col("buy_open_t1") - 1)
+                .alias("fwd_ret_close_2d"),
+            (pl.col("close_t3") / pl.col("buy_open_t1") - 1)
+                .alias("fwd_ret_close_3d"),
+            (pl.col(f"close_t{MFE_WINDOW}") / pl.col("buy_open_t1") - 1)
                 .alias(f"fwd_ret_{MFE_WINDOW}d"),
         ])
     )
@@ -202,7 +224,9 @@ def _(
     final_cols = [
         "code", "date", "open_adj", "high_adj", "low_adj", "close_adj",
         "volume", "amount", "market_cap_100m",
-        "fwd_mfe_5d", "fwd_ret_1d", f"fwd_ret_{MFE_WINDOW}d",
+        "buy_open_t1",
+        "fwd_mfe_5d", "fwd_ret_1d", "fwd_ret_open_2d", "fwd_ret_close_2d", "fwd_ret_close_3d",
+        f"fwd_ret_{MFE_WINDOW}d",
         *ALL_FACTORS,
         "is_renko",
         "renko_falling",
@@ -217,7 +241,7 @@ def _(
     print(f"   日期范围: {df_all['date'].min()} ~ {df_all['date'].max()}")
     print(f"   股票数量: {df_all['code'].n_unique()}")
     print(f"   通用因子: {len(ROTATION_FACTORS)}, Renko因子: {len(RENKO_FACTORS)}, 总计: {len(ALL_FACTORS)}")
-    print(f"   ────────────────────────────────")
+    print("   ────────────────────────────────")
     print(f"   🎯 Renko 信号样本: {n_renko:,} 条 ({n_renko/n_total:.2%})")
     if n_renko > 0:
         renko_dates = df_all.filter(pl.col("is_renko"))["date"]
@@ -229,17 +253,15 @@ def _(
 
 
 @app.cell
-def _(ALL_FACTORS, calc_factor_ic, df_all, pl):
+def _(ALL_FACTORS, LABEL, calc_factor_ic, df_all, pl):
     # ==============================================================================
-    # Cell 3: 快速 IC 分析 (Polars 原生, vs MFE-5)
+    # Cell 3: 快速 IC 分析 (Polars 原生)
     # ==============================================================================
-    LABEL = "fwd_mfe_5d"
-
     df_valid = df_all.filter(
         pl.col(LABEL).is_not_null() & pl.col(LABEL).is_not_nan()
     )
 
-    ic_results = calc_factor_ic(
+    calc_factor_ic(
         df_valid,
         factor_cols=ALL_FACTORS,
         label=LABEL,
@@ -250,22 +272,20 @@ def _(ALL_FACTORS, calc_factor_ic, df_all, pl):
 
 
 @app.cell
-def _(ALL_FACTORS, df_all, np, pl):
+def _(ALL_FACTORS, LABEL, df_all, np, pl):
     # ==============================================================================
     # Cell 4: LightGBM Walk-Forward 训练
     #
-    # 全市场训练, MFE-5 回归标签
+    # 全市场训练, 标签由 Cell 1 配置控制
+    # 只输出原始分数; EMA 平滑交给 Cell 5 / Cell 6 独立处理
     # ==============================================================================
     from lightgbm import LGBMRegressor
 
     def run_lgbm_walkforward():
         import warnings
         warnings.filterwarnings("ignore", category=UserWarning)
-        LABEL = "fwd_mfe_5d"
         TRAIN_WINDOW = 480
         RETRAIN_FREQ = 20
-        EMA_ALPHA = 1.0
-
         feature_cols = list(ALL_FACTORS)
 
         lgb_params = {
@@ -353,17 +373,6 @@ def _(ALL_FACTORS, df_all, np, pl):
             "score": score_values,
         })
 
-        df_scores_raw = df_scores.clone()
-
-        if EMA_ALPHA < 1.0:
-            df_scores = (
-                df_scores.sort(["code", "date"])
-                .with_columns(
-                    pl.col("score").ewm_mean(alpha=EMA_ALPHA).over("code").alias("score")
-                )
-            )
-            print(f"   ⚡ Score EMA 平滑: α={EMA_ALPHA}")
-
         if model is not None:
             imp_vals = model.feature_importances_
             imp_max = max(imp_vals) if max(imp_vals) > 0 else 1
@@ -382,20 +391,19 @@ def _(ALL_FACTORS, df_all, np, pl):
                 print(f"{prefix}{row['factor']:<22} {row['importance']:>6} {bar}")
             print("=" * 55)
 
-        return df_scores_raw
+        return df_scores
 
     df_scores_raw = run_lgbm_walkforward()
     return (df_scores_raw,)
 
 
 @app.cell
-def _(df_all, df_scores_raw, np, pl, stats):
+def _(LABEL, df_all, df_scores_raw, np, pl, stats):
     # ==============================================================================
     # Cell 5: 信号质量分析
     # ==============================================================================
     def run_signal_quality():
         EMA_ALPHA = 1.0
-        LABEL = "fwd_mfe_5d"
 
         df_signal = (
             df_scores_raw
@@ -452,7 +460,7 @@ def _(df_all, df_scores_raw, np, pl, stats):
         print(f"\n📊 Signal Quality Analysis (标签: {LABEL})")
         print(f"   样本: {len(scores_np):,} 条, {n_days} 个交易日\n")
         print("=" * 65)
-        print("  Model IC Analysis (vs MFE-5)")
+        print("  Model IC Analysis")
         print("=" * 65)
         print(f"  IC Mean:       {ic_mean:+.4f}")
         print(f"  IC Std:        {ic_std:.4f}")
@@ -493,7 +501,7 @@ def _(df_all, df_scores_raw, np, pl, stats):
         ls_std = ls_arr.std()
         ls_t = ls_mean / (ls_std / np.sqrt(len(ls_arr))) if ls_std > 1e-8 else 0
         ls_sig = "✅ 显著" if abs(ls_t) > 2 else "❌ 不显著"
-        print(f"  ---")
+        print("  ---")
         print(f"  L/S 日均 (Q5-Q1): {ls_mean:+.4%}")
         print(f"  L/S t-stat:       {ls_t:+.2f}  {ls_sig}")
         print("-" * 65)
@@ -528,51 +536,308 @@ def _(df_all, df_scores_raw, np, pl, stats):
 
 
 @app.cell
-def _(calc_renko_factors_wmacd, df_scores_raw, pl, q_full):
+def _(
+    ANALYSIS_EMA_ALPHAS,
+    ANALYSIS_SCORE_QUANTILES,
+    ANALYSIS_TOP_NS,
+    LABEL,
+    df_all,
+    df_scores_raw,
+    np,
+    pl,
+    stats,
+):
     # ==============================================================================
-    # Cell 6: 导出 ML 分数 → Rust 回测 (预留)
+    # Cell 5b: Renko 实验面板
     #
-    # TODO: Rust 端暂无 Renko 回测引擎, 本 Cell 先做导出
+    # 1. EMA 平滑实验
+    # 2. Top-N 扩大实验
+    # 3. 高分阈值过滤实验
+    # ==============================================================================
+    def build_signal(ema_alpha: float):
+        df_signal = (
+            df_scores_raw
+            .select(["date", "code", "score"])
+            .join(
+                df_all.select(["date", "code", LABEL]),
+                on=["date", "code"],
+                how="inner",
+            )
+            .filter(pl.col(LABEL).is_not_null() & pl.col(LABEL).is_not_nan())
+            .sort(["date", "code"])
+        )
+        if ema_alpha < 1.0:
+            df_signal = (
+                df_signal
+                .sort(["code", "date"])
+                .with_columns(
+                    pl.col("score").ewm_mean(alpha=ema_alpha).over("code").alias("score")
+                )
+                .sort(["date", "code"])
+            )
+        return df_signal
+
+    def to_numpy_views(df_signal):
+        dates_np = df_signal["date"].to_numpy()
+        scores_np = df_signal["score"].to_numpy().astype(np.float64)
+        rets_np = df_signal[LABEL].to_numpy().astype(np.float64)
+        codes_np = df_signal["code"].to_numpy()
+        unique_dates = np.unique(dates_np)
+        unique_dates.sort()
+        date_start = np.searchsorted(dates_np, unique_dates, side="left")
+        date_end = np.searchsorted(dates_np, unique_dates, side="right")
+        return dates_np, scores_np, rets_np, codes_np, unique_dates, date_start, date_end
+
+    def calc_core_metrics(df_signal, top_n_for_overlap=20):
+        _, scores_np, rets_np, codes_np, unique_dates, date_start, date_end = to_numpy_views(df_signal)
+        n_days = len(unique_dates)
+
+        daily_ics = []
+        quintile_rets = {q: [] for q in range(1, 6)}
+        prev_top = None
+        overlaps = []
+
+        for idx in range(n_days):
+            s, e = date_start[idx], date_end[idx]
+            sc = scores_np[s:e]
+            rt = rets_np[s:e]
+            cd = codes_np[s:e]
+            valid = np.isfinite(sc) & np.isfinite(rt)
+
+            if valid.sum() >= 30:
+                ic, _ = stats.spearmanr(sc[valid], rt[valid])
+                if np.isfinite(ic):
+                    daily_ics.append(ic)
+
+            if valid.sum() >= 50:
+                sc_v, rt_v = sc[valid], rt[valid]
+                order = np.argsort(sc_v)
+                n = len(order)
+                group_size = n // 5
+                for q in range(5):
+                    start_idx = q * group_size
+                    end_idx = (q + 1) * group_size if q < 4 else n
+                    grp = rt_v[order[start_idx:end_idx]]
+                    if len(grp) > 0:
+                        quintile_rets[q + 1].append(float(np.mean(grp)))
+
+            if valid.sum() >= top_n_for_overlap:
+                sc_v = sc[valid]
+                cd_v = cd[valid]
+                top_idx = np.argsort(sc_v)[-top_n_for_overlap:]
+                cur_top = set(cd_v[top_idx].tolist())
+                if prev_top is not None:
+                    overlaps.append(len(cur_top & prev_top) / top_n_for_overlap)
+                prev_top = cur_top
+
+        ic_arr = np.array(daily_ics) if daily_ics else np.array([np.nan])
+        ic_mean = float(np.nanmean(ic_arr))
+        ic_std = float(np.nanstd(ic_arr))
+        icir = ic_mean / ic_std if ic_std > 1e-8 else 0.0
+        t_stat = ic_mean / (ic_std / np.sqrt(len(daily_ics))) if ic_std > 1e-8 and daily_ics else 0.0
+
+        q1 = float(np.mean(quintile_rets[1])) if quintile_rets[1] else np.nan
+        q5 = float(np.mean(quintile_rets[5])) if quintile_rets[5] else np.nan
+        ls_arr = np.array(quintile_rets[5]) - np.array(quintile_rets[1]) if quintile_rets[1] and quintile_rets[5] else np.array([])
+        ls_mean = float(np.mean(ls_arr)) if len(ls_arr) > 0 else np.nan
+        ls_t = float(ls_mean / (np.std(ls_arr) / np.sqrt(len(ls_arr)))) if len(ls_arr) > 1 and np.std(ls_arr) > 1e-8 else 0.0
+        overlap = float(np.mean(overlaps)) if overlaps else np.nan
+        turnover = (1 - overlap) * 2 if overlaps else np.nan
+
+        return {
+            "ic_mean": ic_mean,
+            "icir": icir,
+            "t_stat": t_stat,
+            "q1": q1,
+            "q5": q5,
+            "ls_mean": ls_mean,
+            "ls_t": ls_t,
+            "overlap": overlap,
+            "turnover": turnover,
+        }
+
+    def print_ema_experiment():
+        print("\n" + "=" * 78)
+        print(f"  实验 1: EMA 平滑 ({LABEL})")
+        print("=" * 78)
+        print(f"  {'EMA':<8} {'ICMean':>8} {'ICIR':>8} {'L/S日均':>10} {'L/S t':>8} {'Top20重叠':>10} {'换手':>8}")
+        print("-" * 78)
+        for alpha in ANALYSIS_EMA_ALPHAS:
+            df_signal = build_signal(alpha)
+            m = calc_core_metrics(df_signal, top_n_for_overlap=20)
+            print(
+                f"  {alpha:<8.2f} {m['ic_mean']:>+8.4f} {m['icir']:>+8.4f} "
+                f"{m['ls_mean']*100:>+9.4f}% {m['ls_t']:>+8.2f} "
+                f"{m['overlap']*100:>9.1f}% {m['turnover']*100:>7.1f}%"
+            )
+        print("-" * 78)
+
+    def print_topn_experiment():
+        ema_for_topn = 0.1 if 0.1 in ANALYSIS_EMA_ALPHAS else ANALYSIS_EMA_ALPHAS[0]
+        df_signal = build_signal(ema_for_topn)
+        _, scores_np, rets_np, codes_np, unique_dates, date_start, date_end = to_numpy_views(df_signal)
+
+        print("\n" + "=" * 78)
+        print(f"  实验 2: Top-N 扩大 ({LABEL}, EMA={ema_for_topn})")
+        print("=" * 78)
+        print(f"  {'TopN':<8} {'日均收益':>10} {'胜率':>8} {'重叠率':>10} {'换手':>8}")
+        print("-" * 78)
+
+        for top_n in ANALYSIS_TOP_NS:
+            daily_rets = []
+            prev_top = None
+            overlaps = []
+            for idx in range(len(unique_dates)):
+                s, e = date_start[idx], date_end[idx]
+                sc = scores_np[s:e]
+                rt = rets_np[s:e]
+                cd = codes_np[s:e]
+                valid = np.isfinite(sc) & np.isfinite(rt)
+                if valid.sum() < top_n:
+                    continue
+                sc_v = sc[valid]
+                rt_v = rt[valid]
+                cd_v = cd[valid]
+                top_idx = np.argsort(sc_v)[-top_n:]
+                daily_rets.append(float(np.mean(rt_v[top_idx])))
+                cur_top = set(cd_v[top_idx].tolist())
+                if prev_top is not None:
+                    overlaps.append(len(cur_top & prev_top) / top_n)
+                prev_top = cur_top
+
+            arr = np.array(daily_rets)
+            mean_ret = float(np.mean(arr)) if len(arr) > 0 else np.nan
+            hit = float(np.mean(arr > 0)) if len(arr) > 0 else np.nan
+            overlap = float(np.mean(overlaps)) if overlaps else np.nan
+            turnover = (1 - overlap) * 2 if overlaps else np.nan
+            print(
+                f"  {top_n:<8} {mean_ret*100:>+9.4f}% {hit*100:>7.1f}% "
+                f"{overlap*100:>9.1f}% {turnover*100:>7.1f}%"
+            )
+        print("-" * 78)
+
+    def print_threshold_experiment():
+        ema_for_threshold = 0.1 if 0.1 in ANALYSIS_EMA_ALPHAS else ANALYSIS_EMA_ALPHAS[0]
+        df_signal = build_signal(ema_for_threshold)
+        _, scores_np, rets_np, _, unique_dates, date_start, date_end = to_numpy_views(df_signal)
+
+        print("\n" + "=" * 90)
+        print(f"  实验 3: 高分阈值过滤 ({LABEL}, EMA={ema_for_threshold})")
+        print("=" * 90)
+        print(f"  {'分位阈值':<10} {'日均样本数':>10} {'日均收益':>10} {'胜率':>8} {'收益t值':>10}")
+        print("-" * 90)
+
+        for q in ANALYSIS_SCORE_QUANTILES:
+            daily_counts = []
+            daily_rets = []
+            for idx in range(len(unique_dates)):
+                s, e = date_start[idx], date_end[idx]
+                sc = scores_np[s:e]
+                rt = rets_np[s:e]
+                valid = np.isfinite(sc) & np.isfinite(rt)
+                if valid.sum() < 50:
+                    continue
+                sc_v = sc[valid]
+                rt_v = rt[valid]
+                threshold = np.quantile(sc_v, q)
+                mask = sc_v >= threshold
+                if mask.sum() == 0:
+                    continue
+                daily_counts.append(int(mask.sum()))
+                daily_rets.append(float(np.mean(rt_v[mask])))
+
+            arr = np.array(daily_rets)
+            mean_count = float(np.mean(daily_counts)) if daily_counts else np.nan
+            mean_ret = float(np.mean(arr)) if len(arr) > 0 else np.nan
+            hit = float(np.mean(arr > 0)) if len(arr) > 0 else np.nan
+            t_val = float(mean_ret / (np.std(arr) / np.sqrt(len(arr)))) if len(arr) > 1 and np.std(arr) > 1e-8 else 0.0
+            print(
+                f"  Top {int((1-q)*100):>2d}%     {mean_count:>10.1f} {mean_ret*100:>+9.4f}% "
+                f"{hit*100:>7.1f}% {t_val:>+10.2f}"
+            )
+        print("-" * 90)
+
+    print_ema_experiment()
+    print_topn_experiment()
+    print_threshold_experiment()
+    return
+
+
+@app.cell
+def _(df_all, df_scores_raw, export_renko_scores, pl, q_full):
+    # ==============================================================================
+    # Cell 6: 导出 ML 分数 → Rust Renko 截面回测
+    #
+    # 时钟:
+    #   T 日收盘得到 score/rank
+    #   Rust 在 T+1 日开盘使用 pre_score/pre_rank 买入
     # ==============================================================================
     def run_export():
-        LOOSE_PERIODS = [
-            ("2019-02-11", "2019-04-10"),
-            ("2019-12-16", "2020-03-02"),
-            ("2020-06-19", "2020-07-15"),
-            ("2020-12-24", "2021-01-25"),
-            ("2021-04-16", "2021-09-14"),
-            ("2022-04-27", "2022-07-05"),
-            ("2023-01-15", "2023-04-15"),
-            ("2024-02-06", "2024-03-20"),
-            ("2024-09-24", "2024-10-15"),
-            ("2025-04-09", "2025-09-04"),
-            ("2026-01-05", "2026-02-02"),
-        ]
+        TOP_N = 20
+        EXPORT_EMA_ALPHA = 1.0  # 导出 parquet 用的分数平滑; 改这里仅需重跑 Cell 6
+        df_scores_export = df_scores_raw
 
-        print("⏳ [Step 6] 生成 Renko 信号 (wmacd)...")
-        df_renko = calc_renko_factors_wmacd(q_full, {"MV_THRESHOLD": 40})
-
-        print("⏳ [Step 6] 合并 ML 分数...")
-        df_renko_scored = (
-            df_renko
-            .join(
-                df_scores_raw.select(["date", "code", "score"]).lazy(),
-                on=["date", "code"],
-                how="left",
+        if EXPORT_EMA_ALPHA < 1.0:
+            df_scores_export = (
+                df_scores_raw
+                .sort(["code", "date"])
+                .with_columns(
+                    pl.col("score").ewm_mean(alpha=EXPORT_EMA_ALPHA).over("code").alias("score")
+                )
+                .sort(["date", "code"])
             )
-            .with_columns(pl.col("score").fill_null(0.0))
+            print(f"⏳ [Step 6] 导出分数 EMA 平滑: α={EXPORT_EMA_ALPHA}")
+        else:
+            print("⏳ [Step 6] 导出使用原始分数 (无 EMA)")
+
+        ever_scored_codes = df_scores_export["code"].unique().to_list()
+        score_date_min = df_scores_export["date"].min()
+        score_date_max = df_scores_export["date"].max()
+
+        print("⏳ [Step 6] 补全完整价格序列...")
+        print(
+            f"   股票数: {len(ever_scored_codes)}, "
+            f"{score_date_min} ~ {score_date_max}"
         )
 
-        n_signals = df_renko_scored.filter(pl.col("renko_signal")).select(pl.len()).collect().item()
-        n_with_score = (
-            df_renko_scored
-            .filter(pl.col("renko_signal") & (pl.col("score") != 0.0))
-            .select(pl.len()).collect().item()
+        price_cols = [
+            "date", "code", "open_adj", "high_adj", "low_adj", "close_adj",
+            "volume", "market_cap_100m",
+        ]
+        df_full_prices = (
+            q_full
+            .filter(pl.col("code").is_in(ever_scored_codes))
+            .filter(pl.col("date") >= score_date_min)
+            .filter(pl.col("date") <= score_date_max)
+            .select([c for c in price_cols if c in q_full.collect_schema().names()])
+            .collect()
         )
-        print(f"   Renko 信号总数: {n_signals:,}, 有 ML 分数: {n_with_score:,} ({n_with_score/max(n_signals,1):.1%})")
-        print(f"\n   ⚠️ Rust Renko 回测引擎尚未实现, 导出功能预留")
 
-    # run_export()
+        df_flags = (
+            df_all
+            .select(["date", "code", "is_renko"])
+            .unique()
+        )
+
+        df_expanded = (
+            df_full_prices
+            .join(df_scores_export, on=["date", "code"], how="left")
+            .join(df_flags, on=["date", "code"], how="left")
+            .with_columns([
+                pl.col("score").fill_null(-999.0),
+                pl.col("is_renko").fill_null(False),
+            ])
+        )
+
+        n_scored = df_scores_export.height
+        n_total = df_expanded.height
+        n_padded = n_total - n_scored
+        print(f"   评分行: {n_scored:,}, 补全行: {n_padded:,}, 总计: {n_total:,}")
+
+        output_path = export_renko_scores(df_expanded, top_n=TOP_N)
+        return output_path
+
+    scores_path = run_export()
     return
 
 

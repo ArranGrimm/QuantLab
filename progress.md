@@ -1,5 +1,46 @@
 # Progress
 
+## 2026-04-01
+
+### [Renko] 研究链路时钟统一重构
+
+#### 核心决策
+- `notebooks/renko_ml_explore.py` 统一为: **T 日收盘确认信号 / 计算特征 → T+1 日开盘买入**
+- 本次只改研究 notebook 的时间线, **暂不修改 Rust 导出 / 回测格式**
+
+#### 主要修改
+- Renko 专属 `rk_*` 因子不再混用 `T-1` 数据:
+  - 删除 `_c1`, `_o1`, `_v1` 临时 shift 列
+  - `rk_bias_wl`, `rk_wl_yl_spread`, `rk_shape`, `rk_rw_dif_pct`, `rk_vol_shrink` 全部改为 **T 日收盘可得**
+- 标签改为以 `T+1 open` 为基准:
+  - 新增 `buy_open_t1 = open_adj.shift(-1)`
+  - `fwd_mfe_5d = max(high[T+1:T+5]) / buy_open_t1 - 1`
+  - `fwd_ret_1d = close[T+1] / buy_open_t1 - 1`
+- 保留 `renko_signal[T]` 作为信号确认时点, 不再与 `T-1` 特征混搭
+
+#### 修复的问题
+- 旧版 notebook 内部同时混用了:
+  - `rotation` 通用因子: T 日
+  - 部分 `rk_*` 因子: T-1
+  - 标签分母: `close[T]`
+  - 单笔交易分析: `open[T+1]`
+- 现已统一为单一时间线, 便于后续重新评估 Renko ML 是否真实有效
+
+#### 新增: Renko 可切换标签入口
+- Cell 1 新增 `LABEL` 配置, 当前默认 `fwd_ret_open_2d`
+- Cell 2 预先计算以下标签, 后续只改一行即可重训:
+  - `fwd_ret_open_2d = open[T+2] / open[T+1] - 1`
+  - `fwd_ret_close_2d = close[T+2] / open[T+1] - 1`
+  - `fwd_ret_close_3d = close[T+3] / open[T+1] - 1`
+- Cell 3 / 4 / 5 全部改为自动引用 `LABEL`
+
+#### 新增: Renko 分析实验面板
+- Cell 5b 改为专门验证高换手短脉冲问题, 提供三组 notebook 内实验:
+  - **EMA 平滑实验**: `ANALYSIS_EMA_ALPHAS = [1.0, 0.2, 0.1, 0.05]`
+  - **Top-N 扩大实验**: `ANALYSIS_TOP_NS = [20, 50, 100]`
+  - **高分阈值过滤实验**: `ANALYSIS_SCORE_QUANTILES = [0.99, 0.97, 0.95, 0.90]`
+- 设计目标: 先在 notebook 内验证 `open_2d / close_3d` 的 alpha 是否能通过平滑、扩容或高分过滤保留下来, 再决定是否值得继续改回测引擎
+
 ## 2026-03-31
 
 ### [Rotation] 涨跌停幻觉修复 + 训练管线重构
@@ -102,6 +143,19 @@
 - **修复**: Cell 6 新增 `df_scores_raw` 输出 (EMA 前的原始分数)
 - Cell 7 改为依赖 `df_scores_raw`, 独立控制 EMA_ALPHA
 - **效果**: 调整分析侧 α 只需重跑 Cell 7, 无需重新训练模型
+
+### Renko 导出侧独立 EMA
+- `notebooks/renko_ml_explore.py` 的 Cell 6 新增 `EXPORT_EMA_ALPHA`
+- 导出 parquet 时改为基于 `df_scores_raw` 现场做 EMA, 不再依赖训练 Cell 内部平滑
+- `EXPORT_EMA_ALPHA` 已下沉到 Cell 6 本地配置, 避免 marimo 修改 Cell 1 时触发上游重跑
+- **效果**: 切换导出用 α 只需重跑 Cell 6, 无需重新训练 LightGBM
+- **复用价值**: 这套“训练输出 raw score, 导出侧单独做平滑”的模式后续可迁移到 `cross_section_rotation.py`, 避免每次只改导出 EMA 也要重训模型
+
+### Renko 回测结论: 暂停继续深入
+- 基于 `fwd_ret_open_2d` 做了 Rust 组合回测, 发现结果对导出侧 `EXPORT_EMA_ALPHA` 高度敏感
+- `EMA=1.0 / 0.1 / 0.2` 下净值表现都很差, 且 gross alpha 不稳定
+- `EMA=0.05` 虽然能把 Gross Return 提升到正值, 但净收益依旧明显为负, 成本无法覆盖
+- 结论: 当前 Renko ML 信号在 notebook 统计上有一定信息量, 但**组合层可兑现性不足**, 暂不作为优先探索方向
 
 ### Rust 回测引擎: 报告自动保存
 - `bt_core` 新增 `format_results()` + `write_report()` 共享函数

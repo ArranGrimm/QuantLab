@@ -229,6 +229,96 @@ def export_rotation_scores(
     return str(output_file)
 
 
+def export_renko_scores(
+    df_scores: pl.DataFrame,
+    output_path: str = "data/signals/renko_scores.parquet",
+    top_n: int = 20,
+) -> str:
+    """
+    Export full-universe Renko model scores for T+1 open execution.
+
+    时钟:
+      - T 日收盘后得到 score/rank
+      - Rust 在 T+1 日开盘使用 pre_score/pre_rank 买入
+      - T+1 日收盘使用当日 rank 做持仓管理
+
+    Required columns:
+        date, code, score, open_adj, high_adj, low_adj, close_adj
+
+    Optional columns:
+        volume, market_cap_100m, renko_signal / is_renko
+    """
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    required = ["date", "code", "score", "open_adj", "high_adj", "low_adj", "close_adj"]
+    missing = [c for c in required if c not in df_scores.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    print("Processing renko scores...")
+
+    df_export = (
+        df_scores
+        .sort(["code", "date"])
+        .with_columns(
+            pl.col("close_adj").shift(1).over("code")
+                .fill_null(pl.col("close_adj"))
+                .alias("pre_close_adj"),
+        )
+        .with_columns(
+            pl.col("score")
+                .rank(method="ordinal", descending=True)
+                .over("date")
+                .cast(pl.UInt16)
+                .alias("rank"),
+        )
+        .with_columns(
+            (pl.col("rank") <= top_n).alias("is_top_n"),
+        )
+        .with_columns([
+            pl.col("score").shift(1).over("code").fill_null(-999.0).alias("pre_score"),
+            pl.col("rank").shift(1).over("code").fill_null(9999).cast(pl.UInt16).alias("pre_rank"),
+            pl.col("is_top_n").shift(1).over("code").fill_null(False).alias("pre_is_top_n"),
+        ])
+    )
+
+    out_cols = [
+        "date", "code",
+        "score", "rank", "is_top_n",
+        "pre_score", "pre_rank", "pre_is_top_n",
+        "open_adj", "high_adj", "low_adj", "close_adj", "pre_close_adj",
+    ]
+    for opt_col in ["volume", "market_cap_100m", "is_renko", "renko_signal"]:
+        if opt_col in df_scores.columns:
+            out_cols.append(opt_col)
+
+    df_final = df_export.select(out_cols)
+    df_final.write_parquet(output_file)
+
+    total_rows = df_final.height
+    unique_dates = df_final.select(pl.col("date").n_unique()).item()
+    unique_codes = df_final.select(pl.col("code").n_unique()).item()
+    top_n_rows = df_final.filter(pl.col("is_top_n")).height
+    pre_top_n_rows = df_final.filter(pl.col("pre_is_top_n")).height
+    date_range = (
+        df_final.select(pl.col("date").min()).item(),
+        df_final.select(pl.col("date").max()).item(),
+    )
+
+    print(f"\n=== Renko Scores Export ===")
+    print(f"File: {output_file}")
+    print(f"Size: {output_file.stat().st_size / 1024 / 1024:.1f} MB")
+    print(f"Total rows: {total_rows:,}")
+    print(f"Trading days: {unique_dates}")
+    print(f"Unique stocks: {unique_codes}")
+    print(f"Date range: {date_range[0]} ~ {date_range[1]}")
+    print(f"Top-{top_n} signals: {top_n_rows:,} ({top_n_rows/unique_dates:.1f}/day avg)")
+    print(f"Pre Top-{top_n} signals: {pre_top_n_rows:,} ({pre_top_n_rows/unique_dates:.1f}/day avg)")
+
+    return str(output_file)
+
+
 def validate_export(filepath: str) -> dict:
     """Validate exported parquet file"""
     df = pl.read_parquet(filepath)

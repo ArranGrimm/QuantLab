@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.21.1"
+__generated_with = "0.22.0"
 app = marimo.App(width="full")
 
 
@@ -36,7 +36,7 @@ def _():
     MIN_LIST_DAYS = 60  # 最少上市天数
     START_DATE = "2020-09-01"  # 创业板注册制后
     LABEL = "fwd_ret_1d"  # 可选: fwd_ret_{1/2/3/5}d 或 fwd_ret_{1/2/3/5}d_excess
-    FEATURE_MODE = "pruned"  # "all" = 全部 FACTOR_COLS, "pruned" = 相关性剪枝后 (Cell 3c)
+    FEATURE_MODE = "all"  # "all" = 全部 FACTOR_COLS, "pruned" = 相关性剪枝后 (Cell 3c)
 
     print("🚀 [Step 1] 加载全量日线数据...")
     st_blacklist = get_st_blacklist_pl("2026-03-31")
@@ -63,6 +63,7 @@ def _():
         make_subplots,
         np,
         pl,
+        px,
         q_full,
         stats,
     )
@@ -383,12 +384,20 @@ def _(FACTOR_COLS, df_all, ic_results, px):
         return corr_mat, factor_names, keep, drop
 
     corr_matrix, corr_names, factors_keep, factors_drop = run_corr_analysis()
+    return (factors_keep,)
+
+
+@app.cell
+def _(FACTOR_COLS):
+    # Cell 4: (实验cell, 可以自定义因子)
+    FACTOR_COLS.remove("price_pos_20d")
+
     return
 
 
 @app.cell
-def _():
-    # Cell 4: (已移除 — 线性排名回测已被 LightGBM + Rust 架构替代)
+def _(FACTOR_COLS):
+    FACTOR_COLS
     return
 
 

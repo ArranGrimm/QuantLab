@@ -1,0 +1,1 @@
+cargo run -p bt-renko --release -- --data ../data/signals/renko_scores.parquet --config crates/renko/config.toml --output-dir ../results

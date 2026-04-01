@@ -25,7 +25,7 @@ from .duckdb_utils import get_adj_factor_frame, load_daily_data_full, load_60m_d
 from .ic_analysis import calc_factor_ic, select_factors_by_ic, calc_factor_corr, print_corr_clusters, find_redundant_factors
 
 # 信号导出 (for Rust)
-from .signal_export import export_for_rust, validate_export
+from .signal_export import export_for_rust, export_rotation_scores, export_renko_scores, validate_export
 
 __all__ = [
     # duckdb utils
@@ -62,6 +62,8 @@ __all__ = [
     "find_redundant_factors",
     # Rust 导出
     "export_for_rust",
+    "export_rotation_scores",
+    "export_renko_scores",
     "validate_export",
     # baostock utils
     "get_st_blacklist_pl",

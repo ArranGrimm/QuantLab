@@ -111,7 +111,35 @@
 
 ---
 
-## 三、共享基础设施
+## 三、Renko 短线策略
+
+### 当前状态
+- `notebooks/renko_ml_explore.py`: 已启动时间线重构, 统一为 `T 日收盘确认 → T+1 开盘买入`
+- Renko 专属 `rk_*` 因子已统一为 **T 日收盘可得**
+- 标签已改为 **`buy_open_t1` 基准**:
+  - `fwd_mfe_5d = max(high[T+1:T+5]) / open[T+1] - 1`
+  - `fwd_ret_1d = close[T+1] / open[T+1] - 1`
+- 已新增可切换标签入口:
+  - `fwd_ret_open_2d`
+  - `fwd_ret_close_2d`
+  - `fwd_ret_close_3d`
+- 已新增 notebook 实验面板:
+  - EMA 平滑实验
+  - Top-N 扩大实验
+  - 高分阈值过滤实验
+- 导出侧已支持独立 `EXPORT_EMA_ALPHA`, 且参数位于 Cell 6 本地, 可单独重跑 Cell 6 生成不同平滑版本 parquet
+- 导出侧“raw score → export EMA”模式后续可迁移到 `cross_section_rotation.py`, 便于只调导出平滑而不重训
+- Rust 导出 / 回测格式 **暂不继续深入调整**
+- 当前结论: `fwd_ret_open_2d` 在 notebook 层有一定统计信号, 但组合回测对 EMA 过于敏感, 且成本后净收益持续为负, **Renko 方向暂时暂停**
+
+### 当前待办
+1. 保留当前 notebook / 导出 / Rust 代码, 作为后续重启 Renko 研究的基线
+2. 若未来重启, 优先重新审视 label 语义、分钟级数据与事件驱动回测框架
+3. 将导出侧独立 EMA 的模式择机复用到截面轮动导出链路
+
+---
+
+## 四、共享基础设施
 
 ### 当前架构
 
