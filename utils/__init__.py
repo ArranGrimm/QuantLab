@@ -6,7 +6,14 @@ from .b1_factors_opt import calc_b1_factors_base, calc_b1_factors_opt, calc_b1_f
 from .renko_factors import calc_renko_factors_base, calc_renko_factors, calc_renko_factors_wmacd
 
 # 截面轮动因子模块
-from .rotation_factors import calc_rotation_factors, cross_section_normalize, FACTOR_COLS
+from .rotation_factors import (
+    calc_rotation_factors,
+    cross_section_normalize,
+    FACTOR_COLS,
+    FACTOR_GROUPS,
+    FACTOR_GROUP_LABELS,
+    FACTOR_TO_GROUP,
+)
 
 # 回测引擎模块
 from .backtest import (
@@ -49,6 +56,9 @@ __all__ = [
     "calc_rotation_factors",
     "cross_section_normalize",
     "FACTOR_COLS",
+    "FACTOR_GROUPS",
+    "FACTOR_GROUP_LABELS",
+    "FACTOR_TO_GROUP",
     # 回测
     "run_backtest",
     "run_backtest_short",

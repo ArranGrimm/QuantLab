@@ -6,14 +6,12 @@ app = marimo.App(width="full")
 
 @app.cell
 def _():
-    import marimo as mo
     import duckdb
     import polars as pl
     import numpy as np
     import plotly.graph_objects as go
     import plotly.express as px
     from plotly.subplots import make_subplots
-    from datetime import datetime
     from scipy import stats
 
     from utils import load_daily_data_full, add_price_limit_cols
@@ -22,6 +20,9 @@ def _():
         calc_rotation_factors,
         cross_section_normalize,
         FACTOR_COLS,
+        FACTOR_GROUP_LABELS,
+        FACTOR_GROUPS,
+        FACTOR_TO_GROUP,
     )
 
     # ==============================================================================
@@ -36,7 +37,6 @@ def _():
     MIN_LIST_DAYS = 60  # 最少上市天数
     START_DATE = "2020-09-01"  # 创业板注册制后
     LABEL = "fwd_ret_1d"  # 可选: fwd_ret_{1/2/3/5}d 或 fwd_ret_{1/2/3/5}d_excess
-    FEATURE_MODE = "all"  # "all" = 全部 FACTOR_COLS, "pruned" = 相关性剪枝后 (Cell 3c)
 
     print("🚀 [Step 1] 加载全量日线数据...")
     st_blacklist = get_st_blacklist_pl("2026-03-31")
@@ -51,7 +51,9 @@ def _():
     print(f"✅ 参数: 流通市值 {MV_MIN}~{MV_MAX} 亿, 上市>{MIN_LIST_DAYS}天, 起始={START_DATE}")
     return (
         FACTOR_COLS,
-        FEATURE_MODE,
+        FACTOR_GROUPS,
+        FACTOR_GROUP_LABELS,
+        FACTOR_TO_GROUP,
         LABEL,
         MIN_LIST_DAYS,
         MV_MAX,
@@ -231,6 +233,58 @@ def _(FACTOR_COLS, LABEL, df_all, go, make_subplots, pl):
 
 
 @app.cell
+def _(FACTOR_GROUPS, FACTOR_GROUP_LABELS, FACTOR_TO_GROUP, ic_results, pl):
+    # ==============================================================================
+    # Cell 3a: 因子分组概览 — 为后续核心因子治理建立统一口径
+    # ==============================================================================
+    def run_factor_group_summary():
+        group_rows = []
+        for group_key_local, factors_local in FACTOR_GROUPS.items():
+            group_icirs = [
+                float(ic_results[f]["icir"])
+                for f in factors_local
+                if f in ic_results and ic_results[f].get("icir") is not None
+            ]
+            group_abs_icirs = [abs(v) for v in group_icirs]
+            top_factor = None
+            top_abs_icir = None
+            if group_abs_icirs:
+                top_factor = max(
+                    factors_local,
+                    key=lambda f: abs(float(ic_results[f]["icir"])) if f in ic_results else -1.0,
+                )
+                top_abs_icir = abs(float(ic_results[top_factor]["icir"]))
+
+            group_rows.append({
+                "group_key": group_key_local,
+                "group_name": FACTOR_GROUP_LABELS.get(group_key_local, group_key_local),
+                "n_factors": len(factors_local),
+                "mean_abs_icir": float(sum(group_abs_icirs) / len(group_abs_icirs)) if group_abs_icirs else 0.0,
+                "max_abs_icir": float(top_abs_icir) if top_abs_icir is not None else 0.0,
+                "top_factor": top_factor or "",
+            })
+
+        df_group_summary_local = pl.DataFrame(group_rows).sort("mean_abs_icir", descending=True)
+
+        print("🧭 [Factor Groups] Rotation 因子分组概览")
+        print("=" * 88)
+        print(f"  {'分组':<20} {'数量':>6} {'平均|ICIR|':>12} {'最佳|ICIR|':>12} {'组内最佳因子':<24}")
+        print("-" * 88)
+        for summary_row in df_group_summary_local.iter_rows(named=True):
+            print(
+                f"  {summary_row['group_name']:<20} {summary_row['n_factors']:>6} "
+                f"{summary_row['mean_abs_icir']:>12.4f} {summary_row['max_abs_icir']:>12.4f} "
+                f"{summary_row['top_factor']:<24}"
+            )
+        print("-" * 88)
+        print(f"  已分组因子: {len(FACTOR_TO_GROUP)} / {sum(len(v) for v in FACTOR_GROUPS.values())}")
+        return df_group_summary_local
+
+    df_group_summary = run_factor_group_summary()
+    return (df_group_summary,)
+
+
+@app.cell
 def _(df_all, df_ic_summary, go, make_subplots, np, stats):
     # ==============================================================================
     # Cell 3b: Alpha Decay 分析 — 因子预测力随持仓天数衰减
@@ -364,7 +418,7 @@ def _(FACTOR_COLS, df_all, ic_results, px):
     def run_corr_analysis():
         corr_mat, factor_names = calc_factor_corr(df_all, list(FACTOR_COLS))
 
-        pairs = print_corr_clusters(corr_mat, factor_names, threshold=0.7)
+        print_corr_clusters(corr_mat, factor_names, threshold=0.7)
 
         keep, drop, decisions = find_redundant_factors(
             corr_mat, factor_names, ic_results=ic_results, threshold=0.85
@@ -388,17 +442,88 @@ def _(FACTOR_COLS, df_all, ic_results, px):
 
 
 @app.cell
-def _(FACTOR_COLS):
-    # Cell 4: (实验cell, 可以自定义因子)
-    FACTOR_COLS.remove("price_pos_20d")
+def _(
+    FACTOR_COLS,
+    FACTOR_GROUPS,
+    FACTOR_GROUP_LABELS,
+    FACTOR_TO_GROUP,
+    factors_keep,
+    ic_results,
+    pl,
+):
+    # ==============================================================================
+    # Cell 3d: 核心因子筛查 — 基于分组 + ICIR + 全局剪枝给出 core feature set
+    # ==============================================================================
+    def run_core_factor_screen():
+        keep_set = set(factors_keep)
+        ranked_rows = []
+        for factor_name in FACTOR_COLS:
+            if factor_name not in ic_results:
+                continue
+            group_key_local = FACTOR_TO_GROUP.get(factor_name, "ungrouped")
+            ranked_rows.append({
+                "factor": factor_name,
+                "group_key": group_key_local,
+                "group_name": FACTOR_GROUP_LABELS.get(group_key_local, group_key_local),
+                "ic_mean": float(ic_results[factor_name]["ic_mean"]),
+                "icir": float(ic_results[factor_name]["icir"]),
+                "abs_icir": abs(float(ic_results[factor_name]["icir"])),
+                "is_pruned_keep": factor_name in keep_set,
+            })
 
-    return
+        core_primary = []
+        secondary_pool = []
 
+        print("🎯 [Core Factors] 分组核心因子筛查")
+        print("=" * 108)
+        print(f"  {'分组':<20} {'候选因子':<24} {'|ICIR|':>10} {'保留?':>8} {'角色':>8}")
+        print("-" * 108)
 
-@app.cell
-def _(FACTOR_COLS):
-    FACTOR_COLS
-    return
+        for group_key_local, factors_local in FACTOR_GROUPS.items():
+            group_rows = [r for r in ranked_rows if r["group_key"] == group_key_local]
+            group_rows.sort(key=lambda r: r["abs_icir"], reverse=True)
+            if not group_rows:
+                continue
+
+            kept_rows = [r for r in group_rows if r["is_pruned_keep"]]
+            primary = kept_rows[0] if kept_rows else group_rows[0]
+            core_primary.append(primary["factor"])
+
+            print(
+                f"  {FACTOR_GROUP_LABELS.get(group_key_local, group_key_local):<20} "
+                f"{primary['factor']:<24} {primary['abs_icir']:>10.4f} "
+                f"{('是' if primary['is_pruned_keep'] else '否'):>8} {'主因子':>8}"
+            )
+
+            follow_rows = kept_rows[1:] if primary["is_pruned_keep"] else kept_rows
+            for candidate_row in follow_rows:
+                if (
+                    candidate_row["abs_icir"] >= 0.08
+                    and candidate_row["abs_icir"] >= primary["abs_icir"] * 0.60
+                ):
+                    secondary_pool.append(candidate_row)
+
+        secondary_pool.sort(key=lambda r: r["abs_icir"], reverse=True)
+        core_target_size = 12
+        extra_slots = max(0, core_target_size - len(core_primary))
+        core_factors_local = list(core_primary)
+        for candidate_row in secondary_pool:
+            if candidate_row["factor"] in core_factors_local:
+                continue
+            if len(core_factors_local) >= len(core_primary) + extra_slots:
+                break
+            core_factors_local.append(candidate_row["factor"])
+            print(
+                f"  {candidate_row['group_name']:<20} {candidate_row['factor']:<24} {candidate_row['abs_icir']:>10.4f} "
+                f"{('是' if candidate_row['is_pruned_keep'] else '否'):>8} {'补充':>8}"
+            )
+
+        print("-" * 108)
+        print(f"  建议 core feature set ({len(core_factors_local)}): {', '.join(core_factors_local)}")
+        return core_factors_local
+
+    core_factors = run_core_factor_screen()
+    return (core_factors,)
 
 
 @app.cell
@@ -408,30 +533,35 @@ def _():
 
 
 @app.cell
-def _(FACTOR_COLS, FEATURE_MODE, LABEL, df_all, factors_keep, np, pl, q_full):
+def _(
+    FACTOR_COLS,
+    LABEL,
+    core_factors,
+    df_all,
+    factors_keep,
+    np,
+    pl,
+):
     # ==============================================================================
-    # Cell 6: LightGBM Walk-Forward 打分 → Parquet 导出
-    # 模型只负责打分, 回测交给 Rust ECS 引擎
+    # Cell 6: LightGBM Walk-Forward 打分
+    # 模型只负责打分, 导出与回测解耦
     #
-    # FEATURE_MODE: "all" = 全部 FACTOR_COLS, "pruned" = 相关性剪枝后
-    #
-    # 关键: Parquet 必须包含所有"曾被评分"股票在整个回测期间的价格数据,
-    # 即使某天该股票不在 universe 内 (市值越界等), 也要保留价格行,
-    # 否则 Rust 引擎无法对该仓位执行止损/排名退出等检查 → "幽灵仓位"
+    # FEATURE_MODE: "all" = 全部 FACTOR_COLS, "pruned" = 相关性剪枝后, "core" = 分组核心因子集
     # ==============================================================================
     def run_lgbm_scoring():
         import lightgbm as lgb
         import warnings
-        from utils.signal_export import export_rotation_scores
         warnings.filterwarnings("ignore", category=UserWarning)
 
         TRAIN_WINDOW = 480
         RETRAIN_FREQ = 20
         TOP_N = 20
-        EMA_ALPHA = 0.15  # Score 时序平滑 (1.0 = 不平滑)
+        FEATURE_MODE = "all"  # "all" / "pruned" / "core"; 改这里仅需重跑 Cell 6
 
         if FEATURE_MODE == "pruned":
             feature_cols = list(factors_keep)
+        elif FEATURE_MODE == "core":
+            feature_cols = list(core_factors)
         else:
             feature_cols = list(FACTOR_COLS)
 
@@ -449,8 +579,13 @@ def _(FACTOR_COLS, FEATURE_MODE, LABEL, df_all, factors_keep, np, pl, q_full):
             "random_state": 42,
         }
 
-        mode_desc = f"pruned ({len(feature_cols)})" if FEATURE_MODE == "pruned" else f"all ({len(feature_cols)})"
-        print(f"🤖 LightGBM Walk-Forward 打分 → Parquet", flush=True)
+        if FEATURE_MODE == "pruned":
+            mode_desc = f"pruned ({len(feature_cols)})"
+        elif FEATURE_MODE == "core":
+            mode_desc = f"core ({len(feature_cols)})"
+        else:
+            mode_desc = f"all ({len(feature_cols)})"
+        print("🤖 LightGBM Walk-Forward 打分", flush=True)
         print(f"   训练窗口: {TRAIN_WINDOW}天, 重训: 每{RETRAIN_FREQ}天, 标签: {LABEL}", flush=True)
         print(f"   特征模式: {mode_desc}, Top-{TOP_N}", flush=True)
 
@@ -518,62 +653,12 @@ def _(FACTOR_COLS, FEATURE_MODE, LABEL, df_all, factors_keep, np, pl, q_full):
 
         print(f"\n   ✅ 打分完成: {len(score_values):,} 条记录", flush=True)
 
-        # ── Build scores DataFrame + EMA 平滑 ──
-        df_scores = pl.DataFrame({
+        # ── Build raw scores DataFrame ──
+        df_scores_raw = pl.DataFrame({
             "date": score_dates,
             "code": score_codes,
             "score": score_values,
         })
-
-        df_scores_raw = df_scores.clone()
-
-        if EMA_ALPHA < 1.0:
-            df_scores = (
-                df_scores
-                .sort(["code", "date"])
-                .with_columns(
-                    pl.col("score")
-                      .ewm_mean(alpha=EMA_ALPHA)
-                      .over("code")
-                      .alias("score")
-                )
-            )
-            print(f"   ⚡ Score EMA 平滑: α={EMA_ALPHA}", flush=True)
-
-        # ── 补全: 用 q_full 获取所有曾评分股票的完整价格序列 ──
-        # 当股票市值越界离开 universe 时, 依然保留其价格行供 Rust 做退出判断
-        ever_scored_codes = df_scores["code"].unique().to_list()
-        score_date_min = df_scores["date"].min()
-        score_date_max = df_scores["date"].max()
-
-        print(f"   📦 补全价格: {len(ever_scored_codes)} 只股票, "
-              f"{score_date_min} ~ {score_date_max}", flush=True)
-
-        price_cols = ["date", "code", "open_adj", "high_adj", "low_adj",
-                      "close_adj", "volume", "market_cap_100m"]
-        df_full_prices = (
-            q_full
-            .filter(pl.col("code").is_in(ever_scored_codes))
-            .filter(pl.col("date") >= score_date_min)
-            .filter(pl.col("date") <= score_date_max)
-            .select([c for c in price_cols if c in q_full.collect_schema().names()])
-            .collect()
-        )
-
-        # Left-join: 有评分的用真实分数, 无评分的 (离开 universe) score 填 -999
-        df_expanded = df_full_prices.join(
-            df_scores, on=["date", "code"], how="left"
-        ).with_columns(
-            pl.col("score").fill_null(-999.0),
-        )
-
-        n_scored = df_scores.height
-        n_total = df_expanded.height
-        n_padded = n_total - n_scored
-        print(f"   评分行: {n_scored:,}, 补全行: {n_padded:,}, 总计: {n_total:,}", flush=True)
-
-        # ── Export Parquet ──
-        output_path = export_rotation_scores(df_expanded, top_n=TOP_N)
 
         # ── Feature importance (最后一个模型) ──
         if model is not None:
@@ -593,10 +678,83 @@ def _(FACTOR_COLS, FEATURE_MODE, LABEL, df_all, factors_keep, np, pl, q_full):
                 print(f"  {imp_row['factor']:<22} {imp_row['importance']:>6} {bar}")
             print("=" * 55)
 
-        return df_expanded, output_path, df_scores_raw
+        return df_scores_raw
 
-    df_rotation_scores, scores_path, df_scores_raw = run_lgbm_scoring()
+    df_scores_raw = run_lgbm_scoring()
     return (df_scores_raw,)
+
+
+@app.cell
+def _(df_scores_raw, pl, q_full):
+    # ==============================================================================
+    # Cell 6b: 导出 Rotation 分数 → Rust 回测
+    #
+    # 基于 Cell 6 输出的原始分数 (df_scores_raw), 独立控制导出侧 EMA.
+    # 修改 EXPORT_EMA_ALPHA 只需重跑本 Cell, 无需重新训练模型.
+    #
+    # 关键: Parquet 必须包含所有"曾被评分"股票在整个回测期间的价格数据,
+    # 即使某天该股票不在 universe 内 (市值越界等), 也要保留价格行,
+    # 否则 Rust 引擎无法对该仓位执行止损/排名退出等检查 → "幽灵仓位"
+    # ==============================================================================
+    from utils.signal_export import export_rotation_scores
+
+    def run_export():
+        EXPORT_TOP_N = 20
+        EXPORT_EMA_ALPHA = 0.15  # 导出 parquet 用的分数平滑; 改这里仅需重跑本 Cell
+
+        df_scores_export = df_scores_raw
+
+        if EXPORT_EMA_ALPHA < 1.0:
+            df_scores_export = (
+                df_scores_raw
+                .sort(["code", "date"])
+                .with_columns(
+                    pl.col("score")
+                      .ewm_mean(alpha=EXPORT_EMA_ALPHA)
+                      .over("code")
+                      .alias("score")
+                )
+                .sort(["date", "code"])
+            )
+            print(f"⏳ [Step 6b] 导出分数 EMA 平滑: α={EXPORT_EMA_ALPHA}", flush=True)
+        else:
+            print("⏳ [Step 6b] 导出使用原始分数 (无 EMA)", flush=True)
+
+        ever_scored_codes = df_scores_export["code"].unique().to_list()
+        score_date_min = df_scores_export["date"].min()
+        score_date_max = df_scores_export["date"].max()
+
+        print(f"   📦 补全价格: {len(ever_scored_codes)} 只股票, "
+              f"{score_date_min} ~ {score_date_max}", flush=True)
+
+        price_cols = ["date", "code", "open_adj", "high_adj", "low_adj",
+                      "close_adj", "volume", "market_cap_100m"]
+        q_full_cols = q_full.collect_schema().names()
+        df_full_prices = (
+            q_full
+            .filter(pl.col("code").is_in(ever_scored_codes))
+            .filter(pl.col("date") >= score_date_min)
+            .filter(pl.col("date") <= score_date_max)
+            .select([c for c in price_cols if c in q_full_cols])
+            .collect()
+        )
+
+        df_expanded = df_full_prices.join(
+            df_scores_export, on=["date", "code"], how="left"
+        ).with_columns(
+            pl.col("score").fill_null(-999.0),
+        )
+
+        n_scored = df_scores_export.height
+        n_total = df_expanded.height
+        n_padded = n_total - n_scored
+        print(f"   评分行: {n_scored:,}, 补全行: {n_padded:,}, 总计: {n_total:,}", flush=True)
+
+        scores_path = export_rotation_scores(df_expanded, top_n=EXPORT_TOP_N)
+        return scores_path
+
+    run_export()
+    return
 
 
 @app.cell
@@ -655,7 +813,7 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
         date_start = np.searchsorted(dates_np, unique_dates, side="left")
         date_end = np.searchsorted(dates_np, unique_dates, side="right")
 
-        print(f"📊 Signal Quality Analysis")
+        print("📊 Signal Quality Analysis")
         print(f"   样本: {len(dates_np):,} 条, {n_days} 个交易日\n")
 
         # ================================================================
@@ -682,8 +840,6 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
         icir = ic_mean / max(ic_std, 1e-8)
         t_stat = ic_mean / max(ic_std, 1e-8) * np.sqrt(len(valid_ic))
         ic_pos_pct = float(np.mean(valid_ic > 0)) * 100
-        cum_ic = np.nancumsum(daily_ic)
-
         print("=" * 65)
         print("  7a. OOS Model IC Analysis")
         print("=" * 65)
@@ -741,7 +897,7 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
             arr = np.array(quintile_daily[q])
             qm = float(np.mean(arr)) * 100
             print(f"  Q{q} 日均收益: {qm:+.3f}%")
-        print(f"  ---")
+        print("  ---")
         print(f"  L/S 日均收益:  {ls_mean * 100:+.4f}%")
         print(f"  L/S 年化Sharpe: {ls_sharpe:.2f}")
         print(f"  L/S t-stat:    {ls_t:+.2f}  {'✅ 显著' if abs(ls_t) > 2 else '❌ 不显著'}")
@@ -900,7 +1056,7 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
             "ls_hit": ls_hit,
         }
 
-    signal_report = run_signal_quality()
+    run_signal_quality()
     return
 
 

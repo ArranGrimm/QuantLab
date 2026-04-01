@@ -9,14 +9,17 @@
 ### 已完成
 - `utils/rotation_factors.py`: 42 个日线截面因子 (动量/波动/成交量/技术/微观/A股T+1/处置效应)
   - T 日数据版: 所有因子直接用当日 OHLCV, 与实盘 14:45 快照对齐
+  - 已新增分组注册表: `FACTOR_GROUPS / FACTOR_GROUP_LABELS / FACTOR_TO_GROUP`
 - `utils/duckdb_utils.py`: `add_price_limit_cols()` 涨跌停标记 (与 Rust bt-core 逻辑一致)
 - `utils/signal_export.py`: 信号导出 (B1 事件信号 + 截面轮动打分), Parquet 格式供 Rust 消费
 - `notebooks/cross_section_rotation.py`: 研究 notebook (7 个 cell)
   - Cell 1-2: 数据加载 + 因子计算 + 涨跌停标记 + 截面标准化 + 超额收益标签
   - Cell 3: Spearman IC 分析 + 排行榜 + 累积 IC 曲线
+  - Cell 3a/3d: 因子分组概览 + 核心因子筛查, 输出建议 `core feature set`
   - Cell 3b: Alpha Decay 分析 (因子预测力随持仓天数衰减)
   - Cell 4-5: (已清空, 旧线性回测)
-  - Cell 6: LightGBM Walk-Forward 打分 → Parquet 导出 (训练时排除涨停样本)
+  - Cell 6: LightGBM Walk-Forward 打分, 本地控制 `FEATURE_MODE`, 输出 `df_scores_raw` (训练时排除涨停样本)
+  - Cell 6b: 导出 parquet, 独立控制 `EXPORT_EMA_ALPHA`, 无需重训模型
   - Cell 7: Signal Quality Analysis (基于原始分数, 独立 EMA, 无需重训模型)
 - Rust 回测引擎:
   - `bt-core`: 涨跌停判定 (`price_limit_pct`, `is_limit_up`, `is_limit_down`)
@@ -70,12 +73,16 @@
 
 ### Rotation 后续方向
 
-1. **因子改进** (提升真实 alpha):
-   - 加行业相对因子 (数据已有 `data/sector_map_em.csv`)
-   - 精简冗余因子 (42 → ~25, 减少过拟合)
-   - 加市场环境因子 (市场宽度、指数收益)
-2. **降换手**: EMA 平滑、hold_buffer 调参、最小持仓天数
-3. **多策略架构**: 拆分为多个独立子策略, 分散化降回撤
+详见 `experiments/rotation-next-phase.md`。
+
+当前下一阶段优先级:
+1. 导出侧独立 `EXPORT_EMA_ALPHA`, 提升研究效率 (已在 `Rotation` / `Renko` notebook 落地)
+2. 因子治理, 收敛 `core feature set` (分组基础设施 + 核心筛查入口已完成)
+3. 增加 `Ridge/ElasticNet` 与 `CatBoost/XGBoost` 基线对照
+4. 在固定研究基线后再收敛组合参数
+
+备注:
+- `Rotation` 当前标的池已经是 **80~500 亿**, 这不是下一阶段待修正项
 
 ---
 

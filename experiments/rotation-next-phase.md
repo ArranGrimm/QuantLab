@@ -1,0 +1,205 @@
+# Rotation 下一阶段可执行清单
+
+> 目标: 在保留当前真实 gross alpha 的前提下, 提升 `Rotation` 的可兑现性与研究效率。
+> 当前共识: `Rotation` 已完成涨停幻觉修复, 标的池已限制为 **80~500 亿**, 下一阶段不再把市值池收敛当成主任务。
+
+## 一、阶段目标
+
+### 主目标
+
+- 保住当前 `gross alpha` (`Gross Return` 约 +47% ~ +48%)
+- 降低交易成本侵蚀, 争取提升 `net return`
+- 确认真实 alpha 来自哪些核心因子, 而不是重复表达
+- 建立 `LightGBM` 之外的模型基线, 避免单模型路径依赖
+
+### 非目标
+
+- 暂不引入分钟级数据
+- 暂不做遗传算法自动挖因子
+- 暂不扩展到新的短线策略主线
+
+## 二、执行顺序
+
+### Phase 1: 导出链路解耦
+
+#### 任务 1.1
+
+- 将 `notebooks/cross_section_rotation.py` 的导出逻辑改为:
+  - 训练 Cell 只输出 `df_scores_raw`
+  - 导出 Cell 单独控制 `EXPORT_EMA_ALPHA`
+
+#### 完成标准
+
+- 修改导出平滑参数时, 只需重跑导出 Cell
+- 不需要重新训练 `LightGBM`
+- 与当前 `Rotation` 导出 parquet 格式保持兼容
+
+#### 验证
+
+- 对比 `EXPORT_EMA_ALPHA = 1.0 / 0.2 / 0.1 / 0.05`
+- 确认导出文件生成正常, Rust 回测可直接复用
+
+### Phase 2: 建立统一实验面板
+
+#### 任务 2.1
+
+- 新增一张统一实验表, 记录每次实验的:
+  - `LABEL`
+  - `feature_set`
+  - `model`
+  - `EXPORT_EMA_ALPHA`
+  - `top_n`
+  - `hold_buffer`
+  - `min_score`
+  - `gross return`
+  - `net return`
+  - `max drawdown`
+  - `avg trades/day`
+
+#### 建议位置
+
+- 先放在 `experiments/rotation-next-phase.md` 末尾
+- 如果后续实验很多, 再拆成单独表格文件
+
+#### 面板完成标准
+
+- 后续每一轮回测都能横向比较
+- 不再依赖聊天记录回忆参数组合
+
+### Phase 3: 因子治理
+
+#### 任务 3.1 因子分组
+
+- 将当前 `Rotation` 因子按信息源分组:
+  - 短期反转
+  - K 线结构
+  - 波动/风险
+  - 成交量/流动性
+  - 中期动量
+  - 位置/偏离率
+
+#### 任务 3.2 核心因子筛查
+
+- 对每个因子检查:
+  - OOS `IC mean`
+  - `ICIR`
+  - 分年稳定性
+  - 与核心因子的相关性
+  - 去掉该因子后对 `gross return` 的影响
+
+#### 任务 3.3 收敛核心集
+
+- 目标不是把 40+ 因子硬砍成极少数
+- 目标是收敛到 **8~15 个核心信息源**, 其余只保留少量补充项
+
+#### 因子治理完成标准
+
+- 能明确回答“哪些因子是真核心 alpha, 哪些只是重复表达”
+- 形成一版 `core feature set`
+- 形成一版 `full feature set`
+
+### Phase 4: 模型基线对照
+
+#### 任务 4.1
+
+- 在 `LightGBM` 之外增加:
+  - `Ridge` 或 `ElasticNet`
+  - `CatBoost` 或 `XGBoost`
+
+#### 任务 4.2
+
+- 对三类模型统一比较:
+  - OOS `IC`
+  - Quintile 单调性
+  - Rust `gross return`
+  - Rust `net return`
+  - turnover / costs
+
+#### 模型对照完成标准
+
+- 确认 `LightGBM` 是否真的优于简单线性模型
+- 避免“复杂模型只是在样本里更会拟合”
+
+### Phase 5: 组合参数收敛
+
+#### 任务 5.1
+
+- 在固定最佳 `feature_set + model + LABEL` 后, 只搜索以下参数:
+  - `EXPORT_EMA_ALPHA`
+  - `top_n`
+  - `hold_buffer`
+  - `min_score`
+
+#### 任务 5.2
+
+- 每轮只改一类参数, 避免多变量混淆
+
+#### 参数收敛完成标准
+
+- 找到一套可复现的“当前最优组合参数”
+- 确认 `gross` 和 `net` 的最优点是否一致
+
+## 三、暂不做的事
+
+### 遗传算法
+
+- 暂不作为下一阶段主线
+- 原因:
+  - 当前 alpha 偏薄
+  - 组合成本敏感
+  - 容易把噪音当信号
+
+### 分钟级数据
+
+- 暂不引入
+- 只有当日频 `Rotation` 已稳定、且确认瓶颈来自执行误差时再讨论
+
+### 新策略主线
+
+- 暂停 `Renko`
+- 下一阶段只聚焦 `Rotation`
+
+## 四、优先级列表
+
+### P0
+
+- `cross_section_rotation.py` 迁移导出侧独立 `EXPORT_EMA_ALPHA`
+- 建立统一实验表
+
+### P1
+
+- 因子分组 + 核心因子筛查
+- 增加 `Ridge/ElasticNet` 基线
+
+### P2
+
+- 增加 `CatBoost/XGBoost` 对照
+- 组合参数收敛
+
+### P3
+
+- 若以上都稳定, 再讨论遗传算法是否值得作为局部搜索工具
+
+## 五、阶段退出标准
+
+满足以下任意一条, 即可结束本阶段:
+
+1. 找到一套比当前基线更优、且 `gross/net/drawdown/turnover` 更平衡的方案
+2. 证明当前因子体系的真实 alpha 已接近日频上限, 再继续堆模型收益不大
+3. 证明简单模型与复杂模型差异极小, 则后续重心转向执行与组合层优化
+
+## 六、当前基线
+
+- 标的池: **80~500 亿**
+- `LABEL`: `fwd_ret_1d`
+- 真实基线参考:
+  - `Gross Return` 约 `+47% ~ +48%`
+  - `Net Return` 约 `+10% ~ +11%`
+  - `Avg Trades/Day` 约 `2.6 ~ 2.7`
+
+---
+
+## 实验记录表
+
+| 日期 | LABEL | Feature Set | Model | Export EMA | Top-N | Hold Buffer | Min Score | Gross | Net | MDD | Trades/Day | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

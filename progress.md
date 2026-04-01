@@ -2,6 +2,38 @@
 
 ## 2026-04-01
 
+### [Rotation] 下一阶段执行清单落地
+- 新增 `experiments/rotation-next-phase.md`
+- 将下一阶段目标明确为:
+  - 导出侧独立 `EXPORT_EMA_ALPHA`
+  - 因子治理与核心因子收敛
+  - `LightGBM` 之外的模型基线对照
+  - 固定研究基线后的组合参数收敛
+- 明确修正共识: `Rotation` 当前标的池已经是 **80~500 亿**, 不再作为下一阶段主任务
+
+### [Rotation] 导出侧独立 EMA 落地
+- `notebooks/cross_section_rotation.py` 的训练 Cell 现在只输出 `df_scores_raw`
+- 新增独立导出 Cell, 本地控制 `EXPORT_EMA_ALPHA`
+- 修改导出平滑参数时, 只需重跑导出 Cell, 无需重新训练 `LightGBM`
+- `Rotation` 与 `Renko` 现已统一为“raw score → export EMA”的导出模式
+
+### [Rotation] 因子分组基础设施落地
+- `utils/rotation_factors.py` 新增:
+  - `FACTOR_GROUPS`
+  - `FACTOR_GROUP_LABELS`
+  - `FACTOR_TO_GROUP`
+- 分组覆盖当前全部 `Rotation` 因子, 并在模块加载时校验完整性
+- `notebooks/cross_section_rotation.py` 新增分组概览 Cell, 可直接查看每组因子数量、平均 `|ICIR|` 与组内最佳因子
+
+### [Rotation] 核心因子筛查入口落地
+- `notebooks/cross_section_rotation.py` 新增 `Cell 3d`
+- 基于:
+  - 因子分组
+  - 单因子 `|ICIR|`
+  - 全局相关性剪枝结果 (`factors_keep`)
+- 自动给出一版建议 `core feature set`
+- `FEATURE_MODE` 现支持 `"core"`, 且参数位于 `Cell 6` 本地, 可直接训练核心因子版本与 `"all"` / `"pruned"` 对照
+
 ### [Renko] 研究链路时钟统一重构
 
 #### 核心决策

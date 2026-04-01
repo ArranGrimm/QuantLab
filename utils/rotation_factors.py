@@ -57,6 +57,67 @@ FACTOR_COLS = [
     "vol_down_asymmetry",  # 下行波动不对称 (downside_vol / total_vol)
 ]
 
+FACTOR_GROUPS = {
+    "momentum_reversal": [
+        "ret_1d", "ret_5d", "ret_10d", "ret_20d", "ret_60d", "ret_120d",
+        "mom_skip1m", "ret_max_5d", "ret_min_5d",
+    ],
+    "volatility_risk": [
+        "vol_20d", "vol_60d", "vol_ratio", "max_drawdown_20d", "vol_compress",
+        "downside_vol_20d", "panic_vol_ratio_20d", "neg_ret_streak", "vol_down_asymmetry",
+    ],
+    "volume_liquidity": [
+        "turnover_rate", "turnover_ma_ratio", "vol_price_corr_20d",
+        "vol_std_20d", "abnormal_vol", "turnover_accel", "amihud_illiq_20d",
+    ],
+    "technical_indicators": [
+        "rsi_14", "macd_hist", "bb_position", "atr_14_pct",
+        "ma_bias_20", "ma_bias_60", "close_to_high_20d",
+    ],
+    "intraday_structure": [
+        "amplitude", "upper_shadow", "lower_shadow", "body_ratio",
+        "intraday_pos", "high_open_pct", "open_low_pct",
+    ],
+    "t1_short_term": [
+        "overnight_ret", "intraday_ret", "overnight_ret_ma5",
+        "intraday_ret_ma5", "price_pos_20d",
+    ],
+    "behavioral_disposition": [
+        "disp_bias_20", "disp_bias_60",
+    ],
+}
+
+FACTOR_GROUP_LABELS = {
+    "momentum_reversal": "动量/反转",
+    "volatility_risk": "波动/风险",
+    "volume_liquidity": "成交量/流动性",
+    "technical_indicators": "技术指标",
+    "intraday_structure": "日内结构",
+    "t1_short_term": "A股T+1短线",
+    "behavioral_disposition": "行为金融/处置效应",
+}
+
+
+def get_factor_group_map() -> dict[str, str]:
+    """返回 factor -> group_key 的映射, 并校验分组覆盖是否完整。"""
+    factor_to_group: dict[str, str] = {}
+    for group_key, factors in FACTOR_GROUPS.items():
+        for factor in factors:
+            if factor in factor_to_group:
+                raise ValueError(f"Factor '{factor}' is assigned to multiple groups")
+            factor_to_group[factor] = group_key
+
+    missing = [factor for factor in FACTOR_COLS if factor not in factor_to_group]
+    extra = [factor for factor in factor_to_group if factor not in FACTOR_COLS]
+    if missing or extra:
+        raise ValueError(
+            f"Rotation factor grouping mismatch: missing={missing}, extra={extra}"
+        )
+    return factor_to_group
+
+
+FACTOR_TO_GROUP = get_factor_group_map()
+
 
 def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame:
     """
