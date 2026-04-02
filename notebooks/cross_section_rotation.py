@@ -532,7 +532,18 @@ def _():
 
 
 @app.cell
-def _(FACTOR_COLS, LABEL, MIN_LIST_DAYS, MV_MAX, MV_MIN, core_factors, df_all, factors_keep, np, pl):
+def _(
+    FACTOR_COLS,
+    LABEL,
+    MIN_LIST_DAYS,
+    MV_MAX,
+    MV_MIN,
+    core_factors,
+    df_all,
+    factors_keep,
+    np,
+    pl,
+):
     # ==============================================================================
     # Cell 6: LightGBM Walk-Forward 打分
     # 模型只负责打分, 导出与回测解耦
@@ -549,7 +560,7 @@ def _(FACTOR_COLS, LABEL, MIN_LIST_DAYS, MV_MAX, MV_MIN, core_factors, df_all, f
         TRAIN_WINDOW = 480
         RETRAIN_FREQ = 20
         TOP_N = 20
-        FEATURE_MODE = "pruned"  # "all" / "pruned" / "core"; 改这里仅需重跑 Cell 6
+        FEATURE_MODE = "core"  # "all" / "pruned" / "core"; 改这里仅需重跑 Cell 6
 
         if FEATURE_MODE == "pruned":
             feature_cols = list(factors_keep)

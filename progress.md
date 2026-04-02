@@ -7,9 +7,9 @@
   - 训练阶段固定 `train_run_id`
   - 保存 `artifacts/rotation/<train_run_id>/train.meta.json`
   - 保存 `artifacts/rotation/<train_run_id>/raw_scores.parquet`
-  - 保存 `artifacts/rotation/<train_run_id>/exports/<export_token>/signal.parquet`
+  - 保存 `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/signal.parquet`
   - 保存对应 `signal.meta.json`
-- 仍保留 `data/signals/rotation_scores.parquet` 作为 **latest alias**, 不破坏现有 `Rust` 启动方式
+  - 在 `artifacts/rotation/<train_run_id>/signals.jsonl` 记录该 train run 派生过哪些 signal
 - sidecar 元数据已记录:
   - `LABEL`
   - `feature_mode`
@@ -21,12 +21,32 @@
 
 ### [Rotation] Rust 回测报告追踪增强
 - `bt-rotation` 现在会自动读取信号文件旁的 `signal.meta.json`
-- 报告文件名改为携带 `signal_run_id + 回测参数`
-- 除原有 txt 报告外, 额外输出同名 `json` 报告
-- 新增全局注册表:
-  - `artifacts/rotation/runs.jsonl`
-  - 每次回测自动追加一条结构化记录
-  - 便于后续按 `run_id / label / feature_hash / export_ema_alpha / hold_buffer / max_hold_days` 检索
+- 每次回测输出固定文件:
+  - `report.txt`
+  - `report.json`
+- 输出目录改为 signal 目录下:
+  - `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/backtests/<backtest_timestamp_ms>/`
+- 回测记录统一写入:
+  - `artifacts/rotation/<train_run_id>/backtest.jsonl`
+- 报告中区分:
+  - `Input Signal` (Rust 实际读取路径)
+  - `Canonical Signal` (artifact 真正归档路径)
+
+### [Rotation] Signal Source 改为 artifacts 唯一真源
+- 默认不再导出 `data/signals/rotation_scores.parquet`
+- `artifacts/rotation/.../signal.parquet` 成为唯一真实 signal 文件
+- `signals.jsonl` 改为下沉到每个 `train_run_id` 目录
+- `backtest-engine/run_rotation.bat` 现在是轻量包装器:
+  - 不带参数时, 进入交互式选择
+  - 传入 `signal.parquet / signal.meta.json / signal目录` 时直接回测
+- 新增 `scripts/rotation_backtest.py`:
+  - 交互式选择 `train run -> signal`
+  - 自动创建 `backtests/<backtest_timestamp_ms>/`
+  - 调用 `bt-rotation` 并把结果写回对应 signal 目录
+- 这样可以安全支持:
+  - 历史 signal 回测
+  - 批量导出多个 signal
+  - 后续参数扫描
 
 ### [Backtest Core] Artifact I/O 安全下沉
 - 将与策略无关的 artifact 追踪 I/O 从 `bt-rotation` 抽到 `bt-core`:

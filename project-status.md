@@ -13,6 +13,7 @@
 - `utils/duckdb_utils.py`: `add_price_limit_cols()` 涨跌停标记 (与 Rust bt-core 逻辑一致)
 - `utils/signal_export.py`: 信号导出 (B1 事件信号 + 截面轮动打分), Parquet 格式供 Rust 消费
   - `Rotation` 已新增 artifact 追踪: `train.meta.json` / `signal.meta.json` / `raw_scores.parquet`
+  - `Rotation` 默认不再写 `data/signals/rotation_scores.parquet`, `artifacts/` 为唯一真源
 - `bt-core`: 已新增 artifact 追踪公共 I/O
   - `SignalArtifactMeta`
   - `load_signal_meta()`
@@ -33,8 +34,12 @@
   - `bt-core`: 涨跌停判定 (`price_limit_pct`, `is_limit_up`, `is_limit_down`)
   - `bt-core`: artifact 追踪公共 I/O (报告 bundle / meta 读取 / registry append)
   - `bt-rotation`: 涨停过滤 (买入) + 跌停锁仓 (卖出) + 过滤统计
-  - 报告自动保存 (`--output-dir`, `results/` 目录)
-  - 自动读取 `signal.meta.json`, 输出 `report.json`, 并追加 `artifacts/rotation/runs.jsonl`
+  - 报告自动保存到 signal 目录下的 `backtests/<backtest_timestamp_ms>/`
+  - 自动读取 `signal.meta.json`, 输出 `report.txt` / `report.json`, 并追加 `artifacts/rotation/<train_run_id>/backtest.jsonl`
+  - `run_rotation.bat` 现在是 `python scripts/rotation_backtest.py` 的 Windows 包装器
+  - 支持:
+    - 交互式选择 `train run -> signal`
+    - 或直接传 `signal.parquet / signal.meta.json / signal目录`
 
 ### 我们的核心数据 (2026-03-31 更新, 排除涨停幻觉后的真实 alpha)
 | 指标 | 值 | 备注 |
@@ -169,8 +174,8 @@ Python (信号层)                    Rust (回测/执行层)
 │   涨跌停标记        │            │ ├─ bt-b1   (B1 超跌反转)     │
 │ LightGBM 1d/1d    │──Parquet──→│ └─ bt-rotation (截面轮动)     │
 │   排除涨停训练      │            │    涨停过滤 / 跌停锁仓       │
-│ signal_export      │            │ report.json + runs.jsonl     │
-│ b1_factors_opt     │            │ 报告: results/ 目录           │
+│ signal_export      │            │ report.json + backtest.jsonl │
+│ b1_factors_opt     │            │ 报告: signal/backtests/ 目录  │
 └────────────────────┘            └──────────────────────────────┘
 ```
 
@@ -179,18 +184,23 @@ Python (信号层)                    Rust (回测/执行层)
   - `artifacts/rotation/<train_run_id>/train.meta.json`
   - `artifacts/rotation/<train_run_id>/raw_scores.parquet`
 - `Rotation` 导出 artifact:
-  - `artifacts/rotation/<train_run_id>/exports/<export_token>/signal.parquet`
-  - `artifacts/rotation/<train_run_id>/exports/<export_token>/signal.meta.json`
-- 兼容别名:
-  - `data/signals/rotation_scores.parquet`
-  - `data/signals/rotation_scores.meta.json`
+  - `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/signal.parquet`
+  - `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/signal.meta.json`
+  - 所有路径尽量使用相对路径, 方便 Windows / macOS 双设备共用
+- `Rotation` 回测 artifact:
+  - `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/backtests/<backtest_timestamp_ms>/report.txt`
+  - `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/backtests/<backtest_timestamp_ms>/report.json`
 - 全局索引:
-  - `artifacts/rotation/runs.jsonl`
-  - 可按 `signal_run_id / label / feature_hash / EXPORT_EMA_ALPHA / 回测参数` 检索
+  - `artifacts/rotation/<train_run_id>/signals.jsonl`
+  - `artifacts/rotation/<train_run_id>/backtest.jsonl`
+  - 可按 `signal_id / label / feature_hash / EXPORT_EMA_ALPHA / 回测参数` 检索
 - 设计原则:
   - 公共部分下沉到 `bt-core`
   - 策略专属统计和配置结构仍留在各自 crate
   - 避免为统一而统一, 兼顾复用性与策略个性
+- `signals/<signal_timestamp_ms>/` 目录采用纯时间戳:
+  - 目录只负责唯一性与顺序
+  - 真正的导出参数统一记录在 `signal.meta.json` / `signals.jsonl`
 - 后续待办:
   - 将 `bt-renko`
   - 将 `bt-b1`

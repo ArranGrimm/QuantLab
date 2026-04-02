@@ -4,8 +4,8 @@
 //! 每日按 score 排名选 Top-N 买入, 排名退出/止损/移动止损卖出.
 //!
 //! Usage:
-//!   cargo run -p bt-rotation --release -- --data ../../data/signals/rotation_scores.parquet
-//!   cargo run -p bt-rotation --release -- --config config.toml --data ../../data/signals/rotation_scores.parquet
+//!   cargo run -p bt-rotation --release -- --data ../../artifacts/rotation/.../signal.parquet
+//!   cargo run -p bt-rotation --release -- --config config.toml --data ../../artifacts/rotation/.../signal.parquet
 
 mod components;
 mod resources;
@@ -27,14 +27,14 @@ use systems::{check_exit_conditions, fill_positions, update_stats};
 #[derive(Parser, Debug)]
 #[command(author, version, about = "截面轮动策略回测")]
 struct Args {
-    #[arg(short, long, default_value = "../data/signals/rotation_scores.parquet")]
+    #[arg(short, long)]
     data: PathBuf,
 
     #[arg(short, long, default_value = "crates/rotation/config.toml")]
     config: PathBuf,
 
     /// 结果输出目录 (留空则不保存)
-    #[arg(short, long, default_value = "../results")]
+    #[arg(short, long, default_value = "")]
     output_dir: String,
 }
 
@@ -177,11 +177,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !args.output_dir.is_empty() {
         let config = app.world().resource::<RotationConfig>();
         let config_text = format_config(config, trading_dates.len());
-        let report_stem = bt_core::build_report_stem(
-            "rotation",
-            signal_meta.as_ref(),
-            &rotation_report_suffix(config),
-        );
         let extra_text = format!(
             "--- Strategy Stats ---\nLimit Up Blocked:  {} ({} days, avg {:.1}/day)\n",
             limit_up_blocked,
@@ -195,7 +190,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let report_paths = bt_core::write_report_bundle(
             &args.output_dir,
             "rotation",
-            &report_stem,
             &args.data,
             signal_meta.as_ref(),
             &config_text,
@@ -360,15 +354,6 @@ fn format_config(config: &RotationConfig, trading_days: usize) -> String {
     s
 }
 
-fn rotation_report_suffix(config: &RotationConfig) -> String {
-    format!(
-        "hb{}_ms{}_hd{}",
-        config.hold_buffer,
-        bt_core::format_float_token(config.min_score, 4),
-        config.max_hold_days
-    )
-}
-
 fn append_rotation_registry_entry(
     signal_meta: Option<&SignalArtifactMeta>,
     data_path: &Path,
@@ -382,28 +367,46 @@ fn append_rotation_registry_entry(
     use chrono::Local;
     let registry_path = bt_core::resolve_registry_path(
         signal_meta,
-        "../artifacts/rotation/runs.jsonl",
+        "../artifacts/rotation/backtest.jsonl",
     );
     let derived = bt_core::calc_derived_metrics(stats, portfolio, trading_days);
+    let train_run_dir = registry_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let signal_path_resolved = signal_meta.and_then(bt_core::resolve_signal_path);
+    let signal_meta_resolved = signal_meta.and_then(|meta| {
+        bt_core::resolve_meta_relative_path(meta, meta.signal_meta_path.as_deref())
+    });
+    let report_dir = report_json_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let backtest_id = report_dir
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| Local::now().format("%Y%m%d_%H%M%S_%3f").to_string());
 
     let record = json!({
         "record_type": "backtest_run",
         "recorded_at": Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
         "strategy": "rotation",
         "train_run_id": signal_meta.and_then(|meta| meta.train_run_id.clone()),
+        "signal_id": signal_meta.and_then(|meta| meta.signal_id.clone()),
         "signal_run_id": signal_meta.and_then(|meta| meta.signal_run_id.clone()),
-        "export_token": signal_meta.and_then(|meta| meta.export_token.clone()),
         "label": signal_meta.and_then(|meta| meta.label.clone()),
         "model_name": signal_meta.and_then(|meta| meta.model_name.clone()),
         "feature_mode": signal_meta.and_then(|meta| meta.feature_mode.clone()),
         "feature_hash": signal_meta.and_then(|meta| meta.feature_hash.clone()),
         "feature_count": signal_meta.and_then(|meta| meta.feature_count),
         "export_ema_alpha": signal_meta.and_then(|meta| meta.export_ema_alpha),
-        "signal_file": data_path.to_string_lossy().to_string(),
-        "canonical_signal_path": signal_meta.and_then(|meta| meta.canonical_signal_path.clone()),
-        "signal_meta_path": signal_meta.and_then(|meta| meta.signal_meta_path.clone()),
-        "git_commit": signal_meta.and_then(|meta| meta.git_commit.clone()),
         "top_n": config.top_n,
+        "backtest_id": backtest_id,
+        "input_signal_file": bt_core::relative_portable_path(&train_run_dir, data_path),
+        "signal_path": signal_path_resolved.as_ref().map(|p| bt_core::relative_portable_path(&train_run_dir, p)),
+        "signal_meta_path": signal_meta_resolved.as_ref().map(|p| bt_core::relative_portable_path(&train_run_dir, p)),
+        "backtest_dir": bt_core::relative_portable_path(&train_run_dir, &report_dir),
+        "git_commit": signal_meta.and_then(|meta| meta.git_commit.clone()),
         "hold_buffer": config.hold_buffer,
         "min_score": config.min_score,
         "max_hold_days": config.max_hold_days,
@@ -421,8 +424,8 @@ fn append_rotation_registry_entry(
         "win_rate_pct": stats.win_rate() * 100.0,
         "avg_trades_per_day": derived.avg_trades_per_day,
         "total_trades": stats.total_trades,
-        "report_txt_path": report_txt_path.to_string_lossy().to_string(),
-        "report_json_path": report_json_path.to_string_lossy().to_string(),
+        "report_txt_path": bt_core::relative_portable_path(&train_run_dir, report_txt_path),
+        "report_json_path": bt_core::relative_portable_path(&train_run_dir, report_json_path),
     });
 
     bt_core::append_jsonl_record(&registry_path, &record)?;

@@ -153,7 +153,9 @@ impl BacktestStats {
 pub struct SignalArtifactMeta {
     pub strategy: Option<String>,
     pub train_run_id: Option<String>,
+    pub signal_id: Option<String>,
     pub signal_run_id: Option<String>,
+    pub signal_timestamp: Option<String>,
     pub export_token: Option<String>,
     pub label: Option<String>,
     pub model_name: Option<String>,
@@ -162,12 +164,23 @@ pub struct SignalArtifactMeta {
     pub feature_count: Option<usize>,
     pub export_ema_alpha: Option<f64>,
     pub registry_path: Option<String>,
+    pub runs_registry_path: Option<String>,
+    pub signals_registry_path: Option<String>,
+    pub signal_path: Option<String>,
     pub canonical_signal_path: Option<String>,
     pub latest_alias_path: Option<String>,
+    pub raw_scores_path: Option<String>,
+    pub signals_index_path: Option<String>,
+    pub backtest_index_path: Option<String>,
+    pub backtests_dir: Option<String>,
     pub train_meta_path: Option<String>,
     pub signal_meta_path: Option<String>,
     pub git_commit: Option<String>,
     pub notebook: Option<String>,
+    #[serde(skip)]
+    pub meta_file_path: Option<std::path::PathBuf>,
+    #[serde(skip)]
+    pub meta_dir: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -371,8 +384,10 @@ pub fn load_signal_meta(data_path: &std::path::Path) -> Option<SignalArtifactMet
     let raw = std::fs::read_to_string(&meta_path).ok()?;
     let mut meta: SignalArtifactMeta = serde_json::from_str(&raw).ok()?;
     if meta.signal_meta_path.is_none() {
-        meta.signal_meta_path = Some(meta_path.to_string_lossy().to_string());
+        meta.signal_meta_path = Some("signal.meta.json".to_string());
     }
+    meta.meta_file_path = Some(meta_path.clone());
+    meta.meta_dir = meta_path.parent().map(|p| p.to_path_buf());
     Some(meta)
 }
 
@@ -410,9 +425,126 @@ pub fn resolve_registry_path(
     fallback_registry_path: &str,
 ) -> std::path::PathBuf {
     signal_meta
-        .and_then(|meta| meta.registry_path.as_ref())
-        .map(std::path::PathBuf::from)
+        .and_then(|meta| {
+            resolve_meta_relative_path(
+                meta,
+                meta.backtest_index_path
+                    .as_deref()
+                    .or(meta.runs_registry_path.as_deref())
+                    .or(meta.registry_path.as_deref()),
+            )
+        })
         .unwrap_or_else(|| std::path::PathBuf::from(fallback_registry_path))
+}
+
+pub fn path_to_portable_string(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+pub fn relative_portable_path(base: &std::path::Path, path: &std::path::Path) -> String {
+    use std::path::{Component, PathBuf};
+
+    let base_components: Vec<_> = base.components().collect();
+    let path_components: Vec<_> = path.components().collect();
+
+    let mut common = 0usize;
+    while common < base_components.len()
+        && common < path_components.len()
+        && base_components[common] == path_components[common]
+    {
+        common += 1;
+    }
+
+    // Different drive / prefix on Windows, fallback to absolute-like portable path.
+    if common == 0 {
+        return path_to_portable_string(path);
+    }
+
+    let mut rel = PathBuf::new();
+
+    for comp in &base_components[common..] {
+        if matches!(comp, Component::Normal(_)) {
+            rel.push("..");
+        }
+    }
+
+    for comp in &path_components[common..] {
+        match comp {
+            Component::Normal(part) => rel.push(part),
+            Component::ParentDir => rel.push(".."),
+            Component::CurDir => {}
+            Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+
+    if rel.as_os_str().is_empty() {
+        ".".to_string()
+    } else {
+        path_to_portable_string(&rel)
+    }
+}
+
+pub fn resolve_meta_relative_path(
+    signal_meta: &SignalArtifactMeta,
+    rel_path: Option<&str>,
+) -> Option<std::path::PathBuf> {
+    let rel = rel_path?;
+    let rel_path_obj = std::path::PathBuf::from(rel);
+    if rel_path_obj.is_absolute() {
+        return Some(rel_path_obj);
+    }
+    signal_meta.meta_dir.as_ref().map(|base| base.join(rel_path_obj))
+}
+
+pub fn resolve_signal_path(signal_meta: &SignalArtifactMeta) -> Option<std::path::PathBuf> {
+    resolve_meta_relative_path(
+        signal_meta,
+        signal_meta
+            .signal_path
+            .as_deref()
+            .or(signal_meta.canonical_signal_path.as_deref()),
+    )
+}
+
+pub fn signal_meta_to_json(meta: &SignalArtifactMeta) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+
+    macro_rules! insert_some {
+        ($field:ident) => {
+            if let Some(value) = &meta.$field {
+                obj.insert(stringify!($field).to_string(), serde_json::json!(value));
+            }
+        };
+    }
+
+    insert_some!(strategy);
+    insert_some!(train_run_id);
+    insert_some!(signal_id);
+    insert_some!(signal_run_id);
+    insert_some!(signal_timestamp);
+    insert_some!(label);
+    insert_some!(model_name);
+    insert_some!(feature_mode);
+    insert_some!(feature_hash);
+    if let Some(value) = meta.feature_count {
+        obj.insert("feature_count".to_string(), serde_json::json!(value));
+    }
+    if let Some(value) = meta.export_ema_alpha {
+        obj.insert("export_ema_alpha".to_string(), serde_json::json!(value));
+    }
+    insert_some!(signal_path);
+    insert_some!(canonical_signal_path);
+    insert_some!(backtests_dir);
+    insert_some!(latest_alias_path);
+    insert_some!(raw_scores_path);
+    insert_some!(signals_index_path);
+    insert_some!(backtest_index_path);
+    insert_some!(train_meta_path);
+    insert_some!(signal_meta_path);
+    insert_some!(git_commit);
+    insert_some!(notebook);
+
+    serde_json::Value::Object(obj)
 }
 
 pub fn append_jsonl_record(
@@ -434,7 +566,6 @@ pub fn append_jsonl_record(
 pub fn write_report_bundle(
     output_dir: &str,
     strategy_name: &str,
-    report_stem: &str,
     data_path: &std::path::Path,
     signal_meta: Option<&SignalArtifactMeta>,
     config_text: &str,
@@ -445,15 +576,19 @@ pub fn write_report_bundle(
     portfolio: &Portfolio,
     trading_days: usize,
 ) -> Result<ReportBundlePaths, Box<dyn std::error::Error>> {
-    use chrono::Local;
     use std::io::Write;
 
     std::fs::create_dir_all(output_dir)?;
 
-    let now = Local::now();
-    let stem = format!("{}__{}", report_stem, now.format("%Y%m%d_%H%M%S"));
-    let txt_path = std::path::Path::new(output_dir).join(format!("{}.txt", stem));
-    let json_path = std::path::Path::new(output_dir).join(format!("{}.json", stem));
+    let now = chrono::Local::now();
+    let output_dir_path = std::path::Path::new(output_dir).to_path_buf();
+    let txt_path = output_dir_path.join("report.txt");
+    let json_path = output_dir_path.join("report.json");
+    let canonical_signal_path = signal_meta.and_then(resolve_signal_path);
+    let input_signal_rel = relative_portable_path(&output_dir_path, data_path);
+    let canonical_signal_rel = canonical_signal_path
+        .as_ref()
+        .map(|p| relative_portable_path(&output_dir_path, p));
 
     let mut f = std::fs::File::create(&txt_path)?;
     writeln!(f, "========================================")?;
@@ -481,7 +616,10 @@ pub fn write_report_bundle(
         if let Some(export_ema_alpha) = meta.export_ema_alpha {
             writeln!(f, "Export EMA:       {}", export_ema_alpha)?;
         }
-        writeln!(f, "Signal File:      {}", data_path.display())?;
+        writeln!(f, "Input Signal:     {}", input_signal_rel)?;
+        if let Some(canonical_signal_rel) = &canonical_signal_rel {
+            writeln!(f, "Canonical Signal: {}", canonical_signal_rel)?;
+        }
         writeln!(f)?;
     }
     if let Some(extra_text) = extra_text {
@@ -497,20 +635,21 @@ pub fn write_report_bundle(
     writeln!(f, "========================================")?;
 
     let signal_json = match signal_meta {
-        Some(meta) => serde_json::to_value(meta)?,
+        Some(meta) => signal_meta_to_json(meta),
         None => serde_json::Value::Null,
     };
     let report_json = serde_json::json!({
         "report_version": 1,
         "strategy": strategy_name,
         "generated_at": now.format("%Y-%m-%d %H:%M:%S").to_string(),
-        "signal_file": data_path.to_string_lossy().to_string(),
+        "input_signal_file": input_signal_rel,
+        "canonical_signal_file": canonical_signal_rel,
         "signal": signal_json,
         "backtest_config": backtest_config_json,
         "metrics": build_metrics_json(stats, portfolio, trading_days),
         "extra": extra_json.unwrap_or(serde_json::Value::Null),
-        "report_txt_path": txt_path.to_string_lossy().to_string(),
-        "report_json_path": json_path.to_string_lossy().to_string(),
+        "report_txt_path": "report.txt",
+        "report_json_path": "report.json",
     });
 
     std::fs::write(&json_path, serde_json::to_string_pretty(&report_json)?)?;
