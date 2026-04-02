@@ -40,6 +40,8 @@
   - 支持:
     - 交互式选择 `train run -> signal`
     - 或直接传 `signal.parquet / signal.meta.json / signal目录`
+    - CLI 覆盖 `top_n / hold_buffer / min_score / max_hold_days`
+    - 每次回测自动落盘 `effective.config.toml`, 避免手改 Git 追踪的基线 config
 
 ### 我们的核心数据 (2026-03-31 更新, 排除涨停幻觉后的真实 alpha)
 | 指标 | 值 | 备注 |
@@ -91,13 +93,14 @@
 详见 `experiments/rotation-next-phase.md`。
 
 当前下一阶段优先级:
-1. 导出侧独立 `EXPORT_EMA_ALPHA`, 提升研究效率 (已在 `Rotation` / `Renko` notebook 落地)
-2. 因子治理, 收敛 `core feature set` (分组基础设施 + 核心筛查入口已完成)
-3. 增加 `Ridge/ElasticNet` 与 `CatBoost/XGBoost` 基线对照
-4. 在固定研究基线后再收敛组合参数
+1. 在 `core_12 + fwd_ret_1d + EXPORT_EMA_ALPHA=0.30` 基线下收敛组合参数
+2. 优先扫描 `hold_buffer / max_hold_days / top_n / min_score`
+3. 因子治理, 继续验证 `core feature set` 的稳定性
+4. 增加 `Ridge/ElasticNet` 与 `CatBoost/XGBoost` 基线对照
 
 备注:
 - `Rotation` 当前标的池已经是 **80~500 亿**, 这不是下一阶段待修正项
+- 导出侧 EMA 扫描已完成, `0.30` 为当前净收益最佳点, `0.28` 为次优平衡点
 
 ---
 
@@ -190,6 +193,7 @@ Python (信号层)                    Rust (回测/执行层)
 - `Rotation` 回测 artifact:
   - `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/backtests/<backtest_timestamp_ms>/report.txt`
   - `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/backtests/<backtest_timestamp_ms>/report.json`
+  - `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/backtests/<backtest_timestamp_ms>/effective.config.toml`
 - 全局索引:
   - `artifacts/rotation/<train_run_id>/signals.jsonl`
   - `artifacts/rotation/<train_run_id>/backtest.jsonl`
@@ -198,6 +202,7 @@ Python (信号层)                    Rust (回测/执行层)
   - 公共部分下沉到 `bt-core`
   - 策略专属统计和配置结构仍留在各自 crate
   - 避免为统一而统一, 兼顾复用性与策略个性
+  - Git 追踪的 `config.toml` 只保存稳定基线, 实验参数优先通过脚本 CLI 覆盖
 - `signals/<signal_timestamp_ms>/` 目录采用纯时间戳:
   - 目录只负责唯一性与顺序
   - 真正的导出参数统一记录在 `signal.meta.json` / `signals.jsonl`

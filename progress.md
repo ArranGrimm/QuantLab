@@ -48,6 +48,31 @@
   - 批量导出多个 signal
   - 后续参数扫描
 
+### [Rotation] 回测参数覆盖入口落地
+- `scripts/rotation_backtest.py` 新增 CLI 覆盖参数:
+  - `--hold-buffer`
+  - `--min-score`
+  - `--max-hold-days`
+  - `--top-n`
+- 每次回测都会在对应 `backtests/<backtest_timestamp_ms>/` 下生成:
+  - `effective.config.toml`
+- 设计约定:
+  - Git 追踪的 `backtest-engine/crates/rotation/config.toml` 继续作为稳定基线
+  - 临时实验参数不再要求手改基线 config
+  - 实际生效参数通过 `effective.config.toml` 与 `backtest.jsonl / report.json` 一起追踪
+
+### [Rotation] 导出 EMA 扫描完成
+- 基于 `core_12 + fwd_ret_1d` 对 `EXPORT_EMA_ALPHA` 做两轮扫描:
+  - 粗扫: `1.0 / 0.4 / 0.3 / 0.2 / 0.15 / 0.1 / 0.05`
+  - 细扫: `0.25 / 0.28 / 0.30 / 0.32 / 0.35`
+- 结论:
+  - `EXPORT_EMA_ALPHA = 0.30` 给出当前最佳净收益 (`Gross +51.19% / Net +16.16%`)
+  - `0.28` 为峰值附近次优平衡点
+  - `1.0 / 0.4` 平滑不足, 交易成本显著失控
+  - `0.1 / 0.05` 平滑过强, 会压缩真实 alpha
+- 已将 `notebooks/cross_section_rotation.py` 的导出默认值更新为新的临时研究基线:
+  - `EXPORT_EMA_ALPHA = 0.30`
+
 ### [Backtest Core] Artifact I/O 安全下沉
 - 将与策略无关的 artifact 追踪 I/O 从 `bt-rotation` 抽到 `bt-core`:
   - `SignalArtifactMeta`

@@ -732,7 +732,7 @@ def _(df_scores_raw, pl, q_full, rotation_train_meta):
 
     def run_export():
         EXPORT_TOP_N = 20
-        EXPORT_EMA_ALPHA = 0.15  # 导出 parquet 用的分数平滑; 改这里仅需重跑本 Cell
+        EXPORT_EMA_ALPHA = 0.30  # 导出 parquet 用的分数平滑; 改这里仅需重跑本 Cell
 
         df_scores_export = df_scores_raw
 
@@ -813,7 +813,7 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
     #   7c. Prediction Turnover (Top-20 日间重叠率)
     # ==============================================================================
     def run_signal_quality():
-        EMA_ALPHA = 0.15  # Score 时序平滑 (1.0 = 不平滑, 仅影响分析, 不影响训练)
+        EMA_ALPHA = 0.35  # Score 时序平滑 (1.0 = 不平滑, 仅影响分析, 不影响训练)
 
         # ── 合并原始 score 与 forward return ──
         df_signal = (
