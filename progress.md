@@ -2,6 +2,18 @@
 
 ## 2026-04-02
 
+### [Rotation] 训练目标复盘 + LABEL 过滤 bug 修复
+- 复盘 `notebooks/cross_section_rotation.py` 后确认:
+  - 当前 `LABEL = fwd_ret_1d` + `LGBMRegressor` **没有根本性错误**
+  - 但训练目标是“收益幅度回归”, 实际使用是“当日截面 Top-N 排名”, 存在目标错配
+- 当前共识更新:
+  - `fwd_ret_1d` 继续保留为真实基线
+  - 不回到 `fwd_ret_1d_excess` 主线 (此前已验证失败)
+  - 下一步优先做“排序化标签”实验, 再决定是否值得切到 `LGBMRanker`
+- 修复一处明显 bug:
+  - Cell 6 训练样本过滤原先写死为 `fwd_ret_1d`
+  - 现改为跟随 `LABEL` 动态过滤, 避免切换标签时样本集与训练目标不一致
+
 ### [Rotation] Artifact Traceability 落地
 - `utils/signal_export.py` 为 `Rotation` 导出新增 artifact 追踪能力:
   - 训练阶段固定 `train_run_id`

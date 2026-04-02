@@ -93,14 +93,15 @@
 详见 `experiments/rotation-next-phase.md`。
 
 当前下一阶段优先级:
-1. 在 `core_12 + fwd_ret_1d + EXPORT_EMA_ALPHA=0.30` 基线下收敛组合参数
-2. 优先扫描 `hold_buffer / max_hold_days / top_n / min_score`
-3. 因子治理, 继续验证 `core feature set` 的稳定性
-4. 增加 `Ridge/ElasticNet` 与 `CatBoost/XGBoost` 基线对照
+1. 在 `core_12 + fwd_ret_1d + EXPORT_EMA_ALPHA=0.30` 基线下, 先验证训练目标语义
+2. 优先新增“排序化标签”实验, 再决定是否进入 `LGBMRanker`
+3. 训练目标稳定后, 再扫描 `hold_buffer / max_hold_days / top_n / min_score`
+4. 因子治理与 `Ridge/ElasticNet` / `CatBoost/XGBoost` 对照后置
 
 备注:
 - `Rotation` 当前标的池已经是 **80~500 亿**, 这不是下一阶段待修正项
 - 导出侧 EMA 扫描已完成, `0.30` 为当前净收益最佳点, `0.28` 为次优平衡点
+- `cross_section_rotation.py` 已修复 Cell 6 的 `LABEL` 动态过滤 bug, 后续切换标签不会再误用写死的 `fwd_ret_1d`
 
 ---
 

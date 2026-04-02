@@ -212,18 +212,42 @@
   - `LABEL = fwd_ret_1d`
   - `EXPORT_EMA_ALPHA = 0.30`
 
-### core_12 下一步扫描顺序
+### 2026-04-02 训练目标复盘
+
+- 当前 `cross_section_rotation.py` 的训练目标**没有根本性错误**:
+  - 标签是 `fwd_ret_1d`
+  - 模型是 `LGBMRegressor`
+  - 本质上是在做“次日收益回归”
+- 但当前存在明显的**目标错配**:
+  - 训练时优化的是收益幅度 (`MSE`)
+  - 实际使用时做的是当日截面 `Top-N` 排名
+  - 因此当前更像“收益回归打分”, 而不是“直接学排序”
+- 已确认:
+  - `fwd_ret_1d_excess` 这条路之前已经失败, 暂不回到超额收益标签主线
+  - 现在最值得优先验证的不是继续扫组合参数, 而是**先把标签语义做成更贴近排序**
+- 已修复一处 notebook 明显 bug:
+  - Cell 6 训练样本过滤原先写死为 `fwd_ret_1d`
+  - 现已改为跟随 `LABEL` 动态过滤, 避免后续切换到 `fwd_ret_2d / fwd_ret_5d / rank label` 时样本集错位
+
+### core_12 下一步扫描顺序 (更新)
 
 1. 固定 `Feature Set = core_12`, 先扫 `EXPORT_EMA_ALPHA`
-2. 再固定最佳 `EXPORT_EMA_ALPHA`, 扫 `hold_buffer`
-3. 再扫 `top_n`
-4. 最后扫 `min_score`
+2. 保留 `fwd_ret_1d` 作为当前真实基线, 不改模型结构, 只确认 bug 修复后结果一致
+3. 新增“排序化标签”实验:
+   - 先做按日分位数 / 分桶标签
+   - 仍优先用 `Regressor` 或 `Classifier` 跑一版
+4. 只有当排序化标签明显改善 `IC / Quintile / Rust Top-N` 后, 再尝试 `LGBMRanker`
+5. 训练目标稳定后, 再回到组合参数扫描:
+   - `hold_buffer`
+   - `top_n`
+   - `min_score`
 
 原因:
 
 - 当前 `core_12` 已证明因子治理方向有效
-- 优先优化导出平滑与组合参数, 性价比高于继续扩大因子集
-- 在 `core_12` 未收敛前, 暂不进入 `Ridge/ElasticNet` 与 `CatBoost/XGBoost` 对照
+- 当前更大的不确定性不在组合层, 而在“训练目标是否和最终排名目标一致”
+- 直接上 `LGBMRanker` 有可能更好, 但调参复杂度更高, 不应跳过中间的排序化标签验证
+- 在标签语义未收敛前, 暂不进入 `Ridge/ElasticNet` 与 `CatBoost/XGBoost` 对照
 
 ---
 

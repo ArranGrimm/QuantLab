@@ -595,7 +595,7 @@ def _(
 
         df_valid_ml = (
             df_all
-            .filter(pl.col("fwd_ret_1d").is_not_null() & pl.col("fwd_ret_1d").is_not_nan())
+            .filter(pl.col(LABEL).is_not_null() & pl.col(LABEL).is_not_nan())
             .sort("date")
         )
 
