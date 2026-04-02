@@ -13,6 +13,71 @@ Signal Export Tool - Export stock signals for Rust backtesting
 import polars as pl
 from pathlib import Path
 from datetime import datetime
+import hashlib
+import json
+import subprocess
+
+
+def _json_default(value):
+    if isinstance(value, (datetime,)):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default),
+        encoding="utf-8",
+    )
+
+
+def _sidecar_meta_path(parquet_path: Path) -> Path:
+    return parquet_path.with_suffix(".meta.json")
+
+
+def _slug_token(text: str) -> str:
+    cleaned = []
+    for ch in str(text).lower():
+        if ch.isalnum():
+            cleaned.append(ch)
+        else:
+            cleaned.append("_")
+    slug = "".join(cleaned)
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug.strip("_") or "na"
+
+
+def _float_token(value: float, precision: int = 4) -> str:
+    s = f"{value:.{precision}f}".rstrip("0").rstrip(".")
+    if not s:
+        s = "0"
+    return s.replace("-", "m").replace(".", "p")
+
+
+def get_git_commit() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return None
+
+
+def build_feature_hash(features: list[str]) -> str:
+    joined = "\n".join(sorted(features))
+    return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:8]
+
+
+def build_rotation_train_run_id(label: str, model_name: str, train_timestamp_token: str, feature_hash: str) -> str:
+    return f"rot_{_slug_token(label)}_{_slug_token(model_name)}_{train_timestamp_token}_{feature_hash}"
 
 
 def export_for_rust(
@@ -139,6 +204,9 @@ def export_rotation_scores(
     df_scores: pl.DataFrame,
     output_path: str = "data/signals/rotation_scores.parquet",
     top_n: int = 20,
+    raw_scores: pl.DataFrame | None = None,
+    artifact_metadata: dict | None = None,
+    artifact_root: str = "artifacts/rotation",
 ) -> str:
     """
     Export cross-section rotation model scores for Rust backtesting.
@@ -163,9 +231,6 @@ def export_rotation_scores(
         open_adj, high_adj, low_adj, close_adj, pre_close_adj,
         [volume, market_cap_100m]
     """
-    output_file = Path(output_path)
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-
     required = ["date", "code", "score", "open_adj", "high_adj", "low_adj", "close_adj"]
     missing = [c for c in required if c not in df_scores.columns]
     if missing:
@@ -206,7 +271,6 @@ def export_rotation_scores(
             out_cols.append(opt_col)
 
     df_final = df_export.select(out_cols)
-    df_final.write_parquet(output_file)
 
     total_rows = df_final.height
     unique_dates = df_final.select(pl.col("date").n_unique()).item()
@@ -217,6 +281,122 @@ def export_rotation_scores(
         df_final.select(pl.col("date").max()).item(),
     )
 
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if artifact_metadata:
+        train_run_id = artifact_metadata.get("train_run_id")
+        if not train_run_id:
+            raise ValueError("artifact_metadata must contain train_run_id")
+
+        artifact_root_path = Path(artifact_root)
+        train_run_dir = artifact_root_path / train_run_id
+        export_token = artifact_metadata.get(
+            "export_token",
+            f"e{_float_token(float(artifact_metadata.get('export_ema_alpha', 1.0)))}_t{top_n}",
+        )
+        signal_run_id = f"{train_run_id}__{export_token}"
+        export_dir = train_run_dir / "exports" / export_token
+        signal_path = export_dir / "signal.parquet"
+        train_meta_path = train_run_dir / "train.meta.json"
+        signal_meta_path = export_dir / "signal.meta.json"
+        raw_scores_path = train_run_dir / "raw_scores.parquet"
+        registry_path = artifact_root_path / "runs.jsonl"
+
+        train_run_dir.mkdir(parents=True, exist_ok=True)
+        export_dir.mkdir(parents=True, exist_ok=True)
+        output_file = output_file.resolve()
+        train_run_dir = train_run_dir.resolve()
+        export_dir = export_dir.resolve()
+        signal_path = signal_path.resolve()
+        train_meta_path = train_meta_path.resolve()
+        signal_meta_path = signal_meta_path.resolve()
+        raw_scores_path = raw_scores_path.resolve()
+        registry_path = registry_path.resolve()
+
+        if raw_scores is not None and not raw_scores_path.exists():
+            raw_scores.write_parquet(raw_scores_path)
+
+        label = artifact_metadata.get("label")
+        model_name = artifact_metadata.get("model_name")
+        feature_mode = artifact_metadata.get("feature_mode")
+        features = list(artifact_metadata.get("features", []))
+        feature_hash = artifact_metadata.get("feature_hash") or build_feature_hash(features)
+        train_meta = {
+            "artifact_version": 1,
+            "artifact_kind": "train_run",
+            "strategy": "rotation",
+            "train_run_id": train_run_id,
+            "label": label,
+            "model_name": model_name,
+            "feature_mode": feature_mode,
+            "feature_hash": feature_hash,
+            "feature_count": len(features),
+            "features": features,
+            "trained_at": artifact_metadata.get("trained_at"),
+            "train_timestamp_token": artifact_metadata.get("train_timestamp_token"),
+            "git_commit": artifact_metadata.get("git_commit"),
+            "notebook": artifact_metadata.get("notebook"),
+            "model_params": artifact_metadata.get("model_params"),
+            "train_window": artifact_metadata.get("train_window"),
+            "retrain_freq": artifact_metadata.get("retrain_freq"),
+            "universe": artifact_metadata.get("universe"),
+            "raw_scores_path": str(raw_scores_path),
+        }
+        signal_meta = {
+            "artifact_version": 1,
+            "artifact_kind": "signal_export",
+            "strategy": "rotation",
+            "train_run_id": train_run_id,
+            "signal_run_id": signal_run_id,
+            "export_token": export_token,
+            "label": label,
+            "model_name": model_name,
+            "feature_mode": feature_mode,
+            "feature_hash": feature_hash,
+            "feature_count": len(features),
+            "features": features,
+            "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "export_ema_alpha": artifact_metadata.get("export_ema_alpha"),
+            "top_n": top_n,
+            "signal_rows": total_rows,
+            "trading_days": unique_dates,
+            "unique_codes": unique_codes,
+            "date_min": str(date_range[0]),
+            "date_max": str(date_range[1]),
+            "canonical_signal_path": str(signal_path),
+            "latest_alias_path": str(output_file),
+            "train_meta_path": str(train_meta_path),
+            "signal_meta_path": str(signal_meta_path),
+            "registry_path": str(registry_path),
+            "git_commit": artifact_metadata.get("git_commit"),
+            "notebook": artifact_metadata.get("notebook"),
+        }
+
+        df_final.write_parquet(signal_path)
+        df_final.write_parquet(output_file)
+        _write_json(train_meta_path, train_meta)
+        _write_json(signal_meta_path, signal_meta)
+        latest_meta = dict(signal_meta)
+        latest_meta["artifact_kind"] = "signal_alias"
+        latest_meta["canonical_signal_meta_path"] = str(signal_meta_path)
+        _write_json(_sidecar_meta_path(output_file), latest_meta)
+
+        print(f"\n=== Rotation Scores Export ===")
+        print(f"Run ID: {signal_run_id}")
+        print(f"Canonical File: {signal_path}")
+        print(f"Latest Alias: {output_file}")
+        print(f"Train Meta: {train_meta_path}")
+        print(f"Signal Meta: {signal_meta_path}")
+        print(f"Size: {signal_path.stat().st_size / 1024 / 1024:.1f} MB")
+        print(f"Total rows: {total_rows:,}")
+        print(f"Trading days: {unique_dates}")
+        print(f"Unique stocks: {unique_codes}")
+        print(f"Date range: {date_range[0]} ~ {date_range[1]}")
+        print(f"Top-{top_n} signals: {top_n_rows:,} ({top_n_rows/unique_dates:.1f}/day avg)")
+        return str(signal_path)
+
+    df_final.write_parquet(output_file)
     print(f"\n=== Rotation Scores Export ===")
     print(f"File: {output_file}")
     print(f"Size: {output_file.stat().st_size / 1024 / 1024:.1f} MB")

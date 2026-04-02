@@ -281,7 +281,7 @@ def _(FACTOR_GROUPS, FACTOR_GROUP_LABELS, FACTOR_TO_GROUP, ic_results, pl):
         return df_group_summary_local
 
     df_group_summary = run_factor_group_summary()
-    return (df_group_summary,)
+    return
 
 
 @app.cell
@@ -449,7 +449,6 @@ def _(
     FACTOR_TO_GROUP,
     factors_keep,
     ic_results,
-    pl,
 ):
     # ==============================================================================
     # Cell 3d: 核心因子筛查 — 基于分组 + ICIR + 全局剪枝给出 core feature set
@@ -533,15 +532,7 @@ def _():
 
 
 @app.cell
-def _(
-    FACTOR_COLS,
-    LABEL,
-    core_factors,
-    df_all,
-    factors_keep,
-    np,
-    pl,
-):
+def _(FACTOR_COLS, LABEL, MIN_LIST_DAYS, MV_MAX, MV_MIN, core_factors, df_all, factors_keep, np, pl):
     # ==============================================================================
     # Cell 6: LightGBM Walk-Forward 打分
     # 模型只负责打分, 导出与回测解耦
@@ -549,14 +540,16 @@ def _(
     # FEATURE_MODE: "all" = 全部 FACTOR_COLS, "pruned" = 相关性剪枝后, "core" = 分组核心因子集
     # ==============================================================================
     def run_lgbm_scoring():
+        from datetime import datetime
         import lightgbm as lgb
         import warnings
+        from utils.signal_export import build_feature_hash, build_rotation_train_run_id, get_git_commit
         warnings.filterwarnings("ignore", category=UserWarning)
 
         TRAIN_WINDOW = 480
         RETRAIN_FREQ = 20
         TOP_N = 20
-        FEATURE_MODE = "all"  # "all" / "pruned" / "core"; 改这里仅需重跑 Cell 6
+        FEATURE_MODE = "pruned"  # "all" / "pruned" / "core"; 改这里仅需重跑 Cell 6
 
         if FEATURE_MODE == "pruned":
             feature_cols = list(factors_keep)
@@ -678,14 +671,42 @@ def _(
                 print(f"  {imp_row['factor']:<22} {imp_row['importance']:>6} {bar}")
             print("=" * 55)
 
-        return df_scores_raw
+        train_timestamp_token = datetime.now().strftime("%Y%m%d_%H%M%S")
+        trained_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        feature_hash = build_feature_hash(feature_cols)
+        rotation_train_meta = {
+            "strategy": "rotation",
+            "label": LABEL,
+            "model_name": "lightgbm",
+            "feature_mode": FEATURE_MODE,
+            "feature_hash": feature_hash,
+            "features": feature_cols,
+            "feature_count": len(feature_cols),
+            "train_timestamp_token": train_timestamp_token,
+            "train_run_id": build_rotation_train_run_id(
+                LABEL, "lightgbm", train_timestamp_token, feature_hash
+            ),
+            "trained_at": trained_at,
+            "git_commit": get_git_commit(),
+            "notebook": "notebooks/cross_section_rotation.py",
+            "model_params": lgb_params,
+            "train_window": TRAIN_WINDOW,
+            "retrain_freq": RETRAIN_FREQ,
+            "universe": {
+                "mv_min": MV_MIN,
+                "mv_max": MV_MAX,
+                "min_list_days": MIN_LIST_DAYS,
+            },
+        }
 
-    df_scores_raw = run_lgbm_scoring()
-    return (df_scores_raw,)
+        return df_scores_raw, rotation_train_meta
+
+    df_scores_raw, rotation_train_meta = run_lgbm_scoring()
+    return df_scores_raw, rotation_train_meta
 
 
 @app.cell
-def _(df_scores_raw, pl, q_full):
+def _(df_scores_raw, pl, q_full, rotation_train_meta):
     # ==============================================================================
     # Cell 6b: 导出 Rotation 分数 → Rust 回测
     #
@@ -750,7 +771,17 @@ def _(df_scores_raw, pl, q_full):
         n_padded = n_total - n_scored
         print(f"   评分行: {n_scored:,}, 补全行: {n_padded:,}, 总计: {n_total:,}", flush=True)
 
-        scores_path = export_rotation_scores(df_expanded, top_n=EXPORT_TOP_N)
+        export_meta = {
+            **rotation_train_meta,
+            "export_ema_alpha": EXPORT_EMA_ALPHA,
+            "export_token": f"e{str(EXPORT_EMA_ALPHA).replace('.', 'p')}_t{EXPORT_TOP_N}",
+        }
+        scores_path = export_rotation_scores(
+            df_expanded,
+            top_n=EXPORT_TOP_N,
+            raw_scores=df_scores_raw,
+            artifact_metadata=export_meta,
+        )
         return scores_path
 
     run_export()

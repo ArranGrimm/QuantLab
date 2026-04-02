@@ -12,19 +12,29 @@
   - 已新增分组注册表: `FACTOR_GROUPS / FACTOR_GROUP_LABELS / FACTOR_TO_GROUP`
 - `utils/duckdb_utils.py`: `add_price_limit_cols()` 涨跌停标记 (与 Rust bt-core 逻辑一致)
 - `utils/signal_export.py`: 信号导出 (B1 事件信号 + 截面轮动打分), Parquet 格式供 Rust 消费
+  - `Rotation` 已新增 artifact 追踪: `train.meta.json` / `signal.meta.json` / `raw_scores.parquet`
+- `bt-core`: 已新增 artifact 追踪公共 I/O
+  - `SignalArtifactMeta`
+  - `load_signal_meta()`
+  - `build_report_stem()`
+  - `write_report_bundle()`
+  - `resolve_registry_path()`
+  - `append_jsonl_record()`
 - `notebooks/cross_section_rotation.py`: 研究 notebook (7 个 cell)
   - Cell 1-2: 数据加载 + 因子计算 + 涨跌停标记 + 截面标准化 + 超额收益标签
   - Cell 3: Spearman IC 分析 + 排行榜 + 累积 IC 曲线
   - Cell 3a/3d: 因子分组概览 + 核心因子筛查, 输出建议 `core feature set`
   - Cell 3b: Alpha Decay 分析 (因子预测力随持仓天数衰减)
   - Cell 4-5: (已清空, 旧线性回测)
-  - Cell 6: LightGBM Walk-Forward 打分, 本地控制 `FEATURE_MODE`, 输出 `df_scores_raw` (训练时排除涨停样本)
-  - Cell 6b: 导出 parquet, 独立控制 `EXPORT_EMA_ALPHA`, 无需重训模型
+  - Cell 6: LightGBM Walk-Forward 打分, 本地控制 `FEATURE_MODE`, 输出 `df_scores_raw + rotation_train_meta` (训练时排除涨停样本)
+  - Cell 6b: 导出 parquet, 独立控制 `EXPORT_EMA_ALPHA`, 写入 artifact 元数据, 无需重训模型
   - Cell 7: Signal Quality Analysis (基于原始分数, 独立 EMA, 无需重训模型)
 - Rust 回测引擎:
   - `bt-core`: 涨跌停判定 (`price_limit_pct`, `is_limit_up`, `is_limit_down`)
+  - `bt-core`: artifact 追踪公共 I/O (报告 bundle / meta 读取 / registry append)
   - `bt-rotation`: 涨停过滤 (买入) + 跌停锁仓 (卖出) + 过滤统计
   - 报告自动保存 (`--output-dir`, `results/` 目录)
+  - 自动读取 `signal.meta.json`, 输出 `report.json`, 并追加 `artifacts/rotation/runs.jsonl`
 
 ### 我们的核心数据 (2026-03-31 更新, 排除涨停幻觉后的真实 alpha)
 | 指标 | 值 | 备注 |
@@ -159,10 +169,32 @@ Python (信号层)                    Rust (回测/执行层)
 │   涨跌停标记        │            │ ├─ bt-b1   (B1 超跌反转)     │
 │ LightGBM 1d/1d    │──Parquet──→│ └─ bt-rotation (截面轮动)     │
 │   排除涨停训练      │            │    涨停过滤 / 跌停锁仓       │
-│ signal_export      │            │                              │
+│ signal_export      │            │ report.json + runs.jsonl     │
 │ b1_factors_opt     │            │ 报告: results/ 目录           │
 └────────────────────┘            └──────────────────────────────┘
 ```
+
+### Artifact 追踪约定
+- `Rotation` 训练 artifact:
+  - `artifacts/rotation/<train_run_id>/train.meta.json`
+  - `artifacts/rotation/<train_run_id>/raw_scores.parquet`
+- `Rotation` 导出 artifact:
+  - `artifacts/rotation/<train_run_id>/exports/<export_token>/signal.parquet`
+  - `artifacts/rotation/<train_run_id>/exports/<export_token>/signal.meta.json`
+- 兼容别名:
+  - `data/signals/rotation_scores.parquet`
+  - `data/signals/rotation_scores.meta.json`
+- 全局索引:
+  - `artifacts/rotation/runs.jsonl`
+  - 可按 `signal_run_id / label / feature_hash / EXPORT_EMA_ALPHA / 回测参数` 检索
+- 设计原则:
+  - 公共部分下沉到 `bt-core`
+  - 策略专属统计和配置结构仍留在各自 crate
+  - 避免为统一而统一, 兼顾复用性与策略个性
+- 后续待办:
+  - 将 `bt-renko`
+  - 将 `bt-b1`
+  - 逐步接入同一套 `bt-core` artifact/report bundle I/O, 但保留各策略独立配置与额外统计
 
 ### 实验记录
 

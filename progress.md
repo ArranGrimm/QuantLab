@@ -1,5 +1,47 @@
 # Progress
 
+## 2026-04-02
+
+### [Rotation] Artifact Traceability 落地
+- `utils/signal_export.py` 为 `Rotation` 导出新增 artifact 追踪能力:
+  - 训练阶段固定 `train_run_id`
+  - 保存 `artifacts/rotation/<train_run_id>/train.meta.json`
+  - 保存 `artifacts/rotation/<train_run_id>/raw_scores.parquet`
+  - 保存 `artifacts/rotation/<train_run_id>/exports/<export_token>/signal.parquet`
+  - 保存对应 `signal.meta.json`
+- 仍保留 `data/signals/rotation_scores.parquet` 作为 **latest alias**, 不破坏现有 `Rust` 启动方式
+- sidecar 元数据已记录:
+  - `LABEL`
+  - `feature_mode`
+  - `feature_hash`
+  - 完整因子列表
+  - `LightGBM` 参数
+  - `EXPORT_EMA_ALPHA`
+  - `git_commit`
+
+### [Rotation] Rust 回测报告追踪增强
+- `bt-rotation` 现在会自动读取信号文件旁的 `signal.meta.json`
+- 报告文件名改为携带 `signal_run_id + 回测参数`
+- 除原有 txt 报告外, 额外输出同名 `json` 报告
+- 新增全局注册表:
+  - `artifacts/rotation/runs.jsonl`
+  - 每次回测自动追加一条结构化记录
+  - 便于后续按 `run_id / label / feature_hash / export_ema_alpha / hold_buffer / max_hold_days` 检索
+
+### [Backtest Core] Artifact I/O 安全下沉
+- 将与策略无关的 artifact 追踪 I/O 从 `bt-rotation` 抽到 `bt-core`:
+  - `SignalArtifactMeta`
+  - `load_signal_meta()`
+  - `build_report_stem()`
+  - `write_report_bundle()`
+  - `resolve_registry_path()`
+  - `append_jsonl_record()`
+- `Rotation` 仅保留策略专属部分:
+  - 配置序列化
+  - 额外统计 (`limit_up_blocked`)
+  - registry 记录字段选择
+- 这次重构目标是为后续 `B1 / Renko / 更多策略` 复用同一套 artifact 追踪能力, **不强行统一各策略的个性化逻辑**
+
 ## 2026-04-01
 
 ### [Rotation] 下一阶段执行清单落地

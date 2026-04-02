@@ -10,6 +10,7 @@ bevy_ecs = { workspace = true }
 bevy_app = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 toml = { workspace = true }
 polars = { workspace = true }
 clap = { workspace = true }

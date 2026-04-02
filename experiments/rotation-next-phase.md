@@ -197,9 +197,38 @@
   - `Net Return` 约 `+10% ~ +11%`
   - `Avg Trades/Day` 约 `2.6 ~ 2.7`
 
+### 2026-04-02 阶段结论
+
+- `46-all` 不再作为下一阶段主推版本
+- `36-pruned` 在当前口径下弱于 `46-all`, 不建议继续作为主线
+- `core_12` 在 `Top-N=20 / HoldBuffer=50 / MinScore=0.002 / MaxHoldDays=10 / ExportEMA=0.15` 下表现最佳
+- 下一阶段临时研究基线:
+  - `Feature Set = core_12`
+  - `LABEL = fwd_ret_1d`
+  - `EXPORT_EMA_ALPHA = 0.15`
+
+### core_12 下一步扫描顺序
+
+1. 固定 `Feature Set = core_12`, 先扫 `EXPORT_EMA_ALPHA`
+2. 再固定最佳 `EXPORT_EMA_ALPHA`, 扫 `hold_buffer`
+3. 再扫 `top_n`
+4. 最后扫 `min_score`
+
+原因:
+
+- 当前 `core_12` 已证明因子治理方向有效
+- 优先优化导出平滑与组合参数, 性价比高于继续扩大因子集
+- 在 `core_12` 未收敛前, 暂不进入 `Ridge/ElasticNet` 与 `CatBoost/XGBoost` 对照
+
 ---
 
 ## 实验记录表
 
-| 日期 | LABEL | Feature Set | Model | Export EMA | Top-N | Hold Buffer | Min Score | Gross | Net | MDD | Trades/Day | 备注 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+
+| 日期         | LABEL        | Feature Set | Model      | Export EMA | Top-N | Hold Buffer | Min Score | Gross     | Net       | MDD      | Trades/Day | 备注                |
+| ---------- | ------------ | ----------- | ---------- | ---------- | ----- | ----------- | --------- | --------- | --------- | -------- | ---------- | ----------------- |
+| 2026-04-02 | `fwd_ret_1d` | `all`       | `LightGBM` | `0.15`     | `20`  | `50`        | `0.002`   | `+26.84%` | `-8.42%`  | `23.24%` | `2.8`      | 46 因子统计层可用, 组合层退化 |
+| 2026-04-02 | `fwd_ret_1d` | `core`      | `LightGBM` | `0.15`     | `20`  | `50`        | `0.002`   | `+28.85%` | `+9.91%`  | `11.92%` | `1.4`      | 当前最佳, 升格为临时研究基线   |
+| 2026-04-02 | `fwd_ret_1d` | `pruned`    | `LightGBM` | `0.15`     | `20`  | `50`        | `0.002`   | `+20.59%` | `-10.22%` | `25.90%` | `2.5`      | 全局相关性剪枝不适合作为当前主线  |
+
+

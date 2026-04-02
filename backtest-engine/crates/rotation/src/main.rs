@@ -16,9 +16,10 @@ use bevy_ecs::prelude::*;
 use chrono::NaiveDate;
 use clap::Parser;
 use polars::prelude::*;
-use std::path::PathBuf;
+use serde_json::json;
+use std::path::{Path, PathBuf};
 
-use bt_core::{BacktestStats, Portfolio};
+use bt_core::{BacktestStats, Portfolio, SignalArtifactMeta};
 use components::Position;
 use resources::{ConfigFile, DailyData, MarketData, PriceBar, RotationConfig};
 use systems::{check_exit_conditions, fill_positions, update_stats};
@@ -39,6 +40,7 @@ struct Args {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    let signal_meta = bt_core::load_signal_meta(&args.data);
 
     println!("========================================");
     println!("   Rotation Backtest Engine (Bevy ECS)");
@@ -59,6 +61,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     print_config(&config);
 
     println!("\nLoading data from: {:?}", args.data);
+    if let Some(meta) = &signal_meta {
+        if let Some(signal_run_id) = &meta.signal_run_id {
+            println!("Signal Run ID: {}", signal_run_id);
+        }
+    }
 
     // 2. Load market data
     let df = LazyFrame::scan_parquet(&args.data, Default::default())?.collect()?;
@@ -170,7 +177,71 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !args.output_dir.is_empty() {
         let config = app.world().resource::<RotationConfig>();
         let config_text = format_config(config, trading_dates.len());
-        bt_core::write_report("rotation", &config_text, stats, portfolio, trading_dates.len(), &args.output_dir)?;
+        let report_stem = bt_core::build_report_stem(
+            "rotation",
+            signal_meta.as_ref(),
+            &rotation_report_suffix(config),
+        );
+        let extra_text = format!(
+            "--- Strategy Stats ---\nLimit Up Blocked:  {} ({} days, avg {:.1}/day)\n",
+            limit_up_blocked,
+            limit_up_days,
+            if limit_up_days > 0 {
+                limit_up_blocked as f64 / limit_up_days as f64
+            } else {
+                0.0
+            }
+        );
+        let report_paths = bt_core::write_report_bundle(
+            &args.output_dir,
+            "rotation",
+            &report_stem,
+            &args.data,
+            signal_meta.as_ref(),
+            &config_text,
+            json!({
+                "initial_capital": config.initial_capital,
+                "max_positions": config.max_positions,
+                "position_size_pct": config.position_size_pct,
+                "max_hold_days": config.max_hold_days,
+                "start_date": config.start_date.map(|d| d.to_string()),
+                "end_date": config.end_date.map(|d| d.to_string()),
+                "top_n": config.top_n,
+                "hold_buffer": config.hold_buffer,
+                "min_score": config.min_score,
+                "stop_loss_enabled": config.stop_loss_enabled,
+                "stop_loss_pct": config.stop_loss_pct,
+                "trailing_enabled": config.trailing_enabled,
+                "trailing_activation_pct": config.trailing_activation_pct,
+                "trailing_pct": config.trailing_pct,
+                "commission_rate": config.cost_model.commission_rate,
+                "stamp_duty_rate": config.cost_model.stamp_duty_rate,
+                "slippage_pct": config.cost_model.slippage_pct,
+            }),
+            Some(extra_text.as_str()),
+            Some(json!({
+                "limit_up_blocked": limit_up_blocked,
+                "limit_up_days": limit_up_days,
+                "limit_up_blocked_per_active_day": if limit_up_days > 0 {
+                    limit_up_blocked as f64 / limit_up_days as f64
+                } else {
+                    0.0
+                }
+            })),
+            stats,
+            portfolio,
+            trading_dates.len(),
+        )?;
+        append_rotation_registry_entry(
+            signal_meta.as_ref(),
+            &args.data,
+            config,
+            stats,
+            portfolio,
+            trading_dates.len(),
+            &report_paths.txt_path,
+            &report_paths.json_path,
+        )?;
     }
 
     Ok(())
@@ -287,6 +358,76 @@ fn format_config(config: &RotationConfig, trading_days: usize) -> String {
     writeln!(s, "Slippage:         {:.2}%", cm.slippage_pct * 100.0).unwrap();
 
     s
+}
+
+fn rotation_report_suffix(config: &RotationConfig) -> String {
+    format!(
+        "hb{}_ms{}_hd{}",
+        config.hold_buffer,
+        bt_core::format_float_token(config.min_score, 4),
+        config.max_hold_days
+    )
+}
+
+fn append_rotation_registry_entry(
+    signal_meta: Option<&SignalArtifactMeta>,
+    data_path: &Path,
+    config: &RotationConfig,
+    stats: &BacktestStats,
+    portfolio: &Portfolio,
+    trading_days: usize,
+    report_txt_path: &Path,
+    report_json_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use chrono::Local;
+    let registry_path = bt_core::resolve_registry_path(
+        signal_meta,
+        "../artifacts/rotation/runs.jsonl",
+    );
+    let derived = bt_core::calc_derived_metrics(stats, portfolio, trading_days);
+
+    let record = json!({
+        "record_type": "backtest_run",
+        "recorded_at": Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        "strategy": "rotation",
+        "train_run_id": signal_meta.and_then(|meta| meta.train_run_id.clone()),
+        "signal_run_id": signal_meta.and_then(|meta| meta.signal_run_id.clone()),
+        "export_token": signal_meta.and_then(|meta| meta.export_token.clone()),
+        "label": signal_meta.and_then(|meta| meta.label.clone()),
+        "model_name": signal_meta.and_then(|meta| meta.model_name.clone()),
+        "feature_mode": signal_meta.and_then(|meta| meta.feature_mode.clone()),
+        "feature_hash": signal_meta.and_then(|meta| meta.feature_hash.clone()),
+        "feature_count": signal_meta.and_then(|meta| meta.feature_count),
+        "export_ema_alpha": signal_meta.and_then(|meta| meta.export_ema_alpha),
+        "signal_file": data_path.to_string_lossy().to_string(),
+        "canonical_signal_path": signal_meta.and_then(|meta| meta.canonical_signal_path.clone()),
+        "signal_meta_path": signal_meta.and_then(|meta| meta.signal_meta_path.clone()),
+        "git_commit": signal_meta.and_then(|meta| meta.git_commit.clone()),
+        "top_n": config.top_n,
+        "hold_buffer": config.hold_buffer,
+        "min_score": config.min_score,
+        "max_hold_days": config.max_hold_days,
+        "stop_loss_enabled": config.stop_loss_enabled,
+        "stop_loss_pct": config.stop_loss_pct,
+        "trailing_enabled": config.trailing_enabled,
+        "trailing_activation_pct": config.trailing_activation_pct,
+        "trailing_pct": config.trailing_pct,
+        "commission_rate": config.cost_model.commission_rate,
+        "stamp_duty_rate": config.cost_model.stamp_duty_rate,
+        "slippage_pct": config.cost_model.slippage_pct,
+        "gross_return_pct": derived.gross_return_pct,
+        "net_return_pct": derived.total_return_pct,
+        "max_drawdown_pct": stats.max_drawdown * 100.0,
+        "win_rate_pct": stats.win_rate() * 100.0,
+        "avg_trades_per_day": derived.avg_trades_per_day,
+        "total_trades": stats.total_trades,
+        "report_txt_path": report_txt_path.to_string_lossy().to_string(),
+        "report_json_path": report_json_path.to_string_lossy().to_string(),
+    });
+
+    bt_core::append_jsonl_record(&registry_path, &record)?;
+    println!("🗂️ Registry appended: {}", registry_path.display());
+    Ok(())
 }
 
 fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {

@@ -8,7 +8,7 @@
 
 use bevy_ecs::prelude::*;
 use chrono::NaiveDate;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// A-share lot size (每手 300 股，科创板/北交所除外)
 pub const LOT_SIZE: u32 = 300;
@@ -93,6 +93,14 @@ pub struct BacktestStats {
     pub total_slippage: f64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct BacktestDerivedMetrics {
+    pub total_return_pct: f64,
+    pub gross_pnl: f64,
+    pub gross_return_pct: f64,
+    pub avg_trades_per_day: f64,
+}
+
 impl BacktestStats {
     pub fn win_rate(&self) -> f64 {
         if self.total_trades == 0 {
@@ -139,6 +147,33 @@ impl BacktestStats {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct SignalArtifactMeta {
+    pub strategy: Option<String>,
+    pub train_run_id: Option<String>,
+    pub signal_run_id: Option<String>,
+    pub export_token: Option<String>,
+    pub label: Option<String>,
+    pub model_name: Option<String>,
+    pub feature_mode: Option<String>,
+    pub feature_hash: Option<String>,
+    pub feature_count: Option<usize>,
+    pub export_ema_alpha: Option<f64>,
+    pub registry_path: Option<String>,
+    pub canonical_signal_path: Option<String>,
+    pub latest_alias_path: Option<String>,
+    pub train_meta_path: Option<String>,
+    pub signal_meta_path: Option<String>,
+    pub git_commit: Option<String>,
+    pub notebook: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReportBundlePaths {
+    pub txt_path: std::path::PathBuf,
+    pub json_path: std::path::PathBuf,
 }
 
 // ============================================================================
@@ -230,6 +265,47 @@ pub fn format_results(stats: &BacktestStats, portfolio: &Portfolio, trading_days
     s
 }
 
+pub fn calc_derived_metrics(
+    stats: &BacktestStats,
+    portfolio: &Portfolio,
+    trading_days: usize,
+) -> BacktestDerivedMetrics {
+    let total_return_pct = (portfolio.cash / portfolio.initial_capital - 1.0) * 100.0;
+    let gross_pnl = stats.total_pnl + stats.total_costs();
+    let gross_return_pct = gross_pnl / portfolio.initial_capital * 100.0;
+    let avg_trades_per_day = stats.total_trades as f64 / trading_days.max(1) as f64;
+    BacktestDerivedMetrics {
+        total_return_pct,
+        gross_pnl,
+        gross_return_pct,
+        avg_trades_per_day,
+    }
+}
+
+pub fn build_metrics_json(
+    stats: &BacktestStats,
+    portfolio: &Portfolio,
+    trading_days: usize,
+) -> serde_json::Value {
+    let derived = calc_derived_metrics(stats, portfolio, trading_days);
+    serde_json::json!({
+        "total_trades": stats.total_trades,
+        "win_rate_pct": stats.win_rate() * 100.0,
+        "total_pnl": stats.total_pnl,
+        "final_portfolio": portfolio.cash,
+        "total_return_pct": derived.total_return_pct,
+        "max_drawdown_pct": stats.max_drawdown * 100.0,
+        "gross_pnl": derived.gross_pnl,
+        "gross_return_pct": derived.gross_return_pct,
+        "total_commission": stats.total_commission,
+        "total_stamp_duty": stats.total_stamp_duty,
+        "total_slippage": stats.total_slippage,
+        "total_costs": stats.total_costs(),
+        "avg_trades_per_day": derived.avg_trades_per_day,
+        "trading_days": trading_days,
+    })
+}
+
 /// Print backtest results summary to stdout
 pub fn print_results(stats: &BacktestStats, portfolio: &Portfolio) {
     println!("\n========================================");
@@ -285,4 +361,161 @@ pub fn write_report(
 
     println!("\n📄 Report saved: {}", filepath.display());
     Ok(filepath)
+}
+
+pub fn load_signal_meta(data_path: &std::path::Path) -> Option<SignalArtifactMeta> {
+    let meta_path = data_path.with_extension("meta.json");
+    if !meta_path.exists() {
+        return None;
+    }
+    let raw = std::fs::read_to_string(&meta_path).ok()?;
+    let mut meta: SignalArtifactMeta = serde_json::from_str(&raw).ok()?;
+    if meta.signal_meta_path.is_none() {
+        meta.signal_meta_path = Some(meta_path.to_string_lossy().to_string());
+    }
+    Some(meta)
+}
+
+pub fn format_float_token(value: f64, precision: usize) -> String {
+    let mut s = format!("{value:.precision$}");
+    while s.contains('.') && s.ends_with('0') {
+        s.pop();
+    }
+    if s.ends_with('.') {
+        s.pop();
+    }
+    if s.is_empty() {
+        s.push('0');
+    }
+    s.replace('-', "m").replace('.', "p")
+}
+
+pub fn build_report_stem(
+    strategy_name: &str,
+    signal_meta: Option<&SignalArtifactMeta>,
+    suffix: &str,
+) -> String {
+    let signal_id = signal_meta
+        .and_then(|meta| meta.signal_run_id.as_deref())
+        .unwrap_or(strategy_name);
+    if suffix.trim().is_empty() {
+        format!("{}__{}", strategy_name, signal_id)
+    } else {
+        format!("{}__{}__{}", strategy_name, signal_id, suffix)
+    }
+}
+
+pub fn resolve_registry_path(
+    signal_meta: Option<&SignalArtifactMeta>,
+    fallback_registry_path: &str,
+) -> std::path::PathBuf {
+    signal_meta
+        .and_then(|meta| meta.registry_path.as_ref())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(fallback_registry_path))
+}
+
+pub fn append_jsonl_record(
+    path: &std::path::Path,
+    record: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(file, "{}", serde_json::to_string(record)?)?;
+    Ok(())
+}
+
+pub fn write_report_bundle(
+    output_dir: &str,
+    strategy_name: &str,
+    report_stem: &str,
+    data_path: &std::path::Path,
+    signal_meta: Option<&SignalArtifactMeta>,
+    config_text: &str,
+    backtest_config_json: serde_json::Value,
+    extra_text: Option<&str>,
+    extra_json: Option<serde_json::Value>,
+    stats: &BacktestStats,
+    portfolio: &Portfolio,
+    trading_days: usize,
+) -> Result<ReportBundlePaths, Box<dyn std::error::Error>> {
+    use chrono::Local;
+    use std::io::Write;
+
+    std::fs::create_dir_all(output_dir)?;
+
+    let now = Local::now();
+    let stem = format!("{}__{}", report_stem, now.format("%Y%m%d_%H%M%S"));
+    let txt_path = std::path::Path::new(output_dir).join(format!("{}.txt", stem));
+    let json_path = std::path::Path::new(output_dir).join(format!("{}.json", stem));
+
+    let mut f = std::fs::File::create(&txt_path)?;
+    writeln!(f, "========================================")?;
+    writeln!(f, "   {} Backtest Report", strategy_name)?;
+    writeln!(f, "   {}", now.format("%Y-%m-%d %H:%M:%S"))?;
+    writeln!(f, "========================================")?;
+    writeln!(f)?;
+    if let Some(meta) = signal_meta {
+        writeln!(f, "--- Signal Artifact ---")?;
+        if let Some(signal_run_id) = &meta.signal_run_id {
+            writeln!(f, "Signal Run ID:    {}", signal_run_id)?;
+        }
+        if let Some(label) = &meta.label {
+            writeln!(f, "Label:            {}", label)?;
+        }
+        if let Some(model_name) = &meta.model_name {
+            writeln!(f, "Model:            {}", model_name)?;
+        }
+        if let Some(feature_mode) = &meta.feature_mode {
+            writeln!(f, "Feature Mode:     {}", feature_mode)?;
+        }
+        if let Some(feature_count) = meta.feature_count {
+            writeln!(f, "Feature Count:    {}", feature_count)?;
+        }
+        if let Some(export_ema_alpha) = meta.export_ema_alpha {
+            writeln!(f, "Export EMA:       {}", export_ema_alpha)?;
+        }
+        writeln!(f, "Signal File:      {}", data_path.display())?;
+        writeln!(f)?;
+    }
+    if let Some(extra_text) = extra_text {
+        write!(f, "{}", extra_text)?;
+        if !extra_text.ends_with('\n') {
+            writeln!(f)?;
+        }
+        writeln!(f)?;
+    }
+    write!(f, "{}", config_text)?;
+    writeln!(f)?;
+    write!(f, "{}", format_results(stats, portfolio, trading_days))?;
+    writeln!(f, "========================================")?;
+
+    let signal_json = match signal_meta {
+        Some(meta) => serde_json::to_value(meta)?,
+        None => serde_json::Value::Null,
+    };
+    let report_json = serde_json::json!({
+        "report_version": 1,
+        "strategy": strategy_name,
+        "generated_at": now.format("%Y-%m-%d %H:%M:%S").to_string(),
+        "signal_file": data_path.to_string_lossy().to_string(),
+        "signal": signal_json,
+        "backtest_config": backtest_config_json,
+        "metrics": build_metrics_json(stats, portfolio, trading_days),
+        "extra": extra_json.unwrap_or(serde_json::Value::Null),
+        "report_txt_path": txt_path.to_string_lossy().to_string(),
+        "report_json_path": json_path.to_string_lossy().to_string(),
+    });
+
+    std::fs::write(&json_path, serde_json::to_string_pretty(&report_json)?)?;
+
+    println!("\n📄 Report saved: {}", txt_path.display());
+    println!("🧾 Report JSON saved: {}", json_path.display());
+    Ok(ReportBundlePaths { txt_path, json_path })
 }
