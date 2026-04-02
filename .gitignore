@@ -61,6 +61,7 @@ data/
 
 # Ignore backtest logs and reports
 results/
+artifacts/
 logs/
 *.log
 *.html
