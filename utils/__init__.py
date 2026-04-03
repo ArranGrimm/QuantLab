@@ -14,6 +14,14 @@ from .rotation_factors import (
     FACTOR_GROUP_LABELS,
     FACTOR_TO_GROUP,
 )
+from .alpha158_factors import (
+    calc_alpha158_factors,
+    ALPHA158_FACTOR_COLS,
+    ALPHA158_FACTOR_GROUPS,
+    ALPHA158_FACTOR_GROUP_LABELS,
+    ALPHA158_FACTOR_TO_GROUP,
+    resolve_alpha158_group_config,
+)
 
 # 回测引擎模块
 from .backtest import (
@@ -30,6 +38,16 @@ from .duckdb_utils import get_adj_factor_frame, load_daily_data_full, load_60m_d
 
 # IC 分析 + 因子相关性工具
 from .ic_analysis import calc_factor_ic, select_factors_by_ic, calc_factor_corr, print_corr_clusters, find_redundant_factors
+from .factor_analysis import (
+    build_daily_ic_frame,
+    build_ic_summary_frame,
+    compute_factor_decay,
+    empty_group_summary_frame,
+    empty_ic_summary_frame,
+    extract_group_top_factor_cols,
+    resolve_decay_factor_cols,
+    summarize_factor_groups,
+)
 
 # 信号导出 (for Rust)
 from .signal_export import export_for_rust, export_rotation_scores, export_renko_scores, validate_export
@@ -59,6 +77,12 @@ __all__ = [
     "FACTOR_GROUPS",
     "FACTOR_GROUP_LABELS",
     "FACTOR_TO_GROUP",
+    "calc_alpha158_factors",
+    "ALPHA158_FACTOR_COLS",
+    "ALPHA158_FACTOR_GROUPS",
+    "ALPHA158_FACTOR_GROUP_LABELS",
+    "ALPHA158_FACTOR_TO_GROUP",
+    "resolve_alpha158_group_config",
     # 回测
     "run_backtest",
     "run_backtest_short",
@@ -70,6 +94,14 @@ __all__ = [
     "calc_factor_corr",
     "print_corr_clusters",
     "find_redundant_factors",
+    "build_daily_ic_frame",
+    "build_ic_summary_frame",
+    "compute_factor_decay",
+    "empty_group_summary_frame",
+    "empty_ic_summary_frame",
+    "extract_group_top_factor_cols",
+    "resolve_decay_factor_cols",
+    "summarize_factor_groups",
     # Rust 导出
     "export_for_rust",
     "export_rotation_scores",

@@ -19,7 +19,11 @@
   7. 处置效应   — 换手率衰减成本线偏离 (EWM近似, 20/60d)
   8. 下行风险   — 下行半方差、恐慌量比、收阴天数、波动不对称
 """
+import numpy as np
 import polars as pl
+from scipy import stats as scipy_stats
+
+_A_SHARE_LOT_SIZE = 100.0
 
 
 FACTOR_COLS = [
@@ -153,7 +157,7 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
                 (pl.col("high_adj") - pl.col("_pc")).abs(),
                 (pl.col("low_adj") - pl.col("_pc")).abs(),
             ).alias("_tr"),
-            (pl.col("volume") / pl.col("circulating_capital").fill_null(1) * 100)
+            ((pl.col("volume") * _A_SHARE_LOT_SIZE) / pl.col("circulating_capital").fill_null(1) * 100)
                 .fill_nan(0.0).alias("turnover_rate"),
         ])
 
@@ -375,21 +379,78 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
     return result
 
 
-def cross_section_normalize(df: pl.LazyFrame, factor_cols: list[str] = None) -> pl.LazyFrame:
-    """
-    截面标准化: 每天内对所有因子做 Z-Score + Winsorize。
+def _build_rank_pct_expr(col_name: str) -> pl.Expr:
+    valid_mask = pl.col(col_name).is_not_null() & pl.col(col_name).is_not_nan()
+    valid_count = (
+        pl.when(valid_mask)
+        .then(pl.lit(1))
+        .otherwise(pl.lit(0))
+        .sum()
+        .over("date")
+        .cast(pl.Float64)
+    )
+    rank_expr = pl.col(col_name).rank(method="average").over("date").cast(pl.Float64)
+    return (
+        pl.when(valid_mask & (valid_count > 1))
+        .then((rank_expr - 1.0) / (valid_count - 1.0))
+        .otherwise(pl.lit(None, dtype=pl.Float64))
+    )
 
-    1. Z-Score: (x - mean) / std  (截面内)
-    2. Winsorize: clip 到 [-5, 5] (去极端值)
+
+def _rank_pct_to_gauss(expr: pl.Expr, eps: float = 1e-4) -> pl.Expr:
+    return expr.map_batches(
+        lambda s: pl.Series(
+            name=s.name,
+            values=_safe_norm_ppf(s, eps=eps),
+        ),
+        return_dtype=pl.Float64,
+    )
+
+
+def _safe_norm_ppf(series: pl.Series, eps: float = 1e-4) -> np.ndarray:
+    values = series.cast(pl.Float64).fill_null(np.nan).to_numpy()
+    out = np.full(values.shape, np.nan, dtype=np.float64)
+    valid = np.isfinite(values)
+    if np.any(valid):
+        clipped = np.clip(values[valid], eps, 1.0 - eps)
+        out[valid] = scipy_stats.norm.ppf(clipped)
+    return out
+
+
+def cross_section_normalize(
+    df: pl.LazyFrame,
+    factor_cols: list[str] = None,
+    mode: str = "zscore",
+) -> pl.LazyFrame:
+    """
+    截面标准化: 每天内对所有因子做统一的截面变换。
+
+    支持三种模式:
+    1. zscore: (x - mean) / std, 再 clip 到 [-5, 5]
+    2. rank_pct: 映射为 [0, 1] 截面分位数
+    3. rank_gauss: 先做 rank_pct, 再映射到近似标准正态
     """
     cols = factor_cols or FACTOR_COLS
-    print(f"[Rotation] 截面标准化 {len(cols)} 个因子...")
+    mode = mode.lower()
+    print(f"[Rotation] 截面标准化 {len(cols)} 个因子... mode={mode}")
+
+    if mode not in {"zscore", "rank_pct", "rank_gauss"}:
+        raise ValueError(
+            f"Unsupported normalize mode: {mode}. "
+            "Expected one of: zscore, rank_pct, rank_gauss"
+        )
 
     exprs = []
     for c in cols:
-        mean_expr = pl.col(c).mean().over("date")
-        std_expr = pl.col(c).std().over("date")
-        z = (pl.col(c) - mean_expr) / pl.max_horizontal(std_expr, pl.lit(1e-8))
-        exprs.append(z.clip(-5.0, 5.0).alias(c))
+        if mode == "zscore":
+            mean_expr = pl.col(c).mean().over("date")
+            std_expr = pl.col(c).std().over("date")
+            normalized = ((pl.col(c) - mean_expr) / pl.max_horizontal(std_expr, pl.lit(1e-8))).clip(-5.0, 5.0)
+        elif mode == "rank_pct":
+            normalized = _build_rank_pct_expr(c)
+        else:
+            normalized = _rank_pct_to_gauss(_build_rank_pct_expr(c))
+
+        exprs.append(normalized.alias(c))
 
     return df.with_columns(exprs)

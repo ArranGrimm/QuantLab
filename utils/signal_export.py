@@ -337,6 +337,7 @@ def export_rotation_scores(
         label = artifact_metadata.get("label")
         model_name = artifact_metadata.get("model_name")
         feature_mode = artifact_metadata.get("feature_mode")
+        normalize_mode = artifact_metadata.get("normalize_mode")
         features = list(artifact_metadata.get("features", []))
         feature_hash = artifact_metadata.get("feature_hash") or build_feature_hash(features)
         train_meta = {
@@ -347,6 +348,7 @@ def export_rotation_scores(
             "label": label,
             "model_name": model_name,
             "feature_mode": feature_mode,
+            "normalize_mode": normalize_mode,
             "feature_hash": feature_hash,
             "feature_count": len(features),
             "features": features,
@@ -372,6 +374,7 @@ def export_rotation_scores(
             "label": label,
             "model_name": model_name,
             "feature_mode": feature_mode,
+            "normalize_mode": normalize_mode,
             "feature_hash": feature_hash,
             "feature_count": len(features),
             "features": features,
@@ -411,6 +414,7 @@ def export_rotation_scores(
                 "label": label,
                 "model_name": model_name,
                 "feature_mode": feature_mode,
+                "normalize_mode": normalize_mode,
                 "feature_hash": feature_hash,
                 "feature_count": len(features),
                 "export_ema_alpha": artifact_metadata.get("export_ema_alpha"),

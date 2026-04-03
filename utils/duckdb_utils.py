@@ -1,5 +1,7 @@
 import polars as pl
 
+_A_SHARE_LOT_SIZE = 100.0
+
 def get_adj_factor_frame(conn):
     """
     [辅助函数] 从数据库读取因子表，并计算所有股票的'前复权系数'
@@ -110,8 +112,16 @@ def load_daily_data_full(conn, codes: list[str] = None):
             (pl.col("high") * pl.col("adj_ratio")).alias("high_adj"),
             (pl.col("low") * pl.col("adj_ratio")).alias("low_adj"),
             (pl.col("close") * pl.col("adj_ratio")).alias("close_adj"),
+            # A 股日线 volume 单位是“手”，需先还原成股数再计算价格。
+            pl.when(pl.col("volume") > 0)
+              .then(pl.col("amount") / (pl.col("volume") * _A_SHARE_LOT_SIZE))
+              .otherwise(None)
+              .alias("vwap_raw"),
             # 保留原始 close 并重命名 (符合你旧代码逻辑)
             pl.col("close").alias("close_raw") 
+        ])
+        .with_columns([
+            (pl.col("vwap_raw") * pl.col("adj_ratio")).alias("vwap_adj"),
         ])
         
         # 3. 关联股本数据 (ASOF JOIN)
@@ -139,9 +149,9 @@ def load_daily_data_full(conn, codes: list[str] = None):
         # 7. 选择并排序最终列
         .select([
             "code", "date", 
-            "open_adj", "high_adj", "low_adj", "close_adj", "pre_close_adj",
+            "open_adj", "high_adj", "low_adj", "close_adj", "vwap_adj", "pre_close_adj",
             "volume", "amount", 
-            "close_raw", "market_cap_100m",
+            "close_raw", "vwap_raw", "market_cap_100m",
             "circulating_capital",
         ])
         .sort(["code", "date"])
@@ -197,12 +207,19 @@ def load_60m_data_adj(conn):
             (pl.col("high") * pl.col("adj_ratio")).alias("high_adj"),
             (pl.col("low") * pl.col("adj_ratio")).alias("low_adj"),
             (pl.col("close") * pl.col("adj_ratio")).alias("close_adj"),
+            pl.when(pl.col("volume") > 0)
+              .then(pl.col("amount") / (pl.col("volume") * _A_SHARE_LOT_SIZE))
+              .otherwise(None)
+              .alias("vwap_raw"),
+        ])
+        .with_columns([
+            (pl.col("vwap_raw") * pl.col("adj_ratio")).alias("vwap_adj"),
         ])
         
         # 4. 清理列
         .select([
             "code", "time", 
-            "open_adj", "high_adj", "low_adj", "close_adj", 
+            "open_adj", "high_adj", "low_adj", "close_adj", "vwap_adj",
             "volume", "amount"
         ])
         .sort(["code", "time"])

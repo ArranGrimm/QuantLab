@@ -8,6 +8,9 @@ B1 选股因子计算模块 (V3.0 精简优化版)
 """
 import polars as pl
 from .sector_factors import get_sector_status
+
+_A_SHARE_LOT_SIZE = 100.0
+
 # ==============================================================================
 # 默认配置 (基于 10 大完美案例优化)
 # ==============================================================================
@@ -648,7 +651,7 @@ def calc_b1_factors_wmacd(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame
             df_b1_signals
             .with_columns([
                 # 日换手率 (%): volume / 流通股本
-                (pl.col("volume") / pl.col("circulating_capital").fill_null(1) * 100)
+                ((pl.col("volume") * _A_SHARE_LOT_SIZE) / pl.col("circulating_capital").fill_null(1) * 100)
                     .fill_nan(0.0).alias("turnover_rate"),
                 # 中长阳线: 实体涨幅 >= 阈值
                 ((pl.col("close_adj") / pl.col("open_adj") - 1) >= yang_thr).alias("_is_mid_yang"),

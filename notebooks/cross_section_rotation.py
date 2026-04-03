@@ -24,6 +24,23 @@ def _():
         FACTOR_GROUPS,
         FACTOR_TO_GROUP,
     )
+    from utils.alpha158_factors import (
+        ALPHA158_FACTOR_GROUP_LABELS,
+        ALPHA158_FACTOR_GROUPS,
+        ALPHA158_FACTOR_TO_GROUP,
+        calc_alpha158_factors,
+        resolve_alpha158_group_config,
+    )
+    from utils.factor_analysis import (
+        build_daily_ic_frame,
+        build_ic_summary_frame,
+        compute_factor_decay,
+        empty_group_summary_frame,
+        empty_ic_summary_frame,
+        extract_group_top_factor_cols,
+        resolve_decay_factor_cols,
+        summarize_factor_groups,
+    )
 
     # ==============================================================================
     # Cell 1: 配置与数据加载
@@ -36,7 +53,29 @@ def _():
     MV_MAX = 500     # 最大流通市值 (亿)
     MIN_LIST_DAYS = 60  # 最少上市天数
     START_DATE = "2020-09-01"  # 创业板注册制后
-    LABEL = "fwd_ret_1d"  # 可选: fwd_ret_{1/2/3/5}d 或 fwd_ret_{1/2/3/5}d_excess
+    NORMALIZE_MODE = "zscore"  # 可选: zscore / rank_pct / rank_gauss
+    LABEL = "fwd_ret_1d"  # 可选: fwd_ret_{1/2/3/5}d / fwd_ret_{1/2/3/5}d_excess / fwd_ret_{1/2/3/5}d_rank_pct
+    FEATURE_MODE = "core_plus_alpha158_top1"  # "all" / "pruned" / "core" / "alpha158" / "core_plus_alpha158" / "core_plus_alpha158_top1" / "all_plus_alpha158"
+    ALPHA158_GROUP_MODE = "kbar_shape"  # 可选: all / kbar_shape / price_level / price_trend / trend_regression / range_position / timing_position / price_volume_corr / directionality / volume_dynamics
+    ALPHA158_ANALYSIS_GROUP_MODE = "all"  # "all" / "match_training"
+    ALPHA_DECAY_SOURCE = "alpha158_top1"  # "rotation" / "alpha158_top1" / "custom_list"
+    ALPHA_DECAY_CUSTOM_FACTORS: tuple[str, ...] = ()
+    RUN_ROTATION_CORR_DIAGNOSTICS = False
+    RUN_ROTATION_CORE_SCREEN = False
+    CORE_FEATURES_FROZEN = [
+        "ret_max_5d",
+        "vol_60d",
+        "turnover_rate",
+        "atr_14_pct",
+        "amplitude",
+        "intraday_ret_ma5",
+        "disp_bias_20",
+        "high_open_pct",
+        "vol_std_20d",
+        "abnormal_vol",
+        "intraday_pos",
+        "vol_price_corr_20d",
+    ]
 
     print("🚀 [Step 1] 加载全量日线数据...")
     st_blacklist = get_st_blacklist_pl("2026-03-31")
@@ -50,38 +89,65 @@ def _():
 
     print(f"✅ 参数: 流通市值 {MV_MIN}~{MV_MAX} 亿, 上市>{MIN_LIST_DAYS}天, 起始={START_DATE}")
     return (
+        ALPHA158_ANALYSIS_GROUP_MODE,
+        ALPHA158_FACTOR_GROUPS,
+        ALPHA158_FACTOR_GROUP_LABELS,
+        ALPHA158_FACTOR_TO_GROUP,
+        ALPHA158_GROUP_MODE,
+        ALPHA_DECAY_CUSTOM_FACTORS,
+        ALPHA_DECAY_SOURCE,
+        CORE_FEATURES_FROZEN,
         FACTOR_COLS,
         FACTOR_GROUPS,
         FACTOR_GROUP_LABELS,
         FACTOR_TO_GROUP,
+        FEATURE_MODE,
         LABEL,
         MIN_LIST_DAYS,
         MV_MAX,
         MV_MIN,
+        NORMALIZE_MODE,
+        RUN_ROTATION_CORE_SCREEN,
+        RUN_ROTATION_CORR_DIAGNOSTICS,
         add_price_limit_cols,
+        build_daily_ic_frame,
+        build_ic_summary_frame,
+        calc_alpha158_factors,
         calc_rotation_factors,
+        compute_factor_decay,
         cross_section_normalize,
+        empty_group_summary_frame,
         go,
         make_subplots,
         np,
         pl,
         px,
         q_full,
+        resolve_alpha158_group_config,
+        resolve_decay_factor_cols,
         stats,
+        summarize_factor_groups,
     )
 
 
 @app.cell
 def _(
+    ALPHA158_ANALYSIS_GROUP_MODE,
+    ALPHA158_FACTOR_GROUP_LABELS,
+    ALPHA158_GROUP_MODE,
     FACTOR_COLS,
+    FEATURE_MODE,
     MIN_LIST_DAYS,
     MV_MAX,
     MV_MIN,
+    NORMALIZE_MODE,
     add_price_limit_cols,
+    calc_alpha158_factors,
     calc_rotation_factors,
     cross_section_normalize,
     pl,
     q_full,
+    resolve_alpha158_group_config,
 ):
     import os
 
@@ -92,13 +158,104 @@ def _(
     # 关键流程:
     #   q_full (全量) → 因子计算 (连续序列) → forward return (连续序列)
     #   → 市值+上市天数过滤 (确定可交易 universe)
-    #   → 截面标准化 (在 universe 内 z-score)
+    #   → 截面标准化 (在 universe 内按 NORMALIZE_MODE 变换)
     #
     # 因子必须在连续序列上计算, 市值过滤只决定"哪些股票可交易"
     # ==============================================================================
-    print("⏳ [Step 2] 计算截面轮动因子 (全量股票, 保证序列连续)...")
+    print("⏳ [Step 2] 计算训练特征 (全量股票, 保证序列连续)...")
 
-    df_factors = calc_rotation_factors(q_full)
+    valid_feature_modes = {
+        "all",
+        "pruned",
+        "core",
+        "alpha158",
+        "core_plus_alpha158",
+        "core_plus_alpha158_top1",
+        "all_plus_alpha158",
+    }
+    if FEATURE_MODE not in valid_feature_modes:
+        raise ValueError(
+            f"Unsupported FEATURE_MODE: {FEATURE_MODE}. "
+            "Expected one of: all, pruned, core, alpha158, core_plus_alpha158, "
+            "core_plus_alpha158_top1, all_plus_alpha158"
+        )
+
+    need_rotation_factors = FEATURE_MODE in {"all", "pruned", "core", "core_plus_alpha158", "core_plus_alpha158_top1", "all_plus_alpha158"}
+    need_alpha158_train_factors = FEATURE_MODE in {"alpha158", "core_plus_alpha158", "core_plus_alpha158_top1", "all_plus_alpha158"}
+    alpha158_analysis_mode = (
+        ALPHA158_GROUP_MODE
+        if str(ALPHA158_ANALYSIS_GROUP_MODE).strip().lower() == "match_training"
+        else ALPHA158_ANALYSIS_GROUP_MODE
+    )
+    need_alpha158_analysis_factors = str(alpha158_analysis_mode).strip().lower() not in {"", "none", "disabled"}
+    need_alpha158_factors = need_alpha158_train_factors or need_alpha158_analysis_factors
+
+    df_factors = q_full
+    active_factor_cols = []
+    active_alpha158_factor_cols = []
+
+    print(f"   特征模式: {FEATURE_MODE}")
+    if need_rotation_factors:
+        print(f"   计算 Rotation 因子: {len(FACTOR_COLS)} 个")
+        df_factors = calc_rotation_factors(df_factors)
+        active_factor_cols.extend(FACTOR_COLS)
+    else:
+        print("   跳过 Rotation 因子计算")
+
+    if need_alpha158_factors:
+        alpha158_train_config = resolve_alpha158_group_config(ALPHA158_GROUP_MODE)
+        alpha158_analysis_config = resolve_alpha158_group_config(alpha158_analysis_mode)
+        merged_group_keys = list(
+            dict.fromkeys(
+                [
+                    *alpha158_train_config["group_keys"],
+                    *alpha158_analysis_config["group_keys"],
+                ]
+            )
+        )
+        active_alpha158_factor_cols = list(
+            dict.fromkeys(
+                [
+                    *alpha158_train_config["factor_cols"],
+                    *alpha158_analysis_config["factor_cols"],
+                ]
+            )
+        )
+        merged_price_fields = tuple(
+            dict.fromkeys(
+                [
+                    *alpha158_train_config["price_fields"],
+                    *alpha158_analysis_config["price_fields"],
+                ]
+            )
+        )
+        merged_include_ops = tuple(
+            dict.fromkeys(
+                [
+                    *(alpha158_train_config["include_ops"] or ()),
+                    *(alpha158_analysis_config["include_ops"] or ()),
+                ]
+            )
+        ) or None
+        active_group_labels = [
+            ALPHA158_FACTOR_GROUP_LABELS.get(group_key, group_key)
+            for group_key in merged_group_keys
+        ]
+        print(f"   Alpha158 训练分组: {alpha158_train_config['group_mode_label']}")
+        print(f"   Alpha158 分析分组: {alpha158_analysis_config['group_mode_label']}")
+        print(f"   Alpha158 合并分组: {', '.join(active_group_labels)}")
+        print(f"   计算 Alpha158 因子: {len(active_alpha158_factor_cols)} 个")
+        df_factors = calc_alpha158_factors(
+            df_factors,
+            use_kbar=bool(alpha158_train_config["use_kbar"] or alpha158_analysis_config["use_kbar"]),
+            price_fields=merged_price_fields,
+            include=merged_include_ops,
+        )
+        active_factor_cols.extend(active_alpha158_factor_cols)
+    else:
+        print("   跳过 Alpha158 因子计算")
+
+    print(f"   合计待标准化: {len(active_factor_cols)} 个")
 
     # Label: 在连续序列上计算 forward return, 避免因市值过滤产生的缺口
     df_with_label = df_factors.with_columns([
@@ -125,25 +282,51 @@ def _(
     )
 
     # 在可交易 universe 内做截面标准化
-    df_normalized = cross_section_normalize(df_universe, FACTOR_COLS)
+    print(f"   截面归一化模式: {NORMALIZE_MODE}")
+    df_normalized = cross_section_normalize(
+        df_universe,
+        active_factor_cols,
+        mode=NORMALIZE_MODE,
+    )
 
     # 超额收益标签: 截面去均值 (在 universe 内计算, 消除市场 beta)
+    base_label_cols = ["fwd_ret_1d", "fwd_ret_2d", "fwd_ret_3d", "fwd_ret_5d"]
     df_normalized = df_normalized.with_columns([
-        (pl.col("fwd_ret_1d") - pl.col("fwd_ret_1d").mean().over("date")).alias("fwd_ret_1d_excess"),
-        (pl.col("fwd_ret_2d") - pl.col("fwd_ret_2d").mean().over("date")).alias("fwd_ret_2d_excess"),
-        (pl.col("fwd_ret_3d") - pl.col("fwd_ret_3d").mean().over("date")).alias("fwd_ret_3d_excess"),
-        (pl.col("fwd_ret_5d") - pl.col("fwd_ret_5d").mean().over("date")).alias("fwd_ret_5d_excess"),
+        (pl.col(label_name) - pl.col(label_name).mean().over("date")).alias(f"{label_name}_excess")
+        for label_name in base_label_cols
     ])
 
+    # 排序化标签: 将未来收益映射为当日截面分位数 [0, 1]
+    rank_pct_exprs = []
+    for label_name in base_label_cols:
+        valid_mask = pl.col(label_name).is_not_null() & pl.col(label_name).is_not_nan()
+        valid_count = (
+            pl.when(valid_mask)
+            .then(pl.lit(1))
+            .otherwise(pl.lit(0))
+            .sum()
+            .over("date")
+            .cast(pl.Float32)
+        )
+        rank_expr = pl.col(label_name).rank(method="average").over("date").cast(pl.Float32)
+        rank_pct_exprs.append(
+            pl.when(valid_mask & (valid_count > 1))
+            .then((rank_expr - 1.0) / (valid_count - 1.0))
+            .otherwise(pl.lit(None, dtype=pl.Float32))
+            .alias(f"{label_name}_rank_pct")
+        )
+    df_normalized = df_normalized.with_columns(rank_pct_exprs)
+
     final_cols = [
-        "code", "date", "open_adj", "high_adj", "low_adj", "close_adj",
+        "code", "date", "open_adj", "high_adj", "low_adj", "close_adj", "vwap_adj",
         "pre_close_adj",
-        "volume", "amount", "close_raw", "market_cap_100m",
+        "volume", "amount", "close_raw", "vwap_raw", "market_cap_100m",
         "circulating_capital",
         "fwd_ret_1d", "fwd_ret_2d", "fwd_ret_3d", "fwd_ret_5d",
         "fwd_ret_1d_excess", "fwd_ret_2d_excess", "fwd_ret_3d_excess", "fwd_ret_5d_excess",
+        "fwd_ret_1d_rank_pct", "fwd_ret_2d_rank_pct", "fwd_ret_3d_rank_pct", "fwd_ret_5d_rank_pct",
         "is_limit_up", "is_limit_down",
-        *FACTOR_COLS,
+        *active_factor_cols,
     ]
 
     print("⏳ [Step 2] Collecting... (全量因子计算, 可能需要更长时间)")
@@ -159,268 +342,426 @@ def _(
 
 
 @app.cell
-def _(FACTOR_COLS, LABEL, df_all, go, make_subplots, pl):
+def _(df_all, pl):
     # ==============================================================================
-    # Cell 3: 因子 IC 分析 (Polars 原生加速)
+    # Cell 2b: amount / volume 单位校验
+    # 口径说明:
+    #   - stock_daily.volume 单位 = 手
+    #   - vwap_raw = amount / (volume * 100)
+    #   - turnover_rate(%) = volume * 100 / circulating_capital * 100
     # ==============================================================================
-    from utils.ic_analysis import calc_factor_ic
-
-    def run_ic_analysis():
-
-        df_valid_local = df_all.filter(
-            pl.col(LABEL).is_not_null() & pl.col(LABEL).is_not_nan()
+    unit_metrics = (
+        df_all
+        .filter(
+            (pl.col("volume") > 0) &
+            (pl.col("amount") > 0) &
+            (pl.col("close_raw") > 0) &
+            pl.col("vwap_raw").is_not_null()
         )
+        .select([
+            (
+                (pl.col("amount") / pl.col("volume") - pl.col("close_raw")).abs()
+                / pl.col("close_raw")
+            ).median().alias("err_if_volume_is_share"),
+            (
+                (pl.col("amount") / (pl.col("volume") * 100.0) - pl.col("close_raw")).abs()
+                / pl.col("close_raw")
+            ).median().alias("err_if_volume_is_lot"),
+            (
+                (pl.col("vwap_raw") - pl.col("close_raw")).abs()
+                / pl.col("close_raw")
+            ).median().alias("err_vwap_raw"),
+        ])
+    )
+    unit_metrics_row = unit_metrics.row(0, named=True)
+    print("🔎 [Step 2b] amount / volume 单位校验")
+    print(f"   假设 volume=股: 相对误差中位数 {unit_metrics_row['err_if_volume_is_share']:.2%}")
+    print(f"   假设 volume=手: 相对误差中位数 {unit_metrics_row['err_if_volume_is_lot']:.2%}")
+    print(f"   当前 vwap_raw: 相对误差中位数 {unit_metrics_row['err_vwap_raw']:.2%}")
+    print("   结论: stock_daily.volume 按“手”解释，turnover_rate 也必须先乘 100 还原股数。")
 
-        ic_results = calc_factor_ic(
-            df_valid_local,
-            factor_cols=list(FACTOR_COLS),
-            label=LABEL,
-            min_samples=30,
+    if unit_metrics_row["err_vwap_raw"] > 0.02:
+        raise ValueError("vwap_raw 与 close_raw 数量级不匹配，请检查 amount / volume 单位口径。")
+
+    unit_sample = (
+        df_all
+        .filter(
+            (pl.col("volume") > 0) &
+            (pl.col("amount") > 0) &
+            (pl.col("close_raw") > 0)
         )
-
-        # 构建 df_ic_summary 供 Cell 3b 使用
-        ic_summary_local = []
-        for factor_name, r in ic_results.items():
-            ic_summary_local.append({
-                "factor": factor_name,
-                "IC_mean": round(r["ic_mean"], 4),
-                "IC_std": round(r["ic_std"], 4),
-                "ICIR": round(r["icir"], 4),
-                "IC_pos_ratio": 0.0,
-                "abs_ICIR": round(abs(r["icir"]), 4),
-            })
-        df_ic_summary_local = pl.DataFrame(ic_summary_local).sort("abs_ICIR", descending=True)
-
-        # 逐日 IC DataFrame (用于累积 IC 图)
-        date_counts = df_valid_local.group_by("date").agg(pl.len().alias("n"))
-        valid_dates = date_counts.filter(pl.col("n") >= 30)["date"]
-        df_filtered = df_valid_local.filter(pl.col("date").is_in(valid_dates))
-
-        available = [f for f in FACTOR_COLS if f in df_filtered.columns]
-        df_ic_local = (
-            df_filtered
-            .group_by("date")
-            .agg([
-                pl.corr(f, LABEL, method="spearman").alias(f)
-                for f in available
-            ])
-            .sort("date")
-        )
-
-        top_factors_local = df_ic_summary_local["factor"].head(6).to_list()
-        fig_ic_local = make_subplots(rows=1, cols=1)
-        for factor_name in top_factors_local:
-            ic_cum = df_ic_local.select(["date", factor_name]).drop_nulls().sort("date")
-            fig_ic_local.add_trace(go.Scatter(
-                x=ic_cum["date"].to_list(),
-                y=ic_cum[factor_name].cum_sum().to_list(),
-                name=factor_name,
-                mode="lines",
-            ))
-
-        fig_ic_local.update_layout(
-            title="Top 6 因子 — IC 累积曲线",
-            xaxis_title="日期",
-            yaxis_title="累积 IC",
-            height=500,
-            template="plotly_dark",
-        )
-        fig_ic_local.show()
-        return df_ic_summary_local, ic_results
-
-    df_ic_summary, ic_results = run_ic_analysis()
-    return df_ic_summary, ic_results
+        .select([
+            "code",
+            "date",
+            "close_raw",
+            "volume",
+            "amount",
+            (pl.col("amount") / pl.col("volume")).alias("px_if_volume_is_share"),
+            (pl.col("amount") / (pl.col("volume") * 100.0)).alias("px_if_volume_is_lot"),
+            "vwap_raw",
+        ])
+        .head(5)
+    )
+    print(unit_sample)
+    return
 
 
 @app.cell
-def _(FACTOR_GROUPS, FACTOR_GROUP_LABELS, FACTOR_TO_GROUP, ic_results, pl):
+def _(
+    ALPHA158_ANALYSIS_GROUP_MODE,
+    ALPHA158_FACTOR_GROUPS,
+    ALPHA158_FACTOR_GROUP_LABELS,
+    ALPHA158_FACTOR_TO_GROUP,
+    FACTOR_COLS,
+    FACTOR_GROUPS,
+    FACTOR_GROUP_LABELS,
+    LABEL,
+    build_daily_ic_frame,
+    build_ic_summary_frame,
+    df_all,
+    empty_group_summary_frame,
+    go,
+    make_subplots,
+    pl,
+    resolve_alpha158_group_config,
+    summarize_factor_groups,
+):
     # ==============================================================================
-    # Cell 3a: 因子分组概览 — 为后续核心因子治理建立统一口径
+    # Cell 3: 因子 IC 分析底座
+    # - Rotation: IC 汇总 + 累积 IC 曲线
+    # - Alpha158: IC 汇总 + 分组 top1 提取
     # ==============================================================================
-    def run_factor_group_summary():
-        group_rows = []
-        for group_key_local, factors_local in FACTOR_GROUPS.items():
-            group_icirs = [
-                float(ic_results[f]["icir"])
-                for f in factors_local
-                if f in ic_results and ic_results[f].get("icir") is not None
+    from utils.ic_analysis import calc_factor_ic
+
+    def run_factor_ic_foundation():
+        df_valid_local = df_all.filter(pl.col(LABEL).is_not_null() & pl.col(LABEL).is_not_nan())
+
+        available_rotation_factors = [factor_name for factor_name in FACTOR_COLS if factor_name in df_all.columns]
+        if available_rotation_factors:
+            rotation_ic_results_local = calc_factor_ic(
+                df_valid_local,
+                factor_cols=available_rotation_factors,
+                label=LABEL,
+                min_samples=30,
+            )
+            rotation_ic_summary_local = build_ic_summary_frame(rotation_ic_results_local)
+            rotation_daily_ic_local = build_daily_ic_frame(
+                df_valid_local,
+                factor_cols=available_rotation_factors,
+                label=LABEL,
+                min_samples=30,
+            )
+        else:
+            print("ℹ️ [Cell 3] 当前 FEATURE_MODE 未加载 Rotation 因子，跳过 Rotation 因子 IC 分析。")
+            rotation_ic_results_local = {}
+            rotation_ic_summary_local = build_ic_summary_frame({})
+            rotation_daily_ic_local = build_daily_ic_frame(df_valid_local, factor_cols=[], label=LABEL)
+
+        analysis_mode = str(ALPHA158_ANALYSIS_GROUP_MODE).strip().lower()
+        if analysis_mode in {"", "none", "disabled"}:
+            alpha_group_keys = []
+            available_alpha158_factors = []
+        elif analysis_mode == "match_training":
+            available_alpha158_factors = [
+                factor_name for factor_name in ALPHA158_FACTOR_TO_GROUP if factor_name in df_all.columns
             ]
-            group_abs_icirs = [abs(v) for v in group_icirs]
-            top_factor = None
-            top_abs_icir = None
-            if group_abs_icirs:
-                top_factor = max(
-                    factors_local,
-                    key=lambda f: abs(float(ic_results[f]["icir"])) if f in ic_results else -1.0,
+            alpha_group_keys = [
+                group_key
+                for group_key, factor_cols in ALPHA158_FACTOR_GROUPS.items()
+                if any(factor in df_all.columns for factor in factor_cols)
+            ]
+        else:
+            alpha_analysis_config = resolve_alpha158_group_config(ALPHA158_ANALYSIS_GROUP_MODE)
+            alpha_group_keys = list(alpha_analysis_config["group_keys"])
+            available_alpha158_factors = [
+                factor_name
+                for factor_name in alpha_analysis_config["factor_cols"]
+                if factor_name in df_all.columns
+            ]
+
+        alpha_factor_groups = {
+            group_key: ALPHA158_FACTOR_GROUPS[group_key]
+            for group_key in alpha_group_keys
+        }
+
+        if available_alpha158_factors:
+            print(f"🧪 [Alpha158 IC] 计算 {len(available_alpha158_factors)} 个 Alpha158 因子的 IC...", flush=True)
+            alpha158_ic_results_local = calc_factor_ic(
+                df_valid_local,
+                factor_cols=available_alpha158_factors,
+                label=LABEL,
+                min_samples=30,
+            )
+            alpha158_ic_summary_local = build_ic_summary_frame(alpha158_ic_results_local)
+            df_alpha158_group_summary_local = summarize_factor_groups(
+                alpha158_ic_results_local,
+                alpha_factor_groups,
+                ALPHA158_FACTOR_GROUP_LABELS,
+            )
+        else:
+            print("ℹ️ [Cell 3] 当前未加载可分析的 Alpha158 因子，跳过 Alpha158 分组 IC。")
+            alpha158_ic_results_local = {}
+            alpha158_ic_summary_local = build_ic_summary_frame({})
+            df_alpha158_group_summary_local = empty_group_summary_frame()
+
+        df_alpha158_top1_local = (
+            df_alpha158_group_summary_local
+            .select([
+                "group_key",
+                "group_name",
+                "top_factor",
+                "top_ic_mean",
+                "top_icir",
+                "top_abs_icir",
+            ])
+            .filter(pl.col("top_factor") != "")
+            .sort("top_abs_icir", descending=True)
+        )
+        alpha158_top1_factor_cols_local = df_alpha158_top1_local["top_factor"].to_list()
+
+        if rotation_ic_summary_local.height > 0 and rotation_daily_ic_local.height > 0:
+            top_factors_local = rotation_ic_summary_local["factor"].head(6).to_list()
+            fig_ic_local = make_subplots(rows=1, cols=1)
+            for factor_name in top_factors_local:
+                ic_cum = rotation_daily_ic_local.select(["date", factor_name]).drop_nulls().sort("date")
+                fig_ic_local.add_trace(
+                    go.Scatter(
+                        x=ic_cum["date"].to_list(),
+                        y=ic_cum[factor_name].cum_sum().to_list(),
+                        name=factor_name,
+                        mode="lines",
+                    )
                 )
-                top_abs_icir = abs(float(ic_results[top_factor]["icir"]))
 
-            group_rows.append({
-                "group_key": group_key_local,
-                "group_name": FACTOR_GROUP_LABELS.get(group_key_local, group_key_local),
-                "n_factors": len(factors_local),
-                "mean_abs_icir": float(sum(group_abs_icirs) / len(group_abs_icirs)) if group_abs_icirs else 0.0,
-                "max_abs_icir": float(top_abs_icir) if top_abs_icir is not None else 0.0,
-                "top_factor": top_factor or "",
-            })
+            fig_ic_local.update_layout(
+                title="Rotation Top 6 因子 — IC 累积曲线",
+                xaxis_title="日期",
+                yaxis_title="累积 IC",
+                height=500,
+                template="plotly_dark",
+            )
+            fig_ic_local.show()
 
-        df_group_summary_local = pl.DataFrame(group_rows).sort("mean_abs_icir", descending=True)
+        rotation_group_summary_local = summarize_factor_groups(
+            rotation_ic_results_local,
+            FACTOR_GROUPS,
+            FACTOR_GROUP_LABELS,
+        )
 
-        print("🧭 [Factor Groups] Rotation 因子分组概览")
-        print("=" * 88)
+        return (
+            rotation_group_summary_local,
+            rotation_daily_ic_local,
+            rotation_ic_results_local,
+            rotation_ic_summary_local,
+            alpha158_top1_factor_cols_local,
+            alpha158_ic_results_local,
+            alpha158_ic_summary_local,
+            df_alpha158_group_summary_local,
+            df_alpha158_top1_local,
+        )
+
+    (
+        df_group_summary,
+        rotation_daily_ic,
+        rotation_ic_results,
+        rotation_ic_summary,
+        alpha158_top1_factor_cols,
+        alpha158_ic_results,
+        alpha158_ic_summary,
+        df_alpha158_group_summary,
+        df_alpha158_top1,
+    ) = run_factor_ic_foundation()
+
+    df_ic_summary = rotation_ic_summary
+    ic_results = rotation_ic_results
+    return (
+        alpha158_top1_factor_cols,
+        df_alpha158_group_summary,
+        df_alpha158_top1,
+        df_group_summary,
+        ic_results,
+        rotation_ic_summary,
+    )
+
+
+@app.cell
+def _(df_alpha158_group_summary, df_alpha158_top1, df_group_summary):
+    # ==============================================================================
+    # Cell 3a: 分组总览面板
+    # ==============================================================================
+    def _print_group_summary(title: str, df_summary):
+        if df_summary.height == 0:
+            print(f"ℹ️ [{title}] 当前无可展示分组。")
+            return
+
+        print(title)
+        print("=" * 108)
         print(f"  {'分组':<20} {'数量':>6} {'平均|ICIR|':>12} {'最佳|ICIR|':>12} {'组内最佳因子':<24}")
-        print("-" * 88)
-        for summary_row in df_group_summary_local.iter_rows(named=True):
+        print("-" * 108)
+        for summary_row in df_summary.iter_rows(named=True):
             print(
                 f"  {summary_row['group_name']:<20} {summary_row['n_factors']:>6} "
                 f"{summary_row['mean_abs_icir']:>12.4f} {summary_row['max_abs_icir']:>12.4f} "
                 f"{summary_row['top_factor']:<24}"
             )
-        print("-" * 88)
-        print(f"  已分组因子: {len(FACTOR_TO_GROUP)} / {sum(len(v) for v in FACTOR_GROUPS.values())}")
-        return df_group_summary_local
+        print("-" * 108)
 
-    df_group_summary = run_factor_group_summary()
+    _print_group_summary("🧭 [Rotation Groups] Rotation 因子分组概览", df_group_summary)
+    _print_group_summary("🧭 [Alpha158 Groups] Alpha158 因子分组概览", df_alpha158_group_summary)
+
+    if df_alpha158_top1.height == 0:
+        print("ℹ️ [Alpha158 Top1] 当前无 Alpha158 top1 因子可展示。")
+    else:
+        print("🏆 [Alpha158 Top1] 各分组 top1 因子 (按 |ICIR|)")
+        print("=" * 96)
+        print(f"  {'分组':<20} {'top1因子':<18} {'IC Mean':>10} {'ICIR':>10} {'|ICIR|':>10}")
+        print("-" * 96)
+        for row in df_alpha158_top1.iter_rows(named=True):
+            print(
+                f"  {row['group_name']:<20} {row['top_factor']:<18} "
+                f"{row['top_ic_mean']:>10.4f} {row['top_icir']:>10.4f} {row['top_abs_icir']:>10.4f}"
+            )
+        print("-" * 96)
     return
 
 
 @app.cell
-def _(df_all, df_ic_summary, go, make_subplots, np, stats):
+def _(
+    ALPHA_DECAY_CUSTOM_FACTORS: tuple[str, ...],
+    ALPHA_DECAY_SOURCE,
+    compute_factor_decay,
+    df_all,
+    df_alpha158_top1,
+    go,
+    make_subplots,
+    resolve_decay_factor_cols,
+    rotation_ic_summary,
+):
     # ==============================================================================
-    # Cell 3b: Alpha Decay 分析 — 因子预测力随持仓天数衰减
+    # Cell 3b: Alpha Decay 分析
+    # - rotation: 使用 Rotation Top-N 因子
+    # - alpha158_top1: 使用 Alpha158 各组 top1
+    # - custom_list: 使用手工指定因子列表
     # ==============================================================================
     def run_alpha_decay():
+        top_factors = resolve_decay_factor_cols(
+            ALPHA_DECAY_SOURCE,
+            rotation_ic_summary=rotation_ic_summary,
+            alpha158_top1=df_alpha158_top1,
+            custom_factor_cols=ALPHA_DECAY_CUSTOM_FACTORS,
+            rotation_top_n=15,
+        )
+        top_factors = [factor for factor in top_factors if factor in df_all.columns]
+        if not top_factors:
+            print("ℹ️ [Cell 3b] 当前衰减分析没有可用因子，跳过 Alpha Decay。")
+            return {}, {}
+
+        print(f"📉 [Alpha Decay] 来源={ALPHA_DECAY_SOURCE}, 因子数={len(top_factors)}...", flush=True)
+        decay_summary_local, avg_icir_local = compute_factor_decay(
+            df_all,
+            factor_cols=top_factors,
+        )
+
         horizons = ["fwd_ret_1d", "fwd_ret_2d", "fwd_ret_3d", "fwd_ret_5d"]
         h_days = [1, 2, 3, 5]
-
-        top_factors = df_ic_summary["factor"].head(15).to_list()
-        print("📉 [Alpha Decay] Top-15 因子预测力随持仓天数衰减...", flush=True)
-
-        df_sub = df_all.select(top_factors + horizons + ["date"]).sort("date")
-        dates_arr = df_sub["date"].to_numpy()
-        factor_np = {fn: df_sub[fn].to_numpy() for fn in top_factors}
-        ret_np = {h: df_sub[h].to_numpy() for h in horizons}
-
-        u_dates = np.unique(dates_arr)
-        u_dates.sort()
-        d_start = np.searchsorted(dates_arr, u_dates, side="left")
-        d_end = np.searchsorted(dates_arr, u_dates, side="right")
-
-        ic_lists = {h: {fn: [] for fn in top_factors} for h in horizons}
-
-        for di in range(len(u_dates)):
-            s, e = d_start[di], d_end[di]
-            if e - s < 30:
-                continue
-            for h in horizons:
-                rv = ret_np[h][s:e]
-                vr = np.isfinite(rv)
-                if vr.sum() < 30:
-                    continue
-                for fn in top_factors:
-                    fv = factor_np[fn][s:e]
-                    mask = np.isfinite(fv) & vr
-                    if mask.sum() < 30:
-                        continue
-                    corr, _ = stats.spearmanr(fv[mask], rv[mask])
-                    ic_lists[h][fn].append(corr)
-
-            if di % 200 == 0:
-                print(f"  进度: {di}/{len(u_dates)} ({di/len(u_dates)*100:.0f}%)", flush=True)
-
-        decay = {}
-        for h in horizons:
-            decay[h] = {}
-            for fn in top_factors:
-                if ic_lists[h][fn]:
-                    arr = np.array(ic_lists[h][fn])
-                    decay[h][fn] = {
-                        "ic_mean": float(np.mean(arr)),
-                        "icir": float(np.mean(arr) / max(np.std(arr), 1e-8)),
-                    }
-                else:
-                    decay[h][fn] = {"ic_mean": 0.0, "icir": 0.0}
-
         print("\n" + "=" * 100)
-        print("  因子 IC 衰减对比 (Top 15, 按 1d |ICIR| 排序)")
+        print("  因子 IC 衰减对比")
         print("=" * 100)
         hdr = f"{'因子':<22}"
         for d in h_days:
             hdr += f"  {'IC_'+str(d)+'d':>8} {'ICIR_'+str(d)+'d':>8}"
         print(hdr)
         print("-" * 100)
-        for fn in top_factors:
-            row_str = f"{fn:<22}"
-            for h in horizons:
-                dd = decay[h][fn]
+        for factor_name in top_factors:
+            row_str = f"{factor_name:<22}"
+            for horizon in horizons:
+                dd = decay_summary_local[horizon][factor_name]
                 row_str += f"  {dd['ic_mean']:>8.4f} {dd['icir']:>8.4f}"
             print(row_str)
         print("-" * 100)
 
-        avg_icir = {}
         print("\n📊 平均 |ICIR| 衰减:")
-        for h, d in zip(horizons, h_days):
-            vals = [abs(decay[h][fn]["icir"]) for fn in top_factors]
-            avg = float(np.mean(vals))
-            avg_icir[d] = avg
-            print(f"  {d}d: avg |ICIR| = {avg:.4f}")
-
-        COST_REF = 0.002
-        GROSS_REF = 0.00187
-        print(f"\n💰 盈亏平衡 (假设日均毛alpha≈{GROSS_REF:.3%}, 成本={COST_REF:.1%}):")
         for d in h_days:
-            cum = GROSS_REF * d
-            net = cum - COST_REF
-            daily_net = net / d
-            print(f"  持仓 {d}d: 累积毛={cum:.3%}, 成本={COST_REF:.3%}, "
-                  f"净={net:.3%}, 日均净={daily_net:.4%}")
+            print(f"  {d}d: avg |ICIR| = {avg_icir_local.get(d, 0.0):.4f}")
 
         fig = make_subplots(
-            rows=1, cols=2,
-            subplot_titles=["Top-8 因子 |ICIR| 衰减", "平均 |ICIR| 衰减"],
+            rows=1,
+            cols=2,
+            subplot_titles=["Top 因子 |ICIR| 衰减", "平均 |ICIR| 衰减"],
         )
 
-        for fn in top_factors[:8]:
-            y_vals = [abs(decay[h][fn]["icir"]) for h in horizons]
-            fig.add_trace(go.Scatter(
-                x=h_days, y=y_vals, name=fn, mode="lines+markers",
-            ), row=1, col=1)
+        for factor_name in top_factors[:8]:
+            y_vals = [abs(decay_summary_local[horizon][factor_name]["icir"]) for horizon in horizons]
+            fig.add_trace(
+                go.Scatter(
+                    x=h_days,
+                    y=y_vals,
+                    name=factor_name,
+                    mode="lines+markers",
+                ),
+                row=1,
+                col=1,
+            )
 
-        avg_y = [avg_icir[d] for d in h_days]
-        fig.add_trace(go.Scatter(
-            x=h_days, y=avg_y, name="平均",
-            mode="lines+markers+text",
-            text=[f"{v:.3f}" for v in avg_y],
-            textposition="top center",
-            line=dict(width=3, color="#00d4aa"),
-        ), row=1, col=2)
+        avg_y = [avg_icir_local.get(d, 0.0) for d in h_days]
+        fig.add_trace(
+            go.Scatter(
+                x=h_days,
+                y=avg_y,
+                name="平均",
+                mode="lines+markers+text",
+                text=[f"{v:.3f}" for v in avg_y],
+                textposition="top center",
+            ),
+            row=1,
+            col=2,
+        )
 
         fig.update_layout(
-            height=450, template="plotly_dark",
-            xaxis_title="持仓天数", xaxis2_title="持仓天数",
-            yaxis_title="|ICIR|", yaxis2_title="平均 |ICIR|",
+            height=450,
+            template="plotly_dark",
+            xaxis_title="持仓天数",
+            xaxis2_title="持仓天数",
+            yaxis_title="|ICIR|",
+            yaxis2_title="平均 |ICIR|",
         )
         fig.show()
 
-        return decay, avg_icir
+        return decay_summary_local, avg_icir_local
 
     decay_summary, avg_icir_decay = run_alpha_decay()
     return
 
 
 @app.cell
-def _(FACTOR_COLS, df_all, ic_results, px):
+def _(
+    FACTOR_COLS,
+    FEATURE_MODE,
+    RUN_ROTATION_CORR_DIAGNOSTICS,
+    df_all,
+    ic_results,
+    px,
+):
     # ==============================================================================
-    # Cell 3c: 因子相关性分析 + 基于 ICIR 的冗余剪枝
+    # Cell 3c: Rotation 相关性与冗余剪枝 (可选诊断)
     # ==============================================================================
-    from utils.ic_analysis import calc_factor_corr, print_corr_clusters, find_redundant_factors
+    from utils.ic_analysis import calc_factor_corr, find_redundant_factors, print_corr_clusters
 
     def run_corr_analysis():
-        corr_mat, factor_names = calc_factor_corr(df_all, list(FACTOR_COLS))
+        available_rotation_factors = [factor_name for factor_name in FACTOR_COLS if factor_name in df_all.columns]
+        should_run = RUN_ROTATION_CORR_DIAGNOSTICS or FEATURE_MODE == "pruned"
+        if not should_run:
+            print("ℹ️ [Cell 3c] Rotation 相关性诊断默认关闭，当前仅返回未剪枝因子列表。")
+            return None, available_rotation_factors, available_rotation_factors, []
+        if len(available_rotation_factors) < 2:
+            print("ℹ️ [Cell 3c] 当前 FEATURE_MODE 未加载足够的 Rotation 因子，跳过相关性分析。")
+            return None, available_rotation_factors, available_rotation_factors, []
+
+        corr_mat, factor_names = calc_factor_corr(df_all, available_rotation_factors)
 
         print_corr_clusters(corr_mat, factor_names, threshold=0.7)
 
-        keep, drop, decisions = find_redundant_factors(
+        keep, drop, _decisions = find_redundant_factors(
             corr_mat, factor_names, ic_results=ic_results, threshold=0.85
         )
 
@@ -429,7 +770,8 @@ def _(FACTOR_COLS, df_all, ic_results, px):
             x=factor_names,
             y=factor_names,
             color_continuous_scale="RdBu_r",
-            zmin=-1, zmax=1,
+            zmin=-1,
+            zmax=1,
             title=f"因子 Spearman 相关矩阵 ({len(factor_names)} 因子)",
         )
         fig.update_layout(height=800, width=900, template="plotly_dark")
@@ -443,32 +785,43 @@ def _(FACTOR_COLS, df_all, ic_results, px):
 
 @app.cell
 def _(
+    CORE_FEATURES_FROZEN,
     FACTOR_COLS,
     FACTOR_GROUPS,
     FACTOR_GROUP_LABELS,
     FACTOR_TO_GROUP,
+    RUN_ROTATION_CORE_SCREEN,
     factors_keep,
     ic_results,
 ):
     # ==============================================================================
-    # Cell 3d: 核心因子筛查 — 基于分组 + ICIR + 全局剪枝给出 core feature set
+    # Cell 3d: Rotation core feature screen (历史治理工具)
+    # 默认直接返回冻结的 core_12，不再作为主流程依赖
     # ==============================================================================
     def run_core_factor_screen():
+        if not RUN_ROTATION_CORE_SCREEN:
+            print("ℹ️ [Cell 3d] 默认不再运行 core feature screen，使用冻结的 core_12 配置。")
+            print(f"   core_12 = {', '.join(CORE_FEATURES_FROZEN)}")
+            return list(CORE_FEATURES_FROZEN)
+        if not ic_results:
+            print("ℹ️ [Cell 3d] 当前 FEATURE_MODE 未加载 Rotation 因子，回退到冻结的 core_12 配置。")
+            return list(CORE_FEATURES_FROZEN)
+
         keep_set = set(factors_keep)
         ranked_rows = []
         for factor_name in FACTOR_COLS:
             if factor_name not in ic_results:
                 continue
             group_key_local = FACTOR_TO_GROUP.get(factor_name, "ungrouped")
-            ranked_rows.append({
-                "factor": factor_name,
-                "group_key": group_key_local,
-                "group_name": FACTOR_GROUP_LABELS.get(group_key_local, group_key_local),
-                "ic_mean": float(ic_results[factor_name]["ic_mean"]),
-                "icir": float(ic_results[factor_name]["icir"]),
-                "abs_icir": abs(float(ic_results[factor_name]["icir"])),
-                "is_pruned_keep": factor_name in keep_set,
-            })
+            ranked_rows.append(
+                {
+                    "factor": factor_name,
+                    "group_key": group_key_local,
+                    "group_name": FACTOR_GROUP_LABELS.get(group_key_local, group_key_local),
+                    "abs_icir": abs(float(ic_results[factor_name]["icir"])),
+                    "is_pruned_keep": factor_name in keep_set,
+                }
+            )
 
         core_primary = []
         secondary_pool = []
@@ -478,7 +831,7 @@ def _(
         print(f"  {'分组':<20} {'候选因子':<24} {'|ICIR|':>10} {'保留?':>8} {'角色':>8}")
         print("-" * 108)
 
-        for group_key_local, factors_local in FACTOR_GROUPS.items():
+        for group_key_local, _factors_local in FACTOR_GROUPS.items():
             group_rows = [r for r in ranked_rows if r["group_key"] == group_key_local]
             group_rows.sort(key=lambda r: r["abs_icir"], reverse=True)
             if not group_rows:
@@ -533,22 +886,35 @@ def _():
 
 @app.cell
 def _(
+    ALPHA158_ANALYSIS_GROUP_MODE,
+    ALPHA158_GROUP_MODE,
     FACTOR_COLS,
+    FEATURE_MODE,
     LABEL,
     MIN_LIST_DAYS,
     MV_MAX,
     MV_MIN,
+    NORMALIZE_MODE,
+    alpha158_top1_factor_cols,
     core_factors,
     df_all,
     factors_keep,
     np,
     pl,
+    resolve_alpha158_group_config,
 ):
     # ==============================================================================
     # Cell 6: LightGBM Walk-Forward 打分
     # 模型只负责打分, 导出与回测解耦
     #
-    # FEATURE_MODE: "all" = 全部 FACTOR_COLS, "pruned" = 相关性剪枝后, "core" = 分组核心因子集
+    # FEATURE_MODE:
+    #   - "all" = 全部 Rotation 因子
+    #   - "pruned" = 相关性剪枝后的 Rotation 因子
+    #   - "core" = 分组核心 Rotation 因子
+    #   - "alpha158" = 全量 Alpha158
+    #   - "core_plus_alpha158" = core_12 + Alpha158
+    #   - "core_plus_alpha158_top1" = core_12 + Alpha158 各组 top1
+    #   - "all_plus_alpha158" = Rotation 全量 + Alpha158
     # ==============================================================================
     def run_lgbm_scoring():
         from datetime import datetime
@@ -560,12 +926,33 @@ def _(
         TRAIN_WINDOW = 480
         RETRAIN_FREQ = 20
         TOP_N = 20
-        FEATURE_MODE = "core"  # "all" / "pruned" / "core"; 改这里仅需重跑 Cell 6
+        alpha158_group_config = resolve_alpha158_group_config(ALPHA158_GROUP_MODE)
+        alpha158_feature_cols = list(alpha158_group_config["factor_cols"])
+        alpha158_top1_feature_cols = list(
+            dict.fromkeys(
+                factor_name
+                for factor_name in alpha158_top1_factor_cols
+                if factor_name in df_all.columns
+            )
+        )
 
         if FEATURE_MODE == "pruned":
             feature_cols = list(factors_keep)
         elif FEATURE_MODE == "core":
             feature_cols = list(core_factors)
+        elif FEATURE_MODE == "alpha158":
+            feature_cols = list(alpha158_feature_cols)
+        elif FEATURE_MODE == "core_plus_alpha158":
+            feature_cols = list(dict.fromkeys([*core_factors, *alpha158_feature_cols]))
+        elif FEATURE_MODE == "core_plus_alpha158_top1":
+            if not alpha158_top1_feature_cols:
+                raise ValueError(
+                    "FEATURE_MODE=core_plus_alpha158_top1 需要先运行 Cell 3，"
+                    "并保证 ALPHA158_ANALYSIS_GROUP_MODE 能产出 Alpha158 top1。"
+                )
+            feature_cols = list(dict.fromkeys([*core_factors, *alpha158_top1_feature_cols]))
+        elif FEATURE_MODE == "all_plus_alpha158":
+            feature_cols = list(dict.fromkeys([*FACTOR_COLS, *alpha158_feature_cols]))
         else:
             feature_cols = list(FACTOR_COLS)
 
@@ -587,11 +974,25 @@ def _(
             mode_desc = f"pruned ({len(feature_cols)})"
         elif FEATURE_MODE == "core":
             mode_desc = f"core ({len(feature_cols)})"
+        elif FEATURE_MODE == "alpha158":
+            mode_desc = f"alpha158 ({len(feature_cols)})"
+        elif FEATURE_MODE == "core_plus_alpha158":
+            mode_desc = f"core_plus_alpha158 ({len(feature_cols)})"
+        elif FEATURE_MODE == "core_plus_alpha158_top1":
+            mode_desc = f"core_plus_alpha158_top1 ({len(feature_cols)})"
+        elif FEATURE_MODE == "all_plus_alpha158":
+            mode_desc = f"all_plus_alpha158 ({len(feature_cols)})"
         else:
             mode_desc = f"all ({len(feature_cols)})"
         print("🤖 LightGBM Walk-Forward 打分", flush=True)
         print(f"   训练窗口: {TRAIN_WINDOW}天, 重训: 每{RETRAIN_FREQ}天, 标签: {LABEL}", flush=True)
         print(f"   特征模式: {mode_desc}, Top-{TOP_N}", flush=True)
+        if FEATURE_MODE in {"alpha158", "core_plus_alpha158", "all_plus_alpha158"}:
+            print(f"   Alpha158 分组: {alpha158_group_config['group_mode_label']}", flush=True)
+        elif FEATURE_MODE == "core_plus_alpha158_top1":
+            print(f"   Alpha158 Top1 来源: {ALPHA158_ANALYSIS_GROUP_MODE}", flush=True)
+            print(f"   Alpha158 Top1 因子数: {len(alpha158_top1_feature_cols)}", flush=True)
+        print(f"   截面归一化: {NORMALIZE_MODE}", flush=True)
 
         df_valid_ml = (
             df_all
@@ -690,6 +1091,16 @@ def _(
             "label": LABEL,
             "model_name": "lightgbm",
             "feature_mode": FEATURE_MODE,
+            "alpha158_group_mode": alpha158_group_config["group_mode_label"]
+            if FEATURE_MODE in {"alpha158", "core_plus_alpha158", "all_plus_alpha158"}
+            else None,
+            "alpha158_analysis_group_mode": ALPHA158_ANALYSIS_GROUP_MODE
+            if FEATURE_MODE == "core_plus_alpha158_top1"
+            else None,
+            "alpha158_top1_factors": alpha158_top1_feature_cols
+            if FEATURE_MODE == "core_plus_alpha158_top1"
+            else None,
+            "normalize_mode": NORMALIZE_MODE,
             "feature_hash": feature_hash,
             "features": feature_cols,
             "feature_count": len(feature_cols),
@@ -800,31 +1211,44 @@ def _(df_scores_raw, pl, q_full, rotation_train_meta):
 
 
 @app.cell
-def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
+def _(LABEL, df_all, df_scores_raw, go, make_subplots, np, pl, stats):
     # ==============================================================================
     # Cell 7: Signal Quality Analysis — 模型信号统计检验
     #
     # 基于 Cell 6 输出的原始分数 (df_scores_raw), 独立做 EMA 平滑.
     # 修改 EMA_ALPHA 只需重跑本 Cell, 无需重新训练模型.
+    # 评估口径拆分:
+    #   - 目标标签诊断: 跟随 LABEL, 看模型是否学到训练目标
+    #   - 经济效果评估: 固定使用 fwd_ret_1d, 保证不同训练目标之间可比
     #
     # 包含:
-    #   7a. OOS IC/ICIR + t检验 + 累积IC曲线
-    #   7b. Quintile Long-Short 分层收益
+    #   7a. Target IC/ICIR + t检验 + 累积IC曲线
+    #   7b. Economic Quintile Long-Short 分层收益 (固定 fwd_ret_1d)
     #   7c. Prediction Turnover (Top-20 日间重叠率)
     # ==============================================================================
     def run_signal_quality():
-        EMA_ALPHA = 0.35  # Score 时序平滑 (1.0 = 不平滑, 仅影响分析, 不影响训练)
+        EMA_ALPHA = 0.3  # Score 时序平滑 (1.0 = 不平滑, 仅影响分析, 不影响训练)
+        target_label_col = LABEL
+        eval_label_col = "fwd_ret_1d"
+        label_cols = ["date", "code", target_label_col]
+        if eval_label_col != target_label_col:
+            label_cols.append(eval_label_col)
 
-        # ── 合并原始 score 与 forward return ──
+        # ── 合并原始 score 与目标标签/经济评估标签 ──
         df_signal = (
             df_scores_raw
             .select(["date", "code", "score"])
             .join(
-                df_all.select(["date", "code", "fwd_ret_1d"]),
+                df_all.select(label_cols),
                 on=["date", "code"],
                 how="inner",
             )
-            .filter(pl.col("fwd_ret_1d").is_not_null() & pl.col("fwd_ret_1d").is_not_nan())
+            .filter(
+                pl.col(target_label_col).is_not_null()
+                & pl.col(target_label_col).is_not_nan()
+                & pl.col(eval_label_col).is_not_null()
+                & pl.col(eval_label_col).is_not_nan()
+            )
             .sort(["date", "code"])
         )
 
@@ -846,7 +1270,8 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
 
         dates_np = df_signal["date"].to_numpy()
         scores_np = df_signal["score"].to_numpy().astype(np.float64)
-        rets_np = df_signal["fwd_ret_1d"].to_numpy().astype(np.float64)
+        target_rets_np = df_signal[target_label_col].to_numpy().astype(np.float64)
+        eval_rets_np = df_signal[eval_label_col].to_numpy().astype(np.float64)
         codes_np = df_signal["code"].to_numpy()
 
         unique_dates = np.unique(dates_np)
@@ -856,10 +1281,12 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
         date_end = np.searchsorted(dates_np, unique_dates, side="right")
 
         print("📊 Signal Quality Analysis")
+        print(f"   目标标签: {target_label_col}")
+        print(f"   经济评估标签: {eval_label_col}")
         print(f"   样本: {len(dates_np):,} 条, {n_days} 个交易日\n")
 
         # ================================================================
-        # 7a. OOS IC / ICIR / t-test
+        # 7a. Target IC / ICIR / t-test
         # ================================================================
         daily_ic = np.full(n_days, np.nan)
         daily_n_stocks = np.zeros(n_days, dtype=int)
@@ -867,7 +1294,7 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
         for i in range(n_days):
             s, e = date_start[i], date_end[i]
             sc = scores_np[s:e]
-            rt = rets_np[s:e]
+            rt = target_rets_np[s:e]
             mask = np.isfinite(sc) & np.isfinite(rt)
             cnt = mask.sum()
             daily_n_stocks[i] = cnt
@@ -883,8 +1310,9 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
         t_stat = ic_mean / max(ic_std, 1e-8) * np.sqrt(len(valid_ic))
         ic_pos_pct = float(np.mean(valid_ic > 0)) * 100
         print("=" * 65)
-        print("  7a. OOS Model IC Analysis")
+        print("  7a. Target Label IC Analysis")
         print("=" * 65)
+        print(f"  标签列:        {target_label_col}")
         print(f"  IC Mean:       {ic_mean:+.4f}")
         print(f"  IC Std:        {ic_std:.4f}")
         print(f"  ICIR:          {icir:+.4f}")
@@ -895,7 +1323,7 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
         print("-" * 65)
 
         # ================================================================
-        # 7b. Quintile Analysis (分层收益)
+        # 7b. Economic Quintile Analysis (分层收益)
         # ================================================================
         N_Q = 5
         quintile_daily = {q: [] for q in range(1, N_Q + 1)}
@@ -904,7 +1332,7 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
         for i in range(n_days):
             s, e = date_start[i], date_end[i]
             sc = scores_np[s:e]
-            rt = rets_np[s:e]
+            rt = eval_rets_np[s:e]
             mask = np.isfinite(sc) & np.isfinite(rt)
             if mask.sum() < N_Q * 10:
                 continue
@@ -933,8 +1361,9 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
         ls_hit = float(np.mean(ls_arr > 0)) * 100
 
         print("\n" + "=" * 65)
-        print("  7b. Quintile Long-Short Analysis (Q1 做多 - Q5 做空)")
+        print("  7b. Economic Quintile Long-Short Analysis (Q1 做多 - Q5 做空)")
         print("=" * 65)
+        print(f"  经济评估标签:  {eval_label_col}")
         for q in range(1, N_Q + 1):
             arr = np.array(quintile_daily[q])
             qm = float(np.mean(arr)) * 100
@@ -978,7 +1407,7 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
         # 7d. 分年分析
         # ================================================================
         print("\n" + "=" * 65)
-        print("  7d. 分年 IC / L-S 统计")
+        print("  7d. 分年 Target IC / Economic L-S 统计")
         print("=" * 65)
         print(f"  {'年份':<6} {'IC_mean':>8} {'ICIR':>8} {'t-stat':>8} "
               f"{'L/S日均':>10} {'L/S Sharpe':>10} {'显著?':>6}")
@@ -1025,9 +1454,9 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
         fig = make_subplots(
             rows=2, cols=2,
             subplot_titles=[
-                "累积 IC 曲线",
-                "分层日均收益 (Quintile)",
-                "L/S 累积收益曲线",
+                f"累积 Target IC 曲线 ({target_label_col})",
+                f"分层日均收益 (按 {eval_label_col} 评估)",
+                f"L/S 累积收益曲线 ({eval_label_col})",
                 "Top-20 日间重叠率 (滚动20日均)",
             ],
             vertical_spacing=0.12,
@@ -1040,7 +1469,7 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
         fig.add_trace(go.Scatter(
             x=valid_dates.astype("datetime64[D]").tolist(),
             y=cum_ic_valid.tolist(),
-            name="累积IC", line=dict(color="#00d4aa"),
+            name="累积Target IC", line=dict(color="#00d4aa"),
         ), row=1, col=1)
 
         # 2. Quintile bar chart
@@ -1050,14 +1479,14 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
             x=[f"Q{q}" for q in range(1, N_Q + 1)],
             y=q_means,
             marker_color=colors,
-            name="日均收益%",
+            name=f"{eval_label_col} 日均收益%",
         ), row=1, col=2)
 
         # 3. L/S cumulative return
         cum_ls_arr = np.cumsum(ls_arr)
         fig.add_trace(go.Scatter(
             y=cum_ls_arr.tolist(),
-            name="L/S累积收益", line=dict(color="#ffa500"),
+            name=f"{eval_label_col} L/S累积收益", line=dict(color="#ffa500"),
         ), row=2, col=1)
 
         # 4. Top-20 overlap rolling mean
@@ -1086,12 +1515,14 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl, stats):
         fig.update_layout(
             height=700, template="plotly_dark",
             showlegend=False,
-            yaxis_title="累积IC", yaxis2_title="日均收益(%)",
-            yaxis3_title="累积L/S收益", yaxis4_title="重叠率(%)",
+            yaxis_title="累积Target IC", yaxis2_title="日均收益(%)",
+            yaxis3_title=f"{eval_label_col} 累积L/S收益", yaxis4_title="重叠率(%)",
         )
         fig.show()
 
         return {
+            "target_label": target_label_col,
+            "eval_label": eval_label_col,
             "ic_mean": ic_mean, "ic_std": ic_std, "icir": icir,
             "t_stat": t_stat, "ic_pos_pct": ic_pos_pct,
             "ls_mean": ls_mean, "ls_sharpe": ls_sharpe, "ls_t": ls_t,

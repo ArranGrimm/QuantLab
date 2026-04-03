@@ -21,15 +21,43 @@
   - `write_report_bundle()`
   - `resolve_registry_path()`
   - `append_jsonl_record()`
-- `notebooks/cross_section_rotation.py`: 研究 notebook (7 个 cell)
+- `notebooks/cross_section_rotation.py`: 研究 notebook (8 个 cell)
   - Cell 1-2: 数据加载 + 因子计算 + 涨跌停标记 + 截面标准化 + 超额收益标签
-  - Cell 3: Spearman IC 分析 + 排行榜 + 累积 IC 曲线
-  - Cell 3a/3d: 因子分组概览 + 核心因子筛查, 输出建议 `core feature set`
-  - Cell 3b: Alpha Decay 分析 (因子预测力随持仓天数衰减)
+  - Cell 1-2: 截面归一化现支持 `zscore / rank_pct / rank_gauss` 三种模式
+  - Cell 1-2: 现已额外提供 `fwd_ret_{1/2/3/5}d_rank_pct` 排序化标签入口
+  - Cell 1-2: 已额外接入本地 `Alpha158` 全量 `158` 因子计算
+  - Cell 1-2: 已支持按 `FEATURE_MODE` 懒计算, `alpha158` 模式不再额外计算 `Rotation` 因子
+- Cell 1: 当前已显式冻结 `core_12` 配置, 不再依赖每次运行时动态重筛
+  - Cell 2b: 校验 `amount / volume` 单位口径, 防止 `vwap_raw` 误放大 100 倍
+  - Cell 2b: 已固定写明 `vwap_raw / turnover_rate` 的 A 股单位换算口径
+- Cell 3: 因子分析底座, 统一产出 Rotation / Alpha158 两套 `IC summary + ic_results`
+- Cell 3a: 分组总览面板, 同时展示:
+  - Rotation 分组概览
+  - Alpha158 分组概览
+  - Alpha158 每组 `top1` 因子
+- Cell 3b: Alpha Decay 分析, 现支持:
+  - `rotation`
+  - `alpha158_top1`
+  - `custom_list`
+- Cell 3c: Rotation 相关性与冗余剪枝, 已降级为可选诊断工具, 默认不跑
+- Cell 3d: 原 `core feature screen` 已退出主流程, 默认仅回落到冻结 `core_12`
   - Cell 4-5: (已清空, 旧线性回测)
   - Cell 6: LightGBM Walk-Forward 打分, 本地控制 `FEATURE_MODE`, 输出 `df_scores_raw + rotation_train_meta` (训练时排除涨停样本)
+- Cell 6: `FEATURE_MODE` 现支持 `alpha158 / core_plus_alpha158 / core_plus_alpha158_top1 / all_plus_alpha158`
+- Cell 6: `core_plus_alpha158_top1` 会显式依赖 `Cell 3` 产出的 `alpha158_top1_factor_cols`
   - Cell 6b: 导出 parquet, 独立控制 `EXPORT_EMA_ALPHA`, 写入 artifact 元数据, 无需重训模型
-  - Cell 7: Signal Quality Analysis (基于原始分数, 独立 EMA, 无需重训模型)
+  - Cell 7: Signal Quality Analysis (基于原始分数, 独立 EMA; `7a` 跟随 `LABEL` 看目标诊断, `7b/7d` 固定 `fwd_ret_1d` 看经济效果)
+- 新增 `utils/factor_analysis.py`:
+  - `build_ic_summary_frame`
+  - `summarize_factor_groups`
+  - `extract_group_top_factor_cols`
+  - `build_daily_ic_frame`
+  - `resolve_decay_factor_cols`
+  - `compute_factor_decay`
+- `utils/alpha158_factors.py`:
+  - 已按 `Qlib Alpha158` 默认模板本地复刻 `158` 因子
+  - 已可直接与现有 `Rotation` 因子合并训练
+  - `RANK / BETA / RSQR / RESI / IMAX / IMIN / IMXD` 已改为 Polars 原生实现, 不再依赖 `rolling_map`
 - Rust 回测引擎:
   - `bt-core`: 涨跌停判定 (`price_limit_pct`, `is_limit_up`, `is_limit_down`)
   - `bt-core`: artifact 追踪公共 I/O (报告 bundle / meta 读取 / registry append)
@@ -59,6 +87,77 @@
 | LABEL | fwd_ret_1d | |
 | 涨停过滤 (Rust) | 日均 2.0 只 | 模型残余偏好 |
 
+### 当前最新主线候选 (2026-04-03 更新, `core_plus_alpha158 + kbar_shape`)
+| 指标 | 值 | 备注 |
+|---|---|---|
+| Feature Mode | `core_plus_alpha158` | `core_12 + Alpha158(kbar_shape)` |
+| Feature Count | 21 | `12 + 9` |
+| Normalize | `zscore` | |
+| Export EMA | `0.30` | |
+| Target IC Mean | +0.0441 | `t-stat = +10.89` |
+| ICIR | +0.3827 | |
+| L/S Sharpe | 1.47 | 经济评估口径 `fwd_ret_1d` |
+| Gross Return | +59.79% | 810 天 |
+| Total Return | +18.61% | 当前已知优于旧主线 |
+| 最大回撤 | 14.45% | 较旧主线明显改善 |
+| 总交易笔数 | 2,457 | 日均 3.0 笔 |
+| 总成本 | 205,925 | 其中滑点占比最高 |
+| Top-20 日均双边换手 | 106.6% | notebook 诊断口径 |
+
+阶段判断:
+- `Alpha158` 首轮对照已出现明确正增益, 且不是只换来更高回撤的“虚胖 alpha”
+- 最有效的新增信息当前集中在 `kbar_shape` 组, 与特征重要性结果一致
+- 需要继续确认:
+  - uplift 是来自 `kbar_shape` 独立 alpha, 还是主要来自其与 `core_12` 的交互
+  - notebook 高换手诊断与 Rust 实际成交次数之间的差异, 是否还能通过组合层参数继续压缩成本
+
+### `alpha158(kbar_shape)` 单跑验证 (2026-04-03 更新)
+| 指标 | 值 | 备注 |
+|---|---|---|
+| Feature Mode | `alpha158` | 仅 `kbar_shape` 9 因子 |
+| Feature Count | 9 | |
+| Export EMA | `0.30` | |
+| Target IC Mean | +0.0438 | `t-stat = +12.10` |
+| ICIR | +0.4250 | 统计信号并不弱 |
+| L/S Sharpe | 1.45 | notebook 经济分层仍显著 |
+| Gross Return | +7.65% | 810 天 |
+| Total Return | -21.70% | 成本后明显失败 |
+| 最大回撤 | 28.68% | 高于当前主线 |
+| 总交易笔数 | 2,250 | 日均 2.8 笔 |
+| 总成本 | 146,736 | gross alpha 无法覆盖成本 |
+| Top-20 日均双边换手 | 124.0% | 高于 `core_plus_alpha158` |
+
+阶段判断更新:
+- `kbar_shape` 单跑时只体现出“统计上有信息量”, 但组合层不可兑现
+- 因此上一轮 uplift 不能再理解为“发现了可独立替代 `core_12` 的新主线”
+- 当前更合理的解释是:
+  - `kbar_shape` 对 `core_12` 更像高价值交互增强器
+  - 其独立排序能力不足以支撑当前 `Top-20 + hold_buffer=50 + min_score=0.002` 的组合约束
+- 后续主线应聚焦:
+  - `core_12 + kbar_shape`
+  - 以及该组合在组合层的成本压缩与兑现优化
+
+### `core_plus_alpha158_top1` 全组 top1 验证 (2026-04-03 更新)
+| 指标 | 值 | 备注 |
+|---|---|---|
+| Feature Mode | `core_plus_alpha158_top1` | `core_12 + Alpha158(all groups top1)` |
+| Feature Count | 21 | `12 + 9` |
+| Export EMA | `0.30` | |
+| Target IC Mean | +0.0322 | `t-stat = +8.50` |
+| ICIR | +0.2987 | 弱于 `kbar_shape` 组合 |
+| L/S Sharpe | 1.36 | notebook 经济分层仍为正 |
+| Gross Return | +10.40% | 810 天 |
+| Total Return | -49.33% | 成本后彻底失败 |
+| 最大回撤 | 50.38% | 明显不可接受 |
+| 总交易笔数 | 5,631 | 日均 7.0 笔 |
+| 总成本 | 298,619 | `slippage + stamp duty` 主导 |
+| Top-20 日均双边换手 | 121.4% | 明显高于 `kbar_shape` 组合 |
+
+阶段判断更新:
+- `Alpha158` 各组 `top1` 虽然统计上并非完全无效, 但组合层兑现严重失控
+- “每组保留 1 个”这个规则对训练入口过于机械, 会把弱组一起带入并稀释强组增量
+- 因此 `core_plus_alpha158_top1` 暂时退出主线, 当前 Alpha158 主线仍维持 `core_plus_alpha158(kbar_shape)`
+
 #### 失败实验记录
 - **涨停幻觉**: 旧模型 +586% 几乎全是虚假买入涨停股, 过滤后 Gross 仅 +5.7%
 - **超额收益标签** (fwd_ret_1d_excess): 五分位单调性崩塌, Top-20 选股退化为随机
@@ -66,6 +165,7 @@
 - **128 天长周期因子** (42→55 因子): IC 下降, 回测净收益从 +82% 降至 +30%, 已回退
 - **EMA α=1.0** (无平滑): 日均 14.1 笔交易, 成本 > 本金, 净收益 -45%
 - **单因子 IC 剪枝** (55→50): 反而更差, 树模型非线性交互使单因子 IC 不适合做删减依据
+- **`core_plus_alpha158_top1`**: 虽有 `Gross +10.40%`, 但 `Net -49.33% / MDD 50.38% / 7.0 trades/day`, 属于高换手失控失败
 
 ### 原策略关键参数 (2026-01 更新)
 | 指标 | 值 | 备注 |
@@ -93,15 +193,35 @@
 详见 `experiments/rotation-next-phase.md`。
 
 当前下一阶段优先级:
-1. 在 `core_12 + fwd_ret_1d + EXPORT_EMA_ALPHA=0.30` 基线下, 先验证训练目标语义
-2. 优先新增“排序化标签”实验, 再决定是否进入 `LGBMRanker`
-3. 训练目标稳定后, 再扫描 `hold_buffer / max_hold_days / top_n / min_score`
-4. 因子治理与 `Ridge/ElasticNet` / `CatBoost/XGBoost` 对照后置
+1. 将 `core_plus_alpha158(kbar_shape)` 作为当前最强主线候选, 与旧 `core_12` 基线并行对照
+2. `alpha158(kbar_shape)` 单跑已验证不适合作为独立主线, 暂不继续深挖
+3. 先讨论并设计“因子挖掘分析/因子选择”与“主训练/导出/回测”更彻底解耦的架构, 再决定下一轮 notebook 改造
+4. 若继续扩 Alpha158, 优先看更强子集而非 `top1_all`, 避免弱组稀释与高换手失控
+5. 围绕 `core_plus_alpha158(kbar_shape)` 做组合层兑现优化: 优先看 `hold_buffer / min_score / Top-N` 对成本的压缩空间
+6. `fwd_ret_1d_rank_pct` 仍可保留观察, 但继续后置于组合层优化
+7. 暂不急于上全量 `158` 因子, 继续按小分组渐进扩容
 
 备注:
 - `Rotation` 当前标的池已经是 **80~500 亿**, 这不是下一阶段待修正项
 - 导出侧 EMA 扫描已完成, `0.30` 为当前净收益最佳点, `0.28` 为次优平衡点
 - `cross_section_rotation.py` 已修复 Cell 6 的 `LABEL` 动态过滤 bug, 后续切换标签不会再误用写死的 `fwd_ret_1d`
+- `cross_section_rotation.py` 已新增 `fwd_ret_{1/2/3/5}d_rank_pct`，可在不改模型结构的前提下直接验证排序化标签
+- `cross_section_rotation.py` 已新增 `NORMALIZE_MODE`，可直接对照 `zscore / rank_pct / rank_gauss` 三种特征截面归一化
+- `utils/signal_export.py` 已把 `normalize_mode` 写入 artifact 元数据，后续导出可直接区分不同归一化实验
+- `cross_section_rotation.py` 的 Cell 7 现已采用双口径评估: `Target IC` 跟随 `LABEL`, 经济分层固定按 `fwd_ret_1d`
+- `cross_section_rotation.py` 的 Cell 6 现已支持 `core_plus_alpha158_top1`, 可直接消费 `Cell 3` 产出的各组 `top1` 因子清单
+- `core_plus_alpha158_top1` 首轮验证已失败, 说明当前不宜把“各组 top1 全并入训练”作为默认扩容路径
+- `fwd_ret_1d_rank_pct` 首轮观察未显示优于当前 `fwd_ret_1d` 主线, 尤其经济分层与最终回测暂未改善
+- `NORMALIZE_MODE = rank_pct / rank_gauss` 两轮实验均显著弱于 `zscore`, 当前不再作为主线优化方向
+- 组合参数扫描显示 `max_hold_days=15` 的纯净收益更高, 但当前不升格为对标主线, 以免偏离博主策略“平均持仓 2.8 天”的研究初心
+- `stock_daily.volume` 单位已验证为“手”, 因此 `vwap_raw` 与 `turnover_rate` 现统一按 `volume * 100` 还原股数后再计算
+- `Alpha158` 已完成本地 Polars 复刻并接入 `Rotation` notebook, 下一步进入首轮基线对照
+- `Alpha158` 最重的 `35` 个窗口因子现已去除 Python 回调, 与旧 `rolling_map` 版本数值对齐
+- `alpha158` 单跑实验现会自动跳过 `Rotation` 因子分析 Cell, 以缩短实验等待时间
+- `Alpha158(kbar_shape)` 首轮 `core_plus_alpha158` 对照已给出当前更优净收益: `Gross +59.79% / Net +18.61% / MDD 14.45%`
+- 从当前特征重要性看, 新增 `kbar_shape` 因子里 `KUP2 / KLOW2 / KUP / KLOW / KMID2 / KSFT / KMID / KSFT2 / KLEN` 整体贡献突出
+- `alpha158(kbar_shape)` 单跑虽有较高 `IC / ICIR`, 但 Rust 回测仅 `Gross +7.65% / Net -21.70% / MDD 28.68%`
+- 这说明 `kbar_shape` 当前更像是 `core_12` 的交互增强器, 而非可单独替代主线的独立特征集
 
 ---
 
