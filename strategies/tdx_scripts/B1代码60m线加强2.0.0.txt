@@ -1,0 +1,53 @@
+{===========================================}
+{   B1策略 - 60分钟卖盘无力确认 v5.0        }
+{   关注卖盘的"无力"而非"枯竭"              }
+{===========================================}
+
+{*************** 参数设置 *****************}
+YIN_AMP_TH:=1.5;      {阴线振幅阈值}
+YIN_BODY_TH:=0.8;     {阴线实体阈值}
+YIN_VOL_TH:=0.8;      {阴线量比阈值（可选）}
+
+{*************** 1. 基础计算 *****************}
+IS_YIN:=C<O;
+YIN_AMP:=IF(IS_YIN, (H-L)/L*100, 0);
+YIN_BODY:=IF(IS_YIN, ABS(C-O)/O*100, 0);
+YIN_VOL_RATIO:=IF(IS_YIN, VOL/REF(MA(VOL,20),1), 0);
+
+{*************** 2. 卖盘无力信号（新定义）***********}
+
+{卖盘无力：阴线但下跌无力}
+WEAK_YIN:=IS_YIN AND YIN_AMP<YIN_AMP_TH AND YIN_BODY<YIN_BODY_TH;
+
+{可以加上量比条件（可选）}
+{ WEAK_YIN:=WEAK_YIN AND YIN_VOL_RATIO<YIN_VOL_TH; }
+
+{*************** 3. 普通收敛信号 ***********}
+TOTAL_AMP:=(H-L)/L*100;
+TOTAL_BODY:=ABS(C-O)/O*100;
+TOTAL_VOL_RATIO:=VOL/MA(VOL,20);
+
+CONVERGE:=TOTAL_AMP<2.0 AND TOTAL_BODY<1.0 AND TOTAL_VOL_RATIO<1.0;
+
+{*************** 4. 买盘启动信号 ***********}
+IS_YANG:=C>O;
+BREAK:=IS_YANG AND VOL/MA(VOL,20)>1.5 AND C>REF(HHV(H,16),1);
+
+{*************** 5. 信号去重和绘制 ***********}
+{去重}
+LAST_WEAK:=REF(WEAK_YIN,1);
+LAST_CONV:=REF(CONVERGE,1);
+LAST_BREAK:=REF(BREAK,1);
+
+FINAL_WEAK:=WEAK_YIN AND NOT(LAST_WEAK);
+FINAL_CONV:=CONVERGE AND NOT(LAST_CONV) AND NOT(WEAK_YIN);
+FINAL_BREAK:=BREAK AND NOT(LAST_BREAK);
+
+{绘制}
+STICKLINE(FINAL_CONV,0,5,2,0),COLORLIRED;   {收敛}
+STICKLINE(FINAL_WEAK,0,7,3,0),COLORRED;     {卖盘无力}
+STICKLINE(FINAL_BREAK,0,10,3,0),COLORMAGENTA; {启动}
+
+DRAWTEXT(FINAL_CONV,4,'收'),COLORLIRED;
+DRAWTEXT(FINAL_WEAK,6,'弱'),COLORRED;  {改为"弱"表示卖盘无力}
+DRAWTEXT(FINAL_BREAK,9,'干'),COLORMAGENTA;

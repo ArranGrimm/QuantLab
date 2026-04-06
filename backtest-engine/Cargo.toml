@@ -1,0 +1,33 @@
+[workspace]
+members = ["crates/core", "crates/b1", "crates/rotation", "crates/renko"]
+resolver = "2"
+
+[workspace.dependencies]
+bevy_ecs = "0.15"
+bevy_app = "0.15"
+chrono = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+polars = { version = "0.46", features = ["parquet", "lazy", "dtype-date", "dtype-u16"] }
+clap = { version = "4.0", features = ["derive"] }
+
+# ── Profile: Dev ──
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# ── Profile: Release (快速编译) ──
+[profile.release]
+opt-level = 3
+lto = "off"
+codegen-units = 16
+
+# ── Profile: Production (极致性能) ──
+[profile.production]
+inherits = "release"
+lto = true
+codegen-units = 1
+panic = "abort"

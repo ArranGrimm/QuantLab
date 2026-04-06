@@ -1,0 +1,76 @@
+{==== B1选股代码v2.04b ====}
+DEN:=HHV(H,9)-LLV(L,9);
+
+RSV:=IF(DEN=0,50,(C-LLV(L,9))/DEN*100);
+
+K:=SMA(RSV,3,1);D:=SMA(K,3,1);J:=3*K-2*D;
+
+J_OK:=J<=13;
+
+REAL_YANG:=C>O AND NOT(C<REF(C,1));
+
+REAL_YIN :=C<O AND NOT(C>REF(C,1));
+
+VOL_YANG21:=SUM(VOL*REAL_YANG,21);
+
+VOL_YIN21 :=SUM(VOL*REAL_YIN ,21);
+
+VOL_YANG14:=SUM(VOL*REAL_YANG,14);
+
+VOL_YIN14 :=SUM(VOL*REAL_YIN ,14);
+
+YANGYIN_OK:=(VOL_YANG21>1.5*VOL_YIN21) OR (VOL_YANG14>1.5*VOL_YIN14);
+
+A28:=MA(AMOUNT,28)/100000000; LQ:=A28>=0.005;
+
+MV:=C*CAPITAL*100/100000000; MVOK:=MV>=50;           
+
+O85:=LLV(O,28)+0.925*(HHV(O,28)-LLV(O,28));
+
+TOP15O:=O>=O85;
+
+FD15:=C<REF(C,1) AND C<=O AND VOL>=1.15*REF(VOL,1);
+
+GOOD28:=COUNT(TOP15O AND FD15,28)=0;
+
+MAXVOL28:=HHV(VOL,28);
+
+MAX28_OK:=COUNT(VOL=MAXVOL28 AND REAL_YIN,28)=0;
+
+{================ ①：倍量柱 ================}
+
+AVG40:=MA(VOL,40);
+
+PLRY:=VOL>1.8*REF(VOL,1) AND C>O AND VOL>AVG40;
+
+PLRY_CNT:=COUNT(PLRY,28)>=3;          
+
+{================ ②：关键K ================}
+
+V40P:=SUM(REF(VOL,1),40)/40;             
+
+BD:=C>REF(C,1) AND C>=O;              
+
+BIGV:=VOL>1.75*V40P;                  
+
+R55:=LLV(C,40)+0.55*(HHV(C,40)-LLV(C,40));    
+
+POSOK:=C>R55;                       
+
+KEY_K := BD AND BIGV AND POSOK;
+
+TRIGGER := PLRY_CNT OR EXIST(KEY_K, 28);
+
+{================ 选股 ================} 
+
+XG:= TRIGGER AND J_OK AND LQ AND MVOK AND GOOD28 AND MAX28_OK AND YANGYIN_OK;
+
+A1:=XG;
+
+WL:= EMA(EMA(C,10),10);
+YL:= (MA(CLOSE,14)+MA(CLOSE,28)+MA(CLOSE,57)+MA(CLOSE,114))/4;
+
+B1:=A1*(WL>YL)*(C>YL);
+
+B1;
+

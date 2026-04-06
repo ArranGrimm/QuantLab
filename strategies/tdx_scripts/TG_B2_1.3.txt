@@ -1,0 +1,155 @@
+非ST股 := NOT(NAMELIKE('ST')) AND NOT(NAMELIKE('*ST')); 
+M1:=14;M2:=28;M3:=57;M4:=114;N1:=3;N2:=14;N3:=28;N4:=57;
+
+
+
+知行短期趋势线:=EMA(EMA(C,10),10),COLORFFFFFF,LINETHICK1;
+知行多空线:=(MA(CLOSE,14)+MA(CLOSE,28)+MA(CLOSE,57)+MA(CLOSE,114))/4;
+X:=10;
+
+
+
+
+
+
+
+
+RSV:=(C-LLV(L,9))/(HHV(H,9)-LLV(L,9))*100;
+K:=SMA(RSV,3,1);
+D:=SMA(K,3,1);
+J:=3*K-2*D;
+KDJ_J低 := J < 13; 
+DIF:=EMA(C,12)-EMA(C,26);
+DEA:=EMA(DIF,9); 
+MACD_多头 := DIF >= 0; 
+价格高点位置 := BARSLAST(H = HHV(H,30)); 
+高点DIF := REF(DIF, 价格高点位置); 
+前15高DIF := REF(HHV(DIF,15), 价格高点位置+1); 
+前20高DIF := REF(HHV(DIF,20), 价格高点位置+1); 
+涨幅:=(C-REF(C,1))/REF(C,1)*100; 
+振幅:=(H-L)/REF(C,1)*100;
+BBI:=(MA(C,3)+MA(C,6)+MA(C,12)+MA(C,24))/4;
+前20日BBI:=REF(BBI,20);
+LC:=REF(CLOSE,1);
+RSI1:=SMA(MAX(CLOSE-LC,0),N1,1)/SMA(ABS(CLOSE-LC),N1,1)*100;
+RSI2:=SMA(MAX(CLOSE-LC,0),N2,1)/SMA(ABS(CLOSE-LC),N2,1)*100;
+RSI3:=SMA(MAX(CLOSE-LC,0),N3,1)/SMA(ABS(CLOSE-LC),N3,1)*100;
+RSI4:=SMA(MAX(CLOSE-LC,0),N4,1)/SMA(ABS(CLOSE-LC),N4,1)*100;
+枢轴线:=MA(RSI1,25);
+MA10:=MA(C,10);
+MA20:=MA(C,20);
+MA50:=MA(C,50);
+VOL_MA60:=MA(VOL,60);
+K线长度:=HIGH-LOW;
+上影线:=HIGH-MAX(C,O);
+下影线:=MIN(C,O)-LOW;
+实体 := O - C;
+近3天最高位距今 := HHVBARS(H, 3);  
+该K线DIF := REF(DIF, 近3天最高位距今);
+前3天最高点位置 := BARSLAST(H = HHV(H, 3));
+次高点基础:=HHV(H, 4) = HHV(H, 60) AND H <> HHV(H, 60)         						   	 
+		    AND (VOL > MA(VOL, 5) OR VOL > MA(VOL, 10))             					  
+    	    AND C < O        															  
+   		    AND (((C / REF(C, 10) - 1) * 100 > 10) OR ((C / REF(C, 50) - 1) * 100 > 50)); 
+次高点判断:=IF(次高点基础,
+            IF(前3天最高点位置 >= 0,
+            IF(VOL >= REF(VOL, 前3天最高点位置) * 0.80, 1,0),0),0); 					    
+上证收盘:= "999999$CLOSE";         
+上证昨高:= REF("999999$HIGH", 1);  
+上证30日高:= HHV(REF(上证收盘, 1), 29);  
+知行线波动平均 := (REF(知行多空线,15) + REF(知行多空线,30) + REF(知行多空线,45) + REF(知行多空线,60)) / 4;
+知行线平均_今 := IF(知行线波动平均 <> 0, (知行多空线 - 知行线波动平均)/知行线波动平均, 0);
+涨停价:=IF(NAMELIKE('ST'),ZTPRICE(REF(C,1),0.05),
+        IF(CODELIKE('300') OR CODELIKE('688') OR CODELIKE('301'),ZTPRICE(REF(C,1),0.2),
+        ZTPRICE(REF(C,1),0.1)));
+一字涨停:=(O=C)AND(C=H)AND(C>=涨停价);
+涨停板:=C>=涨停价 AND C>REF(C,1)*1.05;
+跌停价:=IF(NAMELIKE('ST'), DTPRICE(REF(C,1),0.05),
+         IF(CODELIKE('300') OR CODELIKE('688') OR CODELIKE('301'), DTPRICE(REF(C,1),0.2),
+         DTPRICE(REF(C,1),0.1)));
+一字跌停:=(O=C) AND (C=L) AND (C<=跌停价);
+N:=HHVBARS(REF(J,1),15)+1;
+Y有效:=N>=1 AND N<=15;
+YJ:=REF(J,N); YC:=REF(CLOSE,N);
+波幅:=MA(TR,30);
+涨跌幅:=(C-REF(C,1))/REF(C,1)*100;
+波动率:=波幅/REF(C,1)*100;
+大长阳:=C>O AND 涨跌幅>波动率*1.5 AND 涨跌幅>2;
+大长阴:=C<O AND ABS(涨跌幅)>波动率*1.1 AND ABS(涨跌幅)>2;
+参考成交量:=IF(REF(VOL,1)<=VOL/8,REF(VOL,2),REF(VOL,1));
+倍量柱:=IF(VOL>参考成交量*1.8,1,0) AND C>O AND C>REF(C,1);
+天量柱:=REF(倍量柱, 1) AND VOL >= REF(VOL, 1) * 1.8;
+关键K:=CLOSE>REF(CLOSE,1) AND VOL>参考成交量*1.8 AND 大长阳 AND VOL>MA(VOL,40);
+暴力K := C > REF(C, 1) AND VOL > 参考成交量 * 1.8 AND 涨跌幅 > 4 AND 上影线 <= K线长度 / 4 AND VOL > MA(VOL, 60)
+    AND (REF(C, 1) - REF(O, 9)) / REF(O, 9) * 100 < 4 AND (REF(C, 1) - REF(O, 4)) / REF(O, 4) * 100 < 4;
+VAR1A:=(HHV(HIGH,4)-CLOSE)/(HHV(HIGH,4)-LLV(LOW,4))*100-90;
+VAR2A:=SMA(VAR1A,4,1)+100;
+VAR3A:=(CLOSE-LLV(LOW,4))/(HHV(HIGH,4)-LLV(LOW,4))*100;
+VAR4A:=SMA(VAR3A,6,1);
+VAR5A:=SMA(VAR4A,6,1)+100;
+VAR6A:=VAR5A-VAR2A;
+砖型图:=IF(VAR6A>4,VAR6A-4,0),COLORRED;
+砖值:=ABS(砖型图-REF(砖型图,1));
+砖值倍数:=砖值/REF(砖值,1);
+砖值均值:=MA(砖值,120);
+B2触发:=((REF(J,1)<=21) OR (REF(RSI1,1)<=21)) AND VOL>REF(VOL,1) AND 涨幅>3.95 AND VOL > VOL_MA60 AND C>O;
+得分1:=IF(J>80,-3,0) + IF(J>65,-0.8,0) + IF(J>55,-0.8,0);
+得分2:=IF(DIF>=0,0.3,0); {MACD_DIF≥0 → 0.3分}
+得分3:=IF(MA10>REF(MA10,1) AND MA20>REF(MA20,1) AND MA50>REF(MA50,1),0.6,0);
+得分4:=IF(C>知行多空线,0.3,0);
+得分5:=IF(NOT(J<K AND J<D),0.3,0); 
+得分6:=IF(C>BBI,0.4,0);
+得分7:=IF(RSI1>枢轴线,0.5,0) + IF(RSI1>枢轴线-5,0.3,2);
+得分8:=IF(上影线<=K线长度/4,1.5,0) + IF(上影线>=K线长度/4,-1,0) + IF(上影线>=K线长度/3,-1,0) + IF(上影线>=K线长度/2,-1,0);
+得分9:=IF(上影线<=K线长度/4 AND 下影线<=K线长度/4 AND C>O,1.2,0); 
+得分10:=IF(VOL > VOL_MA60, 0.4, 0) + IF(VOL > 1.25 * VOL_MA60, 0.6, 0) + IF(VOL > 1.5 * VOL_MA60, 0.8, 0);
+得分11:=IF(C=HHV(C,90),0.7,0) + IF(C=HHV(C,60),0.7,0) +  IF(C=HHV(C,30),0.7,0);
+阳量40日总和:= SUM(IF(C>O,VOL,0),40); 
+阴量40日总和:= SUM(IF(C<O,VOL,0),40); 
+得分12:=(阳量40日总和 > 阴量40日总和) * 0.3 + (阳量40日总和 >= 1.25*阴量40日总和) * 0.4 + (阳量40日总和 >= 1.5*阴量40日总和) * 0.5;
+最大阳量20日:=MAX(IF(C>O,VOL,0),20);
+最大阴量20日:=MAX(IF(C<O,VOL,0),20);
+得分13:=IF(最大阳量20日>最大阴量20日,0.3,0);
+得分14:=IF(REF(C,1)<REF(知行多空线,1) AND C>知行多空线,0.5,0) AND C>REF(H,1);
+得分15:=IF(价格高点位置>0 AND 高点DIF < 前20高DIF, -0.3, 0) + IF(价格高点位置>0 AND 高点DIF < 前15高DIF, -0.3, 0);
+得分16:=(BARSLAST(V=HHV(V,60))>=1 AND REF(C,BARSLAST(V=HHV(V,60)))>REF(O,BARSLAST(V=HHV(V,60))))*0.3 +
+		(BARSLAST(V=HHV(V,50))>=1 AND REF(C,BARSLAST(V=HHV(V,50)))>REF(O,BARSLAST(V=HHV(V,50))))*0.3 +
+		(BARSLAST(V=HHV(V,40))>=1 AND REF(C,BARSLAST(V=HHV(V,40)))>REF(O,BARSLAST(V=HHV(V,40))))*0.3;
+得分17:=(BARSLAST(V=HHV(V,30))>=1 AND REF(C,BARSLAST(V=HHV(V,30)))>REF(O,BARSLAST(V=HHV(V,30))))*0.3 +
+    	(BARSLAST(V=HHV(V,20))>=1 AND REF(C,BARSLAST(V=HHV(V,20)))>REF(O,BARSLAST(V=HHV(V,20))))*0.3 +
+    	(BARSLAST(V=HHV(V,10))>=1 AND REF(C,BARSLAST(V=HHV(V,10)))>REF(O,BARSLAST(V=HHV(V,10))))*0.3 +
+		(BARSLAST(V=HHV(V,10))>=1 AND REF(C,BARSLAST(V=HHV(V,10)))<REF(O,BARSLAST(V=HHV(V,10)))) * (-2.5);
+得分18:=IF(上证收盘 > 上证昨高, 0.3, 0) + IF(上证收盘 > 上证30日高, 1, 0);
+得分19:=IF(VOL>参考成交量*1.8,0.8,-2)+IF(VOL>参考成交量*2.5,0.3,0)+IF(VOL>参考成交量*3,0.3,0)+IF(VOL>参考成交量*3.5,0.3,0)+IF(VOL>参考成交量*4,0.3,0);
+得分20:=IF(关键K,1,0);
+得分21:=IF(关键K AND 暴力K,0.5,0);
+得分22:=IF(RSI2>RSI3 AND RSI3>RSI4, 0.7, 0);
+得分23:=IF(COUNT(IF(V<REF(V,1)*1.1 AND REF(V,1)<REF(V,2)*1.1 AND REF(V,2)<REF(V,3)*1.1 AND REF(V,3)<REF(V,4)*1.1
+	 		AND REF(C,1)<REF(O,1) AND REF(C,2)<REF(O,2) AND REF(C,3)<REF(O,3) AND REF(C,4)<REF(O,4),1,0),5),-1,0);
+得分24:=IF(VOL = HHV(VOL, 60),0.5,0) + IF(VOL = HHV(VOL, 50),0.5,0) + IF(VOL = HHV(VOL, 40),0.5,0) + IF(VOL = HHV(VOL, 30),0.5,0);
+得分25:=IF(J>REF(J,1) AND REF(J,1)<REF(J,2) AND REF(J,2)<REF(J,3), 1.5, -0.5);
+得分26:=IF(COUNT(大长阴 AND VOL > REF(VOL, 1) * 1.2 AND VOL > MA(VOL, 60) AND  VOL > (HHV(VOL, 60))/1.95, 15) >= 1, -0.4, 0) + 
+		IF(COUNT(大长阴 AND VOL > REF(VOL, 1) * 1.4 AND VOL > MA(VOL, 60) AND  VOL > (HHV(VOL, 60))/1.95, 10) >= 1, -0.4, 0) + 
+		IF(COUNT(大长阴 AND VOL > REF(VOL, 1) * 1.6 AND VOL > MA(VOL, 60) AND  VOL > (HHV(VOL, 60))/1.95, 10) >= 1, -0.4, 0) + 
+		IF(COUNT(大长阴 AND VOL > REF(VOL, 1) * 1.8 AND VOL > MA(VOL, 60) AND  VOL > (HHV(VOL, 60))/1.95, 10) >= 1, -0.4, 0) +
+		IF(COUNT(大长阴 AND VOL > REF(VOL, 1) * 2 AND VOL > MA(VOL, 60) AND  VOL > (HHV(VOL, 60))/1.95, 10) >= 1, -0.4, 0);
+得分27:=IF(V < HHV(V, 13), -0.3, 0) + IF(V < HHV(V, 12), -0.3, 0) + IF(V < HHV(V, 11), -0.3, 0);
+得分28:=IF(COUNT((C=O) AND (C<>涨停价 OR C<=REF(C,1)),60)>2,-1.5,0);
+条件8得分:=IF(V=LLV(IF(一字涨停,10000000,V),30),0.3,0)+IF(V=LLV(IF(一字涨停,10000000,V),26),0.3,0)+IF(V=LLV(IF(一字涨停,10000000,V),24),0.3,0)+
+		   IF(V=LLV(IF(一字涨停,10000000,V),22),0.3,0)+IF(V=LLV(IF(一字涨停,10000000,V),20),0.3,0);
+条件9得分:=IF(V=LLV(IF(一字涨停,10000000,V),18),0.3,0)+IF(V=LLV(IF(一字涨停,10000000,V),16),0.3,0)+IF(V=LLV(IF(一字涨停,10000000,V),14),0.3,0)+
+		   IF(V=LLV(IF(一字涨停,10000000,V),12),0.3,0)+IF(V=LLV(IF(一字涨停,10000000,V),10),0.3,0);
+得分29:=IF(COUNT(条件8得分>0 OR 条件9得分>0,3)>=1,0.5,0);
+得分30:=IF(REF(C,10) > REF(知行短期趋势线,10) AND ABS((REF(L,1)/REF(知行多空线,1))-1) <= 0.02 AND ABS((知行短期趋势线 - 知行多空线)/知行多空线) > 0.04, 1, 0);
+得分31:=IF( REF(C,1) < REF(O,1) AND L < REF(L,1) AND C > REF(H,1) AND VOL>REF(VOL,1),0.8, 0);
+得分32:=IF(C<知行多空线,-3,0) + IF(知行短期趋势线<知行多空线,-2,0);
+得分33:=IF(COUNT(一字跌停,20)>=1,-2,0);
+得分34:=IF(REF((REF(砖型图,1)<砖型图),1)=0 AND ((REF(砖型图,1)<砖型图)=1) AND 砖值>REF(砖值,1)/3*2 AND 砖值>5,0.8,0);
+得分35:=IF(得分34=1 AND 砖值倍数>2,0.4,0);
+得分36:=IF(REF((REF(砖型图,1)<砖型图),1)=0 AND ((REF(砖型图,1)<砖型图)=1) AND 砖值<REF(砖值,1) AND 砖值<5,-2,0);
+B2总得分:=IF(B2触发,得分1+得分2+得分3+得分4+得分5+得分6+得分7+得分8+得分9+得分10+
+					得分11+得分12+得分13+得分14+得分15+得分16+得分17+得分18+得分19+
+					得分20+得分21+得分22+得分23+得分24+得分25+得分26+得分27+得分28+
+					得分29+得分30+得分31+得分32+得分33+得分34+得分35+得分36,0);
+B2总分:=B2总得分;
+选股: 非ST股 AND MACD_多头 AND 知行短期趋势线 > 知行多空线 AND B2总分>=X;

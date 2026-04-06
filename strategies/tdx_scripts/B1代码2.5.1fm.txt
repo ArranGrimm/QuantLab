@@ -1,0 +1,95 @@
+{== 开始复制，祝您涨停！==}
+
+{== ①关键防线原版核心（来自股海网，参数可调换；使用前先学习视频） =m=}
+
+VAR1A:=(HHV(HIGH,9)-CLOSE)/(HHV(HIGH,9)-LLV(LOW,9))*100-70;
+
+VAR2A:=SMA(VAR1A,9,1)+100;
+
+VAR3A:=(CLOSE-LLV(LOW,9))/(HHV(HIGH,9)-LLV(LOW,9))*100;
+
+VAR4A:=SMA(VAR3A,3,1);
+
+VAR5A:=SMA(VAR4A,3,1)+100;
+
+VAR6A:=VAR5A-VAR2A;
+
+关键防线:=IF(VAR6A>6,VAR6A-6,0);
+
+AA:=(REF(关键防线,1)<关键防线);
+
+BB:=REF(关键防线,1)>关键防线;
+
+{== ②品红判断（2月24日自研） ==}
+
+一个图:=关键防线; {需核对}
+
+Y_GREEN := REF(一个图,2)>REF(一个图,1);
+
+Y_TOP := REF(一个图,2);Y_BOT := REF(一个图,1);
+
+THRESH := Y_TOP - (Y_TOP-Y_BOT)*0.25; {此参数可修改}
+
+MAG := Y_GREEN AND AA AND (一个图 > THRESH);
+
+{== ③防线选股触发==}
+
+MAG_OK := MAG OR REF(MAG,1);
+
+CC:=REF(AA,1)=0 AND AA=1;
+
+XG := CC AND MAG_OK;
+
+{== ④ 2.41P量价 ==}
+
+REAL_YANG:=C>O AND NOT(C<REF(C,1));
+
+REAL_YIN:=C<O AND NOT(C>REF(C,1));
+
+RSV:=(C-LLV(L,9))/(HHV(H,9)-LLV(L,9))*100;
+
+K:=SMA(RSV,3,1); D:=SMA(K,3,1); J:=3*K-2*D;
+
+J_OK:=(J<=13) OR (REF(J,1)<=13);
+
+VOL_YANG1:=SUM(VOL*REAL_YANG,57);
+
+VOL_YIN1:=SUM(VOL*REAL_YIN,57);
+
+VOL_YANG2:=SUM(VOL*REAL_YANG,14);
+
+VOL_YIN2:=SUM(VOL*REAL_YIN,14);
+
+YANGYIN_OK1:=VOL_YANG1>1.25*VOL_YIN1;
+
+YANGYIN_OK2:=VOL_YANG2>2.05*VOL_YIN2;
+
+A28:=MA(AMOUNT,28)/100000000; LQ:=A28>=0.005;
+
+MV:=C*CAPITAL*100/100000000; MVOK:=MV>=40;
+
+O85:=LLV(O,28)+0.95*(HHV(O,28)-LLV(O,28)); TOP15O:=O>=O85;
+
+FD15:=C<REF(C,1) AND C<=O AND VOL>=1.15*REF(VOL,1);
+
+CNT28:=COUNT(TOP15O AND FD15,28); GOOD28:=CNT28=0;
+
+MAXVOL56:=HHV(VOL,56);
+
+MAX56_BAD:=VOL=MAXVOL56 AND REAL_YIN;
+
+MAX56_OK:=COUNT(MAX56_BAD,56)=0;
+
+A1:=((YANGYIN_OK1 AND J_OK AND LQ AND MVOK AND GOOD28 AND MAX56_OK)
+
+OR (YANGYIN_OK2 AND J_OK AND LQ AND MVOK AND GOOD28 AND MAX56_OK));
+
+QL:=0.4*MA(C,20)+0.3*MA(C,60)+0.2*MA(C,120)+0.1*MA(C,250); {可按需调换}
+
+B1:=A1 AND (C>=0.99*QL);
+
+{== ⑤总选股；如未理解视频或使用效果不佳，继续使用2.41 ==}
+
+XG AND B1;
+
+{== 结束复制，如未理解视频或使用效果不佳，请继续使用2.41 ==}
