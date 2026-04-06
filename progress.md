@@ -1,5 +1,67 @@
 # Progress
 
+## 2026-04-05
+
+### [Docs] 跨设备统一口径固化
+- 为避免不同设备、不同 agent 把 `Rotation` 与博主完整体系混为一谈, 已将统一口径显式写入:
+  - `experiments/rotation-next-phase.md`
+  - `experiments/target-strategy-evolution.md`
+  - `project-status.md`
+- 当前统一约定:
+  - `Rotation = 候选子策略`
+  - “对标”默认指向博主早期公开的日频截面基线
+  - 博主当前多策略 `rule-based` 体系属于系统级长期目标
+
+### [Docs] Rotation 主线/锚点/废弃路线再收口
+- `experiments/rotation-next-phase.md` 已进一步整理为 agent 入口页风格:
+  - 新增 `当前活跃路线`
+  - 新增 `已收口 / 后置路线`
+  - 新增 `历史归档说明`
+  - 历史结论统一降级为按日期归档, 避免新 agent 把旧实验误判成当前主线
+- `project-status.md` 已同步补充:
+  - 当前活跃路线
+  - 已收口路线
+
+### [Rotation] 三层解耦第一阶段落地
+- `Rotation` notebook 已按“分析层 / 训练层 / 清单层”开始拆分:
+  - `notebooks/rotation_factor_lab.py`: 独立分析 notebook, 专门负责
+    - 因子 IC
+    - 分组汇总
+    - Alpha decay
+    - Alpha158 top1 / 强子集筛选
+  - `manifests/rotation_feature_sets.py`: Python manifest, 作为训练层唯一稳定特征集来源
+  - `notebooks/cross_section_rotation.py`: 收敛为训练入口 notebook
+- `cross_section_rotation.py` 当前改动:
+  - 不再依赖 `Cell 3` 现场产出的 `alpha158_top1_factor_cols / core_factors / factors_keep`
+  - 训练入口改为直接读取 `FEATURE_SET`
+  - 当前默认主线改为 `core_plus_alpha158_kbar_shape`
+- manifest 当前已显式区分:
+  - `active`: `core_12`, `core_plus_alpha158_kbar_shape`
+  - `archived / experimental`: `all_rotation`, `alpha158_kbar_shape`, `all_plus_alpha158_kbar_shape` 等
+  - `analysis-only`: `core_plus_alpha158_top1`, `pruned_rotation`
+- 元数据兼容约束保持不变:
+  - `rotation_train_meta` 结构未改键名
+  - `Cell 6b` 仍通过 `export_meta = {**rotation_train_meta, ...}` 导出
+  - `utils/signal_export.py` 未改 artifact metadata 消费契约
+
+### [Benchmark] 目标策略认知修正
+- 重新审视小红书博主公开帖、评论区与私信截图后确认:
+  - 她并非一直在做截面多因子排序
+  - 早期存在明确的 `128` 日日 K 截面多因子阶段
+  - 后期已转向 `rule-based / trigger-based` 的多策略组合
+  - 当前公开可见体系更接近 `12` 个子策略 + 市场状态切换 + 1 分钟级 T+0
+- 额外确认:
+  - 纯量价策略大约只有 `3` 个
+  - 其他策略混合基本面 / 另类数据
+  - “不是不做动量, 是不做截面排序”, 仍有策略保留动量内核, 只是 `trigger` 改变
+- 新建 `experiments/target-strategy-evolution.md`:
+  - 保留旧 benchmark 的全部关键信息
+  - 按“早期日频基线 / 后期多策略体系”重新整理
+  - 明确 `Rotation` 现在只应对标其一个子策略层面的能力
+- 原 `experiments/rotation-benchmark.md` 废弃:
+  - 原问题不是数据失真, 而是把不同阶段的信息混写成了一个静态 benchmark
+  - 后续统一以 `target-strategy-evolution.md` 为准
+
 ## 2026-04-03
 
 ### [Rotation] Alpha158 各组 `top1` 组合验证失败, `kbar_shape` 继续保留主线地位
@@ -268,8 +330,8 @@
 - 结论:
   - `hold_buffer = 50` 仍是当前最优退出阈值
   - `max_hold_days = 15` 给出当前最高 `net return` (`+17.00%`)
-  - 但为了保持对标小红书博主策略“平均持仓约 2.8 天”的研究初心, 当前**不**将 `15` 升格为主线
-  - 当前冻结的对标研究基线为:
+  - 但为了保持博主早期公开日频基线“平均持仓约 2.8 天”的节奏特征, 当前**不**将 `15` 升格为早期日频对标锚点
+  - 当前冻结的早期日频对标锚点为:
     - `Feature Set = core_12`
     - `LABEL = fwd_ret_1d`
     - `EXPORT_EMA_ALPHA = 0.30`
@@ -523,6 +585,7 @@
 - 新建 `experiments/` 目录, 每个实验独立 markdown
 - `project-status.md` 按策略分节 (Rotation / B1 / 共享基础设施)
 - 迁移旧 `experiments.md` 内容到 `experiments/rotation-benchmark.md` + `rotation-factors.md`
+  - 注: `rotation-benchmark.md` 后续已被 `target-strategy-evolution.md` 取代
 
 ## 2026-03-24
 

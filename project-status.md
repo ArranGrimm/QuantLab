@@ -6,6 +6,35 @@
 
 ## 一、截面轮动策略
 
+### 统一口径
+- `Rotation` 当前定位: **候选子策略**, 不再承担“单策略复刻博主完整体系”的目标
+- `Rotation` 默认对标对象: 博主**早期公开的日频截面基线**
+- 博主当前完整体系: 见 `experiments/target-strategy-evolution.md`, 应理解为系统级长期目标
+- `Rotation` 当前主线候选: `core_plus_alpha158(kbar_shape)`
+
+### 当前活跃路线
+- 主线候选: `core_plus_alpha158(kbar_shape)`
+- 比较锚点: `core_12 + fwd_ret_1d + EXPORT_EMA_ALPHA=0.30 + hold_buffer=50 + max_hold_days=10`
+- 当前优先工作:
+  - 压组合层成本 (`hold_buffer / min_score / top_n`)
+  - 继续按“三层解耦”架构推进 `Rotation` 研究流
+
+### 三层解耦现状
+- 分析层: `notebooks/rotation_factor_lab.py`
+  - 负责因子 IC、分组汇总、Alpha decay、Alpha158 top1 / 强子集筛选
+- 清单层: `manifests/rotation_feature_sets.py`
+  - 负责维护稳定特征集、状态标签 (`active / archived / experimental`) 与说明
+- 训练层: `notebooks/cross_section_rotation.py`
+  - 只消费 manifest 中冻结的特征集
+  - 负责训练集构造、Walk-forward 打分、raw score 导出与 artifact 落盘
+
+### 已收口路线
+- `46-all` / `36-pruned`: 不再作为主推版本
+- `fwd_ret_1d_rank_pct`: 首轮未证明优于当前主线, 仅后置观察
+- `rank_pct / rank_gauss` 截面归一化: 弱于 `zscore`, 当前收口
+- `alpha158(kbar_shape)` 单跑: 判定为交互增强器, 不作为独立主线
+- `core_plus_alpha158_top1`: 已验证失败, 不继续作为扩容主线
+
 ### 已完成
 - `utils/rotation_factors.py`: 42 个日线截面因子 (动量/波动/成交量/技术/微观/A股T+1/处置效应)
   - T 日数据版: 所有因子直接用当日 OHLCV, 与实盘 14:45 快照对齐
@@ -21,32 +50,20 @@
   - `write_report_bundle()`
   - `resolve_registry_path()`
   - `append_jsonl_record()`
-- `notebooks/cross_section_rotation.py`: 研究 notebook (8 个 cell)
-  - Cell 1-2: 数据加载 + 因子计算 + 涨跌停标记 + 截面标准化 + 超额收益标签
-  - Cell 1-2: 截面归一化现支持 `zscore / rank_pct / rank_gauss` 三种模式
-  - Cell 1-2: 现已额外提供 `fwd_ret_{1/2/3/5}d_rank_pct` 排序化标签入口
-  - Cell 1-2: 已额外接入本地 `Alpha158` 全量 `158` 因子计算
-  - Cell 1-2: 已支持按 `FEATURE_MODE` 懒计算, `alpha158` 模式不再额外计算 `Rotation` 因子
-- Cell 1: 当前已显式冻结 `core_12` 配置, 不再依赖每次运行时动态重筛
+- `notebooks/cross_section_rotation.py`: 训练入口 notebook
+  - Cell 1: 读取 `FEATURE_SET` 并从 manifest 加载稳定特征集
+  - Cell 2: 数据加载 + 因子计算 + 涨跌停标记 + 截面标准化 + 标签构造
+  - Cell 2: 仍支持 `zscore / rank_pct / rank_gauss` 与 `fwd_ret_{1/2/3/5}d_rank_pct`
   - Cell 2b: 校验 `amount / volume` 单位口径, 防止 `vwap_raw` 误放大 100 倍
-  - Cell 2b: 已固定写明 `vwap_raw / turnover_rate` 的 A 股单位换算口径
-- Cell 3: 因子分析底座, 统一产出 Rotation / Alpha158 两套 `IC summary + ic_results`
-- Cell 3a: 分组总览面板, 同时展示:
-  - Rotation 分组概览
-  - Alpha158 分组概览
-  - Alpha158 每组 `top1` 因子
-- Cell 3b: Alpha Decay 分析, 现支持:
-  - `rotation`
-  - `alpha158_top1`
-  - `custom_list`
-- Cell 3c: Rotation 相关性与冗余剪枝, 已降级为可选诊断工具, 默认不跑
-- Cell 3d: 原 `core feature screen` 已退出主流程, 默认仅回落到冻结 `core_12`
-  - Cell 4-5: (已清空, 旧线性回测)
-  - Cell 6: LightGBM Walk-Forward 打分, 本地控制 `FEATURE_MODE`, 输出 `df_scores_raw + rotation_train_meta` (训练时排除涨停样本)
-- Cell 6: `FEATURE_MODE` 现支持 `alpha158 / core_plus_alpha158 / core_plus_alpha158_top1 / all_plus_alpha158`
-- Cell 6: `core_plus_alpha158_top1` 会显式依赖 `Cell 3` 产出的 `alpha158_top1_factor_cols`
+  - Cell 3: 明确提示因子分析已迁移到 `rotation_factor_lab.py`
+  - Cell 6: LightGBM Walk-Forward 打分, 输出 `df_scores_raw + rotation_train_meta`
   - Cell 6b: 导出 parquet, 独立控制 `EXPORT_EMA_ALPHA`, 写入 artifact 元数据, 无需重训模型
-  - Cell 7: Signal Quality Analysis (基于原始分数, 独立 EMA; `7a` 跟随 `LABEL` 看目标诊断, `7b/7d` 固定 `fwd_ret_1d` 看经济效果)
+  - Cell 7: 保留原始分数的 Signal Quality 诊断
+- `notebooks/rotation_factor_lab.py`: 独立分析 notebook
+  - 负责 Rotation / Alpha158 因子 IC、分组汇总、Alpha decay、相关性诊断与 core 候选筛查
+- `manifests/rotation_feature_sets.py`:
+  - 当前稳定训练入口: `core_12`, `core_plus_alpha158_kbar_shape`
+  - `core_plus_alpha158_top1` 与 `pruned_rotation` 已降级为 `analysis-only`
 - 新增 `utils/factor_analysis.py`:
   - `build_ic_summary_frame`
   - `summarize_factor_groups`
@@ -186,7 +203,7 @@
 
 ### 与目标策略的差距
 
-详见 `experiments/rotation-benchmark.md`。核心差距: 回撤控制 (9% vs 27%)、胜率 (54% vs 42%)、多策略集成 (12 vs 1)。
+详见 `experiments/target-strategy-evolution.md`。当前应区分“博主早期公开的日频截面基线”与“后期多策略 rule-based 体系”。核心差距已不只是单策略指标, 还包括多策略集成、状态切换、分钟级 T+0 与混合数据源。
 
 ### Rotation 后续方向
 
@@ -213,7 +230,7 @@
 - `core_plus_alpha158_top1` 首轮验证已失败, 说明当前不宜把“各组 top1 全并入训练”作为默认扩容路径
 - `fwd_ret_1d_rank_pct` 首轮观察未显示优于当前 `fwd_ret_1d` 主线, 尤其经济分层与最终回测暂未改善
 - `NORMALIZE_MODE = rank_pct / rank_gauss` 两轮实验均显著弱于 `zscore`, 当前不再作为主线优化方向
-- 组合参数扫描显示 `max_hold_days=15` 的纯净收益更高, 但当前不升格为对标主线, 以免偏离博主策略“平均持仓 2.8 天”的研究初心
+- 组合参数扫描显示 `max_hold_days=15` 的纯净收益更高, 但当前不升格为“早期日频对标锚点”, 以免偏离博主早期公开基线“平均持仓 2.8 天”的节奏特征
 - `stock_daily.volume` 单位已验证为“手”, 因此 `vwap_raw` 与 `turnover_rate` 现统一按 `volume * 100` 还原股数后再计算
 - `Alpha158` 已完成本地 Polars 复刻并接入 `Rotation` notebook, 下一步进入首轮基线对照
 - `Alpha158` 最重的 `35` 个窗口因子现已去除 Python 回调, 与旧 `rolling_map` 版本数值对齐
@@ -335,7 +352,7 @@ Python (信号层)                    Rust (回测/执行层)
 ### 实验记录
 
 详见 `experiments/` 目录:
-- `rotation-benchmark.md` — 目标策略指标
+- `target-strategy-evolution.md` — 博主策略演化与多策略全景
 - `rotation-factors.md` — Rotation 因子实验 (128d 失败、处置效应、EMA)
 - `b1-ml-fullmarket.md` — B1 全市场 ML 排序实验
 - `b1-ml-dedicated.md` — B1 专属模型实验 (结论: 不如全市场)

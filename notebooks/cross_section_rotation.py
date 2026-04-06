@@ -10,36 +10,23 @@ def _():
     import polars as pl
     import numpy as np
     import plotly.graph_objects as go
-    import plotly.express as px
     from plotly.subplots import make_subplots
     from scipy import stats
 
     from utils import load_daily_data_full, add_price_limit_cols
     from utils import get_st_blacklist_pl
+    from manifests.rotation_feature_sets import (
+        describe_rotation_feature_set,
+        get_rotation_feature_set,
+    )
     from utils.rotation_factors import (
         calc_rotation_factors,
         cross_section_normalize,
         FACTOR_COLS,
-        FACTOR_GROUP_LABELS,
-        FACTOR_GROUPS,
-        FACTOR_TO_GROUP,
     )
     from utils.alpha158_factors import (
-        ALPHA158_FACTOR_GROUP_LABELS,
-        ALPHA158_FACTOR_GROUPS,
-        ALPHA158_FACTOR_TO_GROUP,
         calc_alpha158_factors,
         resolve_alpha158_group_config,
-    )
-    from utils.factor_analysis import (
-        build_daily_ic_frame,
-        build_ic_summary_frame,
-        compute_factor_decay,
-        empty_group_summary_frame,
-        empty_ic_summary_frame,
-        extract_group_top_factor_cols,
-        resolve_decay_factor_cols,
-        summarize_factor_groups,
     )
 
     # ==============================================================================
@@ -55,27 +42,9 @@ def _():
     START_DATE = "2020-09-01"  # 创业板注册制后
     NORMALIZE_MODE = "zscore"  # 可选: zscore / rank_pct / rank_gauss
     LABEL = "fwd_ret_1d"  # 可选: fwd_ret_{1/2/3/5}d / fwd_ret_{1/2/3/5}d_excess / fwd_ret_{1/2/3/5}d_rank_pct
-    FEATURE_MODE = "core_plus_alpha158_top1"  # "all" / "pruned" / "core" / "alpha158" / "core_plus_alpha158" / "core_plus_alpha158_top1" / "all_plus_alpha158"
-    ALPHA158_GROUP_MODE = "kbar_shape"  # 可选: all / kbar_shape / price_level / price_trend / trend_regression / range_position / timing_position / price_volume_corr / directionality / volume_dynamics
-    ALPHA158_ANALYSIS_GROUP_MODE = "all"  # "all" / "match_training"
-    ALPHA_DECAY_SOURCE = "alpha158_top1"  # "rotation" / "alpha158_top1" / "custom_list"
-    ALPHA_DECAY_CUSTOM_FACTORS: tuple[str, ...] = ()
-    RUN_ROTATION_CORR_DIAGNOSTICS = False
-    RUN_ROTATION_CORE_SCREEN = False
-    CORE_FEATURES_FROZEN = [
-        "ret_max_5d",
-        "vol_60d",
-        "turnover_rate",
-        "atr_14_pct",
-        "amplitude",
-        "intraday_ret_ma5",
-        "disp_bias_20",
-        "high_open_pct",
-        "vol_std_20d",
-        "abnormal_vol",
-        "intraday_pos",
-        "vol_price_corr_20d",
-    ]
+    FEATURE_SET = "core_plus_alpha158_kbar_shape"
+    selected_feature_set = get_rotation_feature_set(FEATURE_SET)
+    ALPHA158_GROUP_MODE = selected_feature_set.alpha158_group_mode
 
     print("🚀 [Step 1] 加载全量日线数据...")
     st_blacklist = get_st_blacklist_pl("2026-03-31")
@@ -88,55 +57,36 @@ def _():
     )
 
     print(f"✅ 参数: 流通市值 {MV_MIN}~{MV_MAX} 亿, 上市>{MIN_LIST_DAYS}天, 起始={START_DATE}")
+    print(f"✅ Feature Set: {describe_rotation_feature_set(FEATURE_SET)}")
     return (
-        ALPHA158_ANALYSIS_GROUP_MODE,
-        ALPHA158_FACTOR_GROUPS,
-        ALPHA158_FACTOR_GROUP_LABELS,
-        ALPHA158_FACTOR_TO_GROUP,
         ALPHA158_GROUP_MODE,
-        ALPHA_DECAY_CUSTOM_FACTORS,
-        ALPHA_DECAY_SOURCE,
-        CORE_FEATURES_FROZEN,
         FACTOR_COLS,
-        FACTOR_GROUPS,
-        FACTOR_GROUP_LABELS,
-        FACTOR_TO_GROUP,
-        FEATURE_MODE,
+        FEATURE_SET,
         LABEL,
         MIN_LIST_DAYS,
         MV_MAX,
         MV_MIN,
         NORMALIZE_MODE,
-        RUN_ROTATION_CORE_SCREEN,
-        RUN_ROTATION_CORR_DIAGNOSTICS,
         add_price_limit_cols,
-        build_daily_ic_frame,
-        build_ic_summary_frame,
         calc_alpha158_factors,
         calc_rotation_factors,
-        compute_factor_decay,
         cross_section_normalize,
-        empty_group_summary_frame,
         go,
         make_subplots,
         np,
         pl,
-        px,
         q_full,
         resolve_alpha158_group_config,
-        resolve_decay_factor_cols,
+        selected_feature_set,
         stats,
-        summarize_factor_groups,
     )
 
 
 @app.cell
 def _(
-    ALPHA158_ANALYSIS_GROUP_MODE,
-    ALPHA158_FACTOR_GROUP_LABELS,
     ALPHA158_GROUP_MODE,
     FACTOR_COLS,
-    FEATURE_MODE,
+    FEATURE_SET,
     MIN_LIST_DAYS,
     MV_MAX,
     MV_MIN,
@@ -148,6 +98,7 @@ def _(
     pl,
     q_full,
     resolve_alpha158_group_config,
+    selected_feature_set,
 ):
     import os
 
@@ -164,97 +115,58 @@ def _(
     # ==============================================================================
     print("⏳ [Step 2] 计算训练特征 (全量股票, 保证序列连续)...")
 
-    valid_feature_modes = {
-        "all",
-        "pruned",
-        "core",
-        "alpha158",
-        "core_plus_alpha158",
-        "core_plus_alpha158_top1",
-        "all_plus_alpha158",
-    }
-    if FEATURE_MODE not in valid_feature_modes:
+    requested_feature_cols = list(selected_feature_set.feature_cols or ())
+    if not requested_feature_cols:
         raise ValueError(
-            f"Unsupported FEATURE_MODE: {FEATURE_MODE}. "
-            "Expected one of: all, pruned, core, alpha158, core_plus_alpha158, "
-            "core_plus_alpha158_top1, all_plus_alpha158"
+            f"Feature set '{FEATURE_SET}' 没有稳定的因子清单，不能作为训练入口。"
         )
 
-    need_rotation_factors = FEATURE_MODE in {"all", "pruned", "core", "core_plus_alpha158", "core_plus_alpha158_top1", "all_plus_alpha158"}
-    need_alpha158_train_factors = FEATURE_MODE in {"alpha158", "core_plus_alpha158", "core_plus_alpha158_top1", "all_plus_alpha158"}
-    alpha158_analysis_mode = (
-        ALPHA158_GROUP_MODE
-        if str(ALPHA158_ANALYSIS_GROUP_MODE).strip().lower() == "match_training"
-        else ALPHA158_ANALYSIS_GROUP_MODE
+    rotation_factor_set = set(FACTOR_COLS)
+    need_rotation_factors = any(
+        factor_name in rotation_factor_set for factor_name in requested_feature_cols
     )
-    need_alpha158_analysis_factors = str(alpha158_analysis_mode).strip().lower() not in {"", "none", "disabled"}
-    need_alpha158_factors = need_alpha158_train_factors or need_alpha158_analysis_factors
+    need_alpha158_factors = bool(ALPHA158_GROUP_MODE)
 
     df_factors = q_full
-    active_factor_cols = []
     active_alpha158_factor_cols = []
+    available_feature_cols: set[str] = set()
 
-    print(f"   特征模式: {FEATURE_MODE}")
+    print(f"   Feature Set: {FEATURE_SET}")
+    print(f"   状态: {selected_feature_set.status}")
+    print(f"   描述: {selected_feature_set.description}")
     if need_rotation_factors:
         print(f"   计算 Rotation 因子: {len(FACTOR_COLS)} 个")
         df_factors = calc_rotation_factors(df_factors)
-        active_factor_cols.extend(FACTOR_COLS)
+        available_feature_cols.update(FACTOR_COLS)
     else:
         print("   跳过 Rotation 因子计算")
 
-    if need_alpha158_factors:
+    if need_alpha158_factors and ALPHA158_GROUP_MODE:
         alpha158_train_config = resolve_alpha158_group_config(ALPHA158_GROUP_MODE)
-        alpha158_analysis_config = resolve_alpha158_group_config(alpha158_analysis_mode)
-        merged_group_keys = list(
-            dict.fromkeys(
-                [
-                    *alpha158_train_config["group_keys"],
-                    *alpha158_analysis_config["group_keys"],
-                ]
-            )
-        )
-        active_alpha158_factor_cols = list(
-            dict.fromkeys(
-                [
-                    *alpha158_train_config["factor_cols"],
-                    *alpha158_analysis_config["factor_cols"],
-                ]
-            )
-        )
-        merged_price_fields = tuple(
-            dict.fromkeys(
-                [
-                    *alpha158_train_config["price_fields"],
-                    *alpha158_analysis_config["price_fields"],
-                ]
-            )
-        )
-        merged_include_ops = tuple(
-            dict.fromkeys(
-                [
-                    *(alpha158_train_config["include_ops"] or ()),
-                    *(alpha158_analysis_config["include_ops"] or ()),
-                ]
-            )
-        ) or None
-        active_group_labels = [
-            ALPHA158_FACTOR_GROUP_LABELS.get(group_key, group_key)
-            for group_key in merged_group_keys
-        ]
-        print(f"   Alpha158 训练分组: {alpha158_train_config['group_mode_label']}")
-        print(f"   Alpha158 分析分组: {alpha158_analysis_config['group_mode_label']}")
-        print(f"   Alpha158 合并分组: {', '.join(active_group_labels)}")
+        active_alpha158_factor_cols = list(alpha158_train_config["factor_cols"])
+        available_feature_cols.update(active_alpha158_factor_cols)
+        print(f"   Alpha158 分组: {alpha158_train_config['group_mode_label']}")
         print(f"   计算 Alpha158 因子: {len(active_alpha158_factor_cols)} 个")
         df_factors = calc_alpha158_factors(
             df_factors,
-            use_kbar=bool(alpha158_train_config["use_kbar"] or alpha158_analysis_config["use_kbar"]),
-            price_fields=merged_price_fields,
-            include=merged_include_ops,
+            use_kbar=bool(alpha158_train_config["use_kbar"]),
+            price_fields=alpha158_train_config["price_fields"],
+            include=alpha158_train_config["include_ops"],
         )
-        active_factor_cols.extend(active_alpha158_factor_cols)
     else:
         print("   跳过 Alpha158 因子计算")
 
+    missing_feature_cols = [
+        factor_name
+        for factor_name in requested_feature_cols
+        if factor_name not in available_feature_cols
+    ]
+    if missing_feature_cols:
+        raise ValueError(
+            f"Feature set '{FEATURE_SET}' 存在未准备好的因子: {missing_feature_cols}"
+        )
+
+    active_factor_cols = requested_feature_cols
     print(f"   合计待标准化: {len(active_factor_cols)} 个")
 
     # Label: 在连续序列上计算 forward return, 避免因市值过滤产生的缺口
@@ -407,475 +319,15 @@ def _(df_all, pl):
 
 
 @app.cell
-def _(
-    ALPHA158_ANALYSIS_GROUP_MODE,
-    ALPHA158_FACTOR_GROUPS,
-    ALPHA158_FACTOR_GROUP_LABELS,
-    ALPHA158_FACTOR_TO_GROUP,
-    FACTOR_COLS,
-    FACTOR_GROUPS,
-    FACTOR_GROUP_LABELS,
-    LABEL,
-    build_daily_ic_frame,
-    build_ic_summary_frame,
-    df_all,
-    empty_group_summary_frame,
-    go,
-    make_subplots,
-    pl,
-    resolve_alpha158_group_config,
-    summarize_factor_groups,
-):
+def _(FEATURE_SET, selected_feature_set):
     # ==============================================================================
-    # Cell 3: 因子 IC 分析底座
-    # - Rotation: IC 汇总 + 累积 IC 曲线
-    # - Alpha158: IC 汇总 + 分组 top1 提取
+    # Cell 3: 训练入口说明
     # ==============================================================================
-    from utils.ic_analysis import calc_factor_ic
-
-    def run_factor_ic_foundation():
-        df_valid_local = df_all.filter(pl.col(LABEL).is_not_null() & pl.col(LABEL).is_not_nan())
-
-        available_rotation_factors = [factor_name for factor_name in FACTOR_COLS if factor_name in df_all.columns]
-        if available_rotation_factors:
-            rotation_ic_results_local = calc_factor_ic(
-                df_valid_local,
-                factor_cols=available_rotation_factors,
-                label=LABEL,
-                min_samples=30,
-            )
-            rotation_ic_summary_local = build_ic_summary_frame(rotation_ic_results_local)
-            rotation_daily_ic_local = build_daily_ic_frame(
-                df_valid_local,
-                factor_cols=available_rotation_factors,
-                label=LABEL,
-                min_samples=30,
-            )
-        else:
-            print("ℹ️ [Cell 3] 当前 FEATURE_MODE 未加载 Rotation 因子，跳过 Rotation 因子 IC 分析。")
-            rotation_ic_results_local = {}
-            rotation_ic_summary_local = build_ic_summary_frame({})
-            rotation_daily_ic_local = build_daily_ic_frame(df_valid_local, factor_cols=[], label=LABEL)
-
-        analysis_mode = str(ALPHA158_ANALYSIS_GROUP_MODE).strip().lower()
-        if analysis_mode in {"", "none", "disabled"}:
-            alpha_group_keys = []
-            available_alpha158_factors = []
-        elif analysis_mode == "match_training":
-            available_alpha158_factors = [
-                factor_name for factor_name in ALPHA158_FACTOR_TO_GROUP if factor_name in df_all.columns
-            ]
-            alpha_group_keys = [
-                group_key
-                for group_key, factor_cols in ALPHA158_FACTOR_GROUPS.items()
-                if any(factor in df_all.columns for factor in factor_cols)
-            ]
-        else:
-            alpha_analysis_config = resolve_alpha158_group_config(ALPHA158_ANALYSIS_GROUP_MODE)
-            alpha_group_keys = list(alpha_analysis_config["group_keys"])
-            available_alpha158_factors = [
-                factor_name
-                for factor_name in alpha_analysis_config["factor_cols"]
-                if factor_name in df_all.columns
-            ]
-
-        alpha_factor_groups = {
-            group_key: ALPHA158_FACTOR_GROUPS[group_key]
-            for group_key in alpha_group_keys
-        }
-
-        if available_alpha158_factors:
-            print(f"🧪 [Alpha158 IC] 计算 {len(available_alpha158_factors)} 个 Alpha158 因子的 IC...", flush=True)
-            alpha158_ic_results_local = calc_factor_ic(
-                df_valid_local,
-                factor_cols=available_alpha158_factors,
-                label=LABEL,
-                min_samples=30,
-            )
-            alpha158_ic_summary_local = build_ic_summary_frame(alpha158_ic_results_local)
-            df_alpha158_group_summary_local = summarize_factor_groups(
-                alpha158_ic_results_local,
-                alpha_factor_groups,
-                ALPHA158_FACTOR_GROUP_LABELS,
-            )
-        else:
-            print("ℹ️ [Cell 3] 当前未加载可分析的 Alpha158 因子，跳过 Alpha158 分组 IC。")
-            alpha158_ic_results_local = {}
-            alpha158_ic_summary_local = build_ic_summary_frame({})
-            df_alpha158_group_summary_local = empty_group_summary_frame()
-
-        df_alpha158_top1_local = (
-            df_alpha158_group_summary_local
-            .select([
-                "group_key",
-                "group_name",
-                "top_factor",
-                "top_ic_mean",
-                "top_icir",
-                "top_abs_icir",
-            ])
-            .filter(pl.col("top_factor") != "")
-            .sort("top_abs_icir", descending=True)
-        )
-        alpha158_top1_factor_cols_local = df_alpha158_top1_local["top_factor"].to_list()
-
-        if rotation_ic_summary_local.height > 0 and rotation_daily_ic_local.height > 0:
-            top_factors_local = rotation_ic_summary_local["factor"].head(6).to_list()
-            fig_ic_local = make_subplots(rows=1, cols=1)
-            for factor_name in top_factors_local:
-                ic_cum = rotation_daily_ic_local.select(["date", factor_name]).drop_nulls().sort("date")
-                fig_ic_local.add_trace(
-                    go.Scatter(
-                        x=ic_cum["date"].to_list(),
-                        y=ic_cum[factor_name].cum_sum().to_list(),
-                        name=factor_name,
-                        mode="lines",
-                    )
-                )
-
-            fig_ic_local.update_layout(
-                title="Rotation Top 6 因子 — IC 累积曲线",
-                xaxis_title="日期",
-                yaxis_title="累积 IC",
-                height=500,
-                template="plotly_dark",
-            )
-            fig_ic_local.show()
-
-        rotation_group_summary_local = summarize_factor_groups(
-            rotation_ic_results_local,
-            FACTOR_GROUPS,
-            FACTOR_GROUP_LABELS,
-        )
-
-        return (
-            rotation_group_summary_local,
-            rotation_daily_ic_local,
-            rotation_ic_results_local,
-            rotation_ic_summary_local,
-            alpha158_top1_factor_cols_local,
-            alpha158_ic_results_local,
-            alpha158_ic_summary_local,
-            df_alpha158_group_summary_local,
-            df_alpha158_top1_local,
-        )
-
-    (
-        df_group_summary,
-        rotation_daily_ic,
-        rotation_ic_results,
-        rotation_ic_summary,
-        alpha158_top1_factor_cols,
-        alpha158_ic_results,
-        alpha158_ic_summary,
-        df_alpha158_group_summary,
-        df_alpha158_top1,
-    ) = run_factor_ic_foundation()
-
-    df_ic_summary = rotation_ic_summary
-    ic_results = rotation_ic_results
-    return (
-        alpha158_top1_factor_cols,
-        df_alpha158_group_summary,
-        df_alpha158_top1,
-        df_group_summary,
-        ic_results,
-        rotation_ic_summary,
-    )
-
-
-@app.cell
-def _(df_alpha158_group_summary, df_alpha158_top1, df_group_summary):
-    # ==============================================================================
-    # Cell 3a: 分组总览面板
-    # ==============================================================================
-    def _print_group_summary(title: str, df_summary):
-        if df_summary.height == 0:
-            print(f"ℹ️ [{title}] 当前无可展示分组。")
-            return
-
-        print(title)
-        print("=" * 108)
-        print(f"  {'分组':<20} {'数量':>6} {'平均|ICIR|':>12} {'最佳|ICIR|':>12} {'组内最佳因子':<24}")
-        print("-" * 108)
-        for summary_row in df_summary.iter_rows(named=True):
-            print(
-                f"  {summary_row['group_name']:<20} {summary_row['n_factors']:>6} "
-                f"{summary_row['mean_abs_icir']:>12.4f} {summary_row['max_abs_icir']:>12.4f} "
-                f"{summary_row['top_factor']:<24}"
-            )
-        print("-" * 108)
-
-    _print_group_summary("🧭 [Rotation Groups] Rotation 因子分组概览", df_group_summary)
-    _print_group_summary("🧭 [Alpha158 Groups] Alpha158 因子分组概览", df_alpha158_group_summary)
-
-    if df_alpha158_top1.height == 0:
-        print("ℹ️ [Alpha158 Top1] 当前无 Alpha158 top1 因子可展示。")
-    else:
-        print("🏆 [Alpha158 Top1] 各分组 top1 因子 (按 |ICIR|)")
-        print("=" * 96)
-        print(f"  {'分组':<20} {'top1因子':<18} {'IC Mean':>10} {'ICIR':>10} {'|ICIR|':>10}")
-        print("-" * 96)
-        for row in df_alpha158_top1.iter_rows(named=True):
-            print(
-                f"  {row['group_name']:<20} {row['top_factor']:<18} "
-                f"{row['top_ic_mean']:>10.4f} {row['top_icir']:>10.4f} {row['top_abs_icir']:>10.4f}"
-            )
-        print("-" * 96)
+    print("ℹ️ [Step 3] 因子分析 / 因子选择已迁移到 notebooks/rotation_factor_lab.py")
+    print("   当前 notebook 只负责训练入口、raw score 导出与 artifact 落盘。")
+    print(f"   当前训练特征集: {FEATURE_SET} ({selected_feature_set.feature_count} 个因子)")
+    print(f"   特征集状态: {selected_feature_set.status}")
     return
-
-
-@app.cell
-def _(
-    ALPHA_DECAY_CUSTOM_FACTORS: tuple[str, ...],
-    ALPHA_DECAY_SOURCE,
-    compute_factor_decay,
-    df_all,
-    df_alpha158_top1,
-    go,
-    make_subplots,
-    resolve_decay_factor_cols,
-    rotation_ic_summary,
-):
-    # ==============================================================================
-    # Cell 3b: Alpha Decay 分析
-    # - rotation: 使用 Rotation Top-N 因子
-    # - alpha158_top1: 使用 Alpha158 各组 top1
-    # - custom_list: 使用手工指定因子列表
-    # ==============================================================================
-    def run_alpha_decay():
-        top_factors = resolve_decay_factor_cols(
-            ALPHA_DECAY_SOURCE,
-            rotation_ic_summary=rotation_ic_summary,
-            alpha158_top1=df_alpha158_top1,
-            custom_factor_cols=ALPHA_DECAY_CUSTOM_FACTORS,
-            rotation_top_n=15,
-        )
-        top_factors = [factor for factor in top_factors if factor in df_all.columns]
-        if not top_factors:
-            print("ℹ️ [Cell 3b] 当前衰减分析没有可用因子，跳过 Alpha Decay。")
-            return {}, {}
-
-        print(f"📉 [Alpha Decay] 来源={ALPHA_DECAY_SOURCE}, 因子数={len(top_factors)}...", flush=True)
-        decay_summary_local, avg_icir_local = compute_factor_decay(
-            df_all,
-            factor_cols=top_factors,
-        )
-
-        horizons = ["fwd_ret_1d", "fwd_ret_2d", "fwd_ret_3d", "fwd_ret_5d"]
-        h_days = [1, 2, 3, 5]
-        print("\n" + "=" * 100)
-        print("  因子 IC 衰减对比")
-        print("=" * 100)
-        hdr = f"{'因子':<22}"
-        for d in h_days:
-            hdr += f"  {'IC_'+str(d)+'d':>8} {'ICIR_'+str(d)+'d':>8}"
-        print(hdr)
-        print("-" * 100)
-        for factor_name in top_factors:
-            row_str = f"{factor_name:<22}"
-            for horizon in horizons:
-                dd = decay_summary_local[horizon][factor_name]
-                row_str += f"  {dd['ic_mean']:>8.4f} {dd['icir']:>8.4f}"
-            print(row_str)
-        print("-" * 100)
-
-        print("\n📊 平均 |ICIR| 衰减:")
-        for d in h_days:
-            print(f"  {d}d: avg |ICIR| = {avg_icir_local.get(d, 0.0):.4f}")
-
-        fig = make_subplots(
-            rows=1,
-            cols=2,
-            subplot_titles=["Top 因子 |ICIR| 衰减", "平均 |ICIR| 衰减"],
-        )
-
-        for factor_name in top_factors[:8]:
-            y_vals = [abs(decay_summary_local[horizon][factor_name]["icir"]) for horizon in horizons]
-            fig.add_trace(
-                go.Scatter(
-                    x=h_days,
-                    y=y_vals,
-                    name=factor_name,
-                    mode="lines+markers",
-                ),
-                row=1,
-                col=1,
-            )
-
-        avg_y = [avg_icir_local.get(d, 0.0) for d in h_days]
-        fig.add_trace(
-            go.Scatter(
-                x=h_days,
-                y=avg_y,
-                name="平均",
-                mode="lines+markers+text",
-                text=[f"{v:.3f}" for v in avg_y],
-                textposition="top center",
-            ),
-            row=1,
-            col=2,
-        )
-
-        fig.update_layout(
-            height=450,
-            template="plotly_dark",
-            xaxis_title="持仓天数",
-            xaxis2_title="持仓天数",
-            yaxis_title="|ICIR|",
-            yaxis2_title="平均 |ICIR|",
-        )
-        fig.show()
-
-        return decay_summary_local, avg_icir_local
-
-    decay_summary, avg_icir_decay = run_alpha_decay()
-    return
-
-
-@app.cell
-def _(
-    FACTOR_COLS,
-    FEATURE_MODE,
-    RUN_ROTATION_CORR_DIAGNOSTICS,
-    df_all,
-    ic_results,
-    px,
-):
-    # ==============================================================================
-    # Cell 3c: Rotation 相关性与冗余剪枝 (可选诊断)
-    # ==============================================================================
-    from utils.ic_analysis import calc_factor_corr, find_redundant_factors, print_corr_clusters
-
-    def run_corr_analysis():
-        available_rotation_factors = [factor_name for factor_name in FACTOR_COLS if factor_name in df_all.columns]
-        should_run = RUN_ROTATION_CORR_DIAGNOSTICS or FEATURE_MODE == "pruned"
-        if not should_run:
-            print("ℹ️ [Cell 3c] Rotation 相关性诊断默认关闭，当前仅返回未剪枝因子列表。")
-            return None, available_rotation_factors, available_rotation_factors, []
-        if len(available_rotation_factors) < 2:
-            print("ℹ️ [Cell 3c] 当前 FEATURE_MODE 未加载足够的 Rotation 因子，跳过相关性分析。")
-            return None, available_rotation_factors, available_rotation_factors, []
-
-        corr_mat, factor_names = calc_factor_corr(df_all, available_rotation_factors)
-
-        print_corr_clusters(corr_mat, factor_names, threshold=0.7)
-
-        keep, drop, _decisions = find_redundant_factors(
-            corr_mat, factor_names, ic_results=ic_results, threshold=0.85
-        )
-
-        fig = px.imshow(
-            corr_mat,
-            x=factor_names,
-            y=factor_names,
-            color_continuous_scale="RdBu_r",
-            zmin=-1,
-            zmax=1,
-            title=f"因子 Spearman 相关矩阵 ({len(factor_names)} 因子)",
-        )
-        fig.update_layout(height=800, width=900, template="plotly_dark")
-        fig.show()
-
-        return corr_mat, factor_names, keep, drop
-
-    corr_matrix, corr_names, factors_keep, factors_drop = run_corr_analysis()
-    return (factors_keep,)
-
-
-@app.cell
-def _(
-    CORE_FEATURES_FROZEN,
-    FACTOR_COLS,
-    FACTOR_GROUPS,
-    FACTOR_GROUP_LABELS,
-    FACTOR_TO_GROUP,
-    RUN_ROTATION_CORE_SCREEN,
-    factors_keep,
-    ic_results,
-):
-    # ==============================================================================
-    # Cell 3d: Rotation core feature screen (历史治理工具)
-    # 默认直接返回冻结的 core_12，不再作为主流程依赖
-    # ==============================================================================
-    def run_core_factor_screen():
-        if not RUN_ROTATION_CORE_SCREEN:
-            print("ℹ️ [Cell 3d] 默认不再运行 core feature screen，使用冻结的 core_12 配置。")
-            print(f"   core_12 = {', '.join(CORE_FEATURES_FROZEN)}")
-            return list(CORE_FEATURES_FROZEN)
-        if not ic_results:
-            print("ℹ️ [Cell 3d] 当前 FEATURE_MODE 未加载 Rotation 因子，回退到冻结的 core_12 配置。")
-            return list(CORE_FEATURES_FROZEN)
-
-        keep_set = set(factors_keep)
-        ranked_rows = []
-        for factor_name in FACTOR_COLS:
-            if factor_name not in ic_results:
-                continue
-            group_key_local = FACTOR_TO_GROUP.get(factor_name, "ungrouped")
-            ranked_rows.append(
-                {
-                    "factor": factor_name,
-                    "group_key": group_key_local,
-                    "group_name": FACTOR_GROUP_LABELS.get(group_key_local, group_key_local),
-                    "abs_icir": abs(float(ic_results[factor_name]["icir"])),
-                    "is_pruned_keep": factor_name in keep_set,
-                }
-            )
-
-        core_primary = []
-        secondary_pool = []
-
-        print("🎯 [Core Factors] 分组核心因子筛查")
-        print("=" * 108)
-        print(f"  {'分组':<20} {'候选因子':<24} {'|ICIR|':>10} {'保留?':>8} {'角色':>8}")
-        print("-" * 108)
-
-        for group_key_local, _factors_local in FACTOR_GROUPS.items():
-            group_rows = [r for r in ranked_rows if r["group_key"] == group_key_local]
-            group_rows.sort(key=lambda r: r["abs_icir"], reverse=True)
-            if not group_rows:
-                continue
-
-            kept_rows = [r for r in group_rows if r["is_pruned_keep"]]
-            primary = kept_rows[0] if kept_rows else group_rows[0]
-            core_primary.append(primary["factor"])
-
-            print(
-                f"  {FACTOR_GROUP_LABELS.get(group_key_local, group_key_local):<20} "
-                f"{primary['factor']:<24} {primary['abs_icir']:>10.4f} "
-                f"{('是' if primary['is_pruned_keep'] else '否'):>8} {'主因子':>8}"
-            )
-
-            follow_rows = kept_rows[1:] if primary["is_pruned_keep"] else kept_rows
-            for candidate_row in follow_rows:
-                if (
-                    candidate_row["abs_icir"] >= 0.08
-                    and candidate_row["abs_icir"] >= primary["abs_icir"] * 0.60
-                ):
-                    secondary_pool.append(candidate_row)
-
-        secondary_pool.sort(key=lambda r: r["abs_icir"], reverse=True)
-        core_target_size = 12
-        extra_slots = max(0, core_target_size - len(core_primary))
-        core_factors_local = list(core_primary)
-        for candidate_row in secondary_pool:
-            if candidate_row["factor"] in core_factors_local:
-                continue
-            if len(core_factors_local) >= len(core_primary) + extra_slots:
-                break
-            core_factors_local.append(candidate_row["factor"])
-            print(
-                f"  {candidate_row['group_name']:<20} {candidate_row['factor']:<24} {candidate_row['abs_icir']:>10.4f} "
-                f"{('是' if candidate_row['is_pruned_keep'] else '否'):>8} {'补充':>8}"
-            )
-
-        print("-" * 108)
-        print(f"  建议 core feature set ({len(core_factors_local)}): {', '.join(core_factors_local)}")
-        return core_factors_local
-
-    core_factors = run_core_factor_screen()
-    return (core_factors,)
 
 
 @app.cell
@@ -886,35 +338,23 @@ def _():
 
 @app.cell
 def _(
-    ALPHA158_ANALYSIS_GROUP_MODE,
     ALPHA158_GROUP_MODE,
-    FACTOR_COLS,
-    FEATURE_MODE,
+    FEATURE_SET,
     LABEL,
     MIN_LIST_DAYS,
     MV_MAX,
     MV_MIN,
     NORMALIZE_MODE,
-    alpha158_top1_factor_cols,
-    core_factors,
     df_all,
-    factors_keep,
     np,
     pl,
     resolve_alpha158_group_config,
+    selected_feature_set,
 ):
     # ==============================================================================
     # Cell 6: LightGBM Walk-Forward 打分
-    # 模型只负责打分, 导出与回测解耦
-    #
-    # FEATURE_MODE:
-    #   - "all" = 全部 Rotation 因子
-    #   - "pruned" = 相关性剪枝后的 Rotation 因子
-    #   - "core" = 分组核心 Rotation 因子
-    #   - "alpha158" = 全量 Alpha158
-    #   - "core_plus_alpha158" = core_12 + Alpha158
-    #   - "core_plus_alpha158_top1" = core_12 + Alpha158 各组 top1
-    #   - "all_plus_alpha158" = Rotation 全量 + Alpha158
+    # 模型只负责打分, 导出与回测解耦。
+    # 本 notebook 只消费 manifest 中冻结的稳定特征集。
     # ==============================================================================
     def run_lgbm_scoring():
         from datetime import datetime
@@ -926,35 +366,15 @@ def _(
         TRAIN_WINDOW = 480
         RETRAIN_FREQ = 20
         TOP_N = 20
-        alpha158_group_config = resolve_alpha158_group_config(ALPHA158_GROUP_MODE)
-        alpha158_feature_cols = list(alpha158_group_config["factor_cols"])
-        alpha158_top1_feature_cols = list(
-            dict.fromkeys(
-                factor_name
-                for factor_name in alpha158_top1_factor_cols
-                if factor_name in df_all.columns
+        feature_cols = list(selected_feature_set.feature_cols or ())
+        if not feature_cols:
+            raise ValueError(
+                f"Feature set '{FEATURE_SET}' 没有稳定因子清单，不能直接训练。"
             )
-        )
 
-        if FEATURE_MODE == "pruned":
-            feature_cols = list(factors_keep)
-        elif FEATURE_MODE == "core":
-            feature_cols = list(core_factors)
-        elif FEATURE_MODE == "alpha158":
-            feature_cols = list(alpha158_feature_cols)
-        elif FEATURE_MODE == "core_plus_alpha158":
-            feature_cols = list(dict.fromkeys([*core_factors, *alpha158_feature_cols]))
-        elif FEATURE_MODE == "core_plus_alpha158_top1":
-            if not alpha158_top1_feature_cols:
-                raise ValueError(
-                    "FEATURE_MODE=core_plus_alpha158_top1 需要先运行 Cell 3，"
-                    "并保证 ALPHA158_ANALYSIS_GROUP_MODE 能产出 Alpha158 top1。"
-                )
-            feature_cols = list(dict.fromkeys([*core_factors, *alpha158_top1_feature_cols]))
-        elif FEATURE_MODE == "all_plus_alpha158":
-            feature_cols = list(dict.fromkeys([*FACTOR_COLS, *alpha158_feature_cols]))
-        else:
-            feature_cols = list(FACTOR_COLS)
+        alpha158_group_config = None
+        if ALPHA158_GROUP_MODE:
+            alpha158_group_config = resolve_alpha158_group_config(ALPHA158_GROUP_MODE)
 
         lgb_params = {
             "n_estimators": 200,
@@ -970,28 +390,16 @@ def _(
             "random_state": 42,
         }
 
-        if FEATURE_MODE == "pruned":
-            mode_desc = f"pruned ({len(feature_cols)})"
-        elif FEATURE_MODE == "core":
-            mode_desc = f"core ({len(feature_cols)})"
-        elif FEATURE_MODE == "alpha158":
-            mode_desc = f"alpha158 ({len(feature_cols)})"
-        elif FEATURE_MODE == "core_plus_alpha158":
-            mode_desc = f"core_plus_alpha158 ({len(feature_cols)})"
-        elif FEATURE_MODE == "core_plus_alpha158_top1":
-            mode_desc = f"core_plus_alpha158_top1 ({len(feature_cols)})"
-        elif FEATURE_MODE == "all_plus_alpha158":
-            mode_desc = f"all_plus_alpha158 ({len(feature_cols)})"
-        else:
-            mode_desc = f"all ({len(feature_cols)})"
+        mode_desc = (
+            f"{FEATURE_SET} -> {selected_feature_set.feature_mode} "
+            f"({len(feature_cols)})"
+        )
         print("🤖 LightGBM Walk-Forward 打分", flush=True)
         print(f"   训练窗口: {TRAIN_WINDOW}天, 重训: 每{RETRAIN_FREQ}天, 标签: {LABEL}", flush=True)
-        print(f"   特征模式: {mode_desc}, Top-{TOP_N}", flush=True)
-        if FEATURE_MODE in {"alpha158", "core_plus_alpha158", "all_plus_alpha158"}:
+        print(f"   特征集: {mode_desc}, Top-{TOP_N}", flush=True)
+        print(f"   特征集状态: {selected_feature_set.status}", flush=True)
+        if alpha158_group_config is not None:
             print(f"   Alpha158 分组: {alpha158_group_config['group_mode_label']}", flush=True)
-        elif FEATURE_MODE == "core_plus_alpha158_top1":
-            print(f"   Alpha158 Top1 来源: {ALPHA158_ANALYSIS_GROUP_MODE}", flush=True)
-            print(f"   Alpha158 Top1 因子数: {len(alpha158_top1_feature_cols)}", flush=True)
         print(f"   截面归一化: {NORMALIZE_MODE}", flush=True)
 
         df_valid_ml = (
@@ -1090,16 +498,12 @@ def _(
             "strategy": "rotation",
             "label": LABEL,
             "model_name": "lightgbm",
-            "feature_mode": FEATURE_MODE,
+            "feature_mode": selected_feature_set.feature_mode,
             "alpha158_group_mode": alpha158_group_config["group_mode_label"]
-            if FEATURE_MODE in {"alpha158", "core_plus_alpha158", "all_plus_alpha158"}
+            if alpha158_group_config is not None
             else None,
-            "alpha158_analysis_group_mode": ALPHA158_ANALYSIS_GROUP_MODE
-            if FEATURE_MODE == "core_plus_alpha158_top1"
-            else None,
-            "alpha158_top1_factors": alpha158_top1_feature_cols
-            if FEATURE_MODE == "core_plus_alpha158_top1"
-            else None,
+            "alpha158_analysis_group_mode": selected_feature_set.alpha158_analysis_group_mode,
+            "alpha158_top1_factors": None,
             "normalize_mode": NORMALIZE_MODE,
             "feature_hash": feature_hash,
             "features": feature_cols,
