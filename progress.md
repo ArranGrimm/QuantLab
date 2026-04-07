@@ -1,5 +1,89 @@
 # Progress
 
+## 2026-04-07
+
+### [Rotation] Top-20 优化阶段先验证出 `hold_buffer=20` 的主效应
+- 基于 `Cell 8` 的 `Top-20 Tail Diagnostics`，当前信号已确认呈现明显前排集中:
+  - `Top1-2` 最强
+  - `Top16-20` 已明显弱于前排
+  - 当前问题首先更像“旧仓卖得太慢”，而不只是“新仓怎么进”
+- 回测层新加的两条能力:
+  - `max_daily_buys`
+  - `entry_rank_limit`
+  已完成落地，但本轮实验尚未证明它们本身就是收益提升主因
+- 本轮关键对比结论:
+  - 当 `max_daily_buys=20` 且 `entry_rank_limit=20` 时，新机制已退化回旧买入行为
+  - 在这一前提下，仅将 `hold_buffer` 从 `50` 收紧到 `20`，回测表现明显改善
+  - 当前更应优先把 `hold_buffer=20` 视作新的强候选基线，再评估更复杂的入场控制
+- 当前阶段判断:
+  - `hold_buffer=20` 是 Top-20 优化的第一有效改动
+  - `max_daily_buys / entry_rank_limit` 目前保留为后续实验工具，不作为本轮主结论
+
+### [Rotation] 回测层已支持渐进建仓与前排准入
+- `backtest-engine/crates/rotation` 已新增两条独立控制:
+  - `max_daily_buys`: 每日最多新开仓数量, 用于控制建仓节奏
+  - `entry_rank_limit`: 仅允许新开仓来自前排 rank, 用于控制准入质量
+- 当前规则语义已明确拆开:
+  - `max_positions` = 组合容量上限
+  - `max_daily_buys` = 每日新增节奏
+  - `entry_rank_limit` = 新仓质量门槛
+  - `hold_buffer` = 已持仓保留阈值
+- 兼容性处理:
+  - 旧配置文件即使未声明新字段也可继续运行
+  - `max_daily_buys` 默认回落到 `max_positions`
+  - `entry_rank_limit` 默认回落到 `top_n`
+- 已同步更新:
+  - `backtest-engine/crates/rotation/config.toml`
+  - 回测控制台配置输出
+  - report bundle / registry 元数据
+- 已验证:
+  - `cargo check -p bt-rotation`
+  - 仅有 rotation crate 既有 dead_code warning, 本次未新增编译错误
+
+### [Rotation] 训练 notebook 已新增 Top-20 专用诊断面板
+- `notebooks/cross_section_rotation.py` 已在 `Cell 7` 后新增 `Top-20 Tail Diagnostics`:
+  - `Top-20` 日均收益 / 中位数 / 单票胜率
+  - `Rank 1-20` 的逐名次日均收益
+  - `Rank 1-5 / 6-10 / 11-15 / 16-20` 分桶收益
+  - `Top-20` vs `Rank 21-40` 的日均收益与累计收益
+  - `Rank20-21` 的 score gap
+  - `Top-20` 最差 `1` 只 / 最差 `3` 只的日均拖累
+- 当前设计选择:
+  - 与 `Cell 7` 统一口径, 继续基于 `df_scores_raw` 做诊断侧 EMA
+  - 固定按 `fwd_ret_1d` 做经济评估, 不改训练和导出主流程
+- 已验证:
+  - `python -m py_compile notebooks/cross_section_rotation.py`
+  - `uv run marimo check notebooks/cross_section_rotation.py`
+
+### [Rotation] 自定义因子组合训练入口落地
+- `manifests/rotation_feature_sets.py` 已新增运行时 `custom feature set` 解析能力:
+  - 支持在训练 notebook 中直接传入任意 `Rotation / Alpha158` 因子组合
+  - 自动推导:
+    - `feature_mode`
+    - `alpha158_group_mode`
+    - 未知因子校验
+- `notebooks/cross_section_rotation.py` 当前已支持:
+  - `FEATURE_SET = "custom"`
+  - `CUSTOM_FEATURE_SET_NAME`
+  - `CUSTOM_FEATURE_COLS`
+- 当前设计口径:
+  - 训练层仍优先消费 manifest 中冻结的稳定特征集
+  - 但已不再限制只能跑 registry 里预先写死的组合
+  - 对跨 Alpha158 分组的自定义组合, 训练层会自动推导所需分组并准备依赖因子
+
+### [Rotation] `rotation_factor_lab.py` marimo 兼容性修复
+- 已用 `uv run marimo check` 复现并修复 Factor Lab 中的典型 marimo 问题:
+  - 跨 cell 重复定义局部变量
+  - cell 分支中的早退 `return`
+  - 空 cell 告警
+- 当前结果:
+  - `uv run marimo check notebooks/rotation_factor_lab.py` 已通过
+  - `uv run marimo check notebooks/cross_section_rotation.py` 已通过
+- 顺手做的结构清理:
+  - Factor Lab 中各 cell 的临时变量统一改为私有命名
+  - 训练入口说明补充 `selected_feature_set.note`
+  - `rotation_train_meta` 新增 `feature_set_name`
+
 ## 2026-04-05
 
 ### [Docs] 跨设备统一口径固化

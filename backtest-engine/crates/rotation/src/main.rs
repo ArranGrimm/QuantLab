@@ -94,6 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
     let initial_capital = config.initial_capital;
     let top_n = config.top_n;
+    let entry_rank_limit = config.entry_rank_limit as u32;
     let min_score = config.min_score;
     app.insert_resource(config);
     app.insert_resource(Portfolio::new(initial_capital));
@@ -129,7 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if bar.score < min_score {
                         return None;
                     }
-                    Some((code.clone(), bar.score, bar.close, bar.pre_close))
+                    Some((code.clone(), bar.score, bar.close, bar.pre_close, bar.rank))
                 })
             })
             .collect();
@@ -138,7 +139,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         candidates.truncate(top_n);
 
         let before = candidates.len();
-        candidates.retain(|(code, _score, close, pre_close)| {
+        candidates.retain(|(code, _score, close, pre_close, _rank)| {
             let limit = bt_core::price_limit_pct(code);
             !bt_core::is_limit_up(*close, *pre_close, limit)
         });
@@ -150,7 +151,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let candidates: Vec<(String, f64, f64)> = candidates
             .into_iter()
-            .map(|(code, score, close, _)| (code, score, close))
+            .filter(|(_, _, _, _, rank)| *rank <= entry_rank_limit)
+            .map(|(code, score, close, _, _)| (code, score, close))
             .collect();
 
         world.resource_mut::<DailyData>().candidates = candidates;
@@ -196,11 +198,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             json!({
                 "initial_capital": config.initial_capital,
                 "max_positions": config.max_positions,
+                "max_daily_buys": config.max_daily_buys,
                 "position_size_pct": config.position_size_pct,
                 "max_hold_days": config.max_hold_days,
                 "start_date": config.start_date.map(|d| d.to_string()),
                 "end_date": config.end_date.map(|d| d.to_string()),
                 "top_n": config.top_n,
+                "entry_rank_limit": config.entry_rank_limit,
                 "hold_buffer": config.hold_buffer,
                 "min_score": config.min_score,
                 "stop_loss_enabled": config.stop_loss_enabled,
@@ -245,12 +249,18 @@ fn print_config(config: &RotationConfig) {
     println!("\n--- Rotation Configuration ---");
     println!("Initial Capital: {:.0}", config.initial_capital);
     println!("Max Positions: {}", config.max_positions);
+    println!("Max Daily Buys: {}", config.max_daily_buys);
     println!("Position Size: {:.1}%", config.position_size_pct * 100.0);
     println!("Max Hold Days: {}", config.max_hold_days);
     let start_str = config.start_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".to_string());
     let end_str = config.end_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".to_string());
     println!("Date Range: {} ~ {}", start_str, end_str);
-    println!("Top-N: {} (Hold Buffer: {})", config.top_n, config.hold_buffer);
+    println!(
+        "Top-N: {} (Entry Rank Limit: {}, Hold Buffer: {})",
+        config.top_n,
+        config.entry_rank_limit,
+        config.hold_buffer
+    );
     println!("Min Score: {}", config.min_score);
     println!(
         "Stop Loss: {:.1}% ({})",
@@ -328,6 +338,7 @@ fn format_config(config: &RotationConfig, trading_days: usize) -> String {
     writeln!(s, "--- Configuration ---").unwrap();
     writeln!(s, "Initial Capital:  {:.0}", config.initial_capital).unwrap();
     writeln!(s, "Max Positions:    {}", config.max_positions).unwrap();
+    writeln!(s, "Max Daily Buys:   {}", config.max_daily_buys).unwrap();
     writeln!(s, "Position Size:    {:.1}%", config.position_size_pct * 100.0).unwrap();
     writeln!(s, "Max Hold Days:    {}", config.max_hold_days).unwrap();
     let start_str = config.start_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".into());
@@ -335,6 +346,7 @@ fn format_config(config: &RotationConfig, trading_days: usize) -> String {
     writeln!(s, "Date Range:       {} ~ {}", start_str, end_str).unwrap();
     writeln!(s, "Trading Days:     {}", trading_days).unwrap();
     writeln!(s, "Top-N:            {}", config.top_n).unwrap();
+    writeln!(s, "Entry Rank Limit: {}", config.entry_rank_limit).unwrap();
     writeln!(s, "Hold Buffer:      {}", config.hold_buffer).unwrap();
     writeln!(s, "Min Score:        {}", config.min_score).unwrap();
     writeln!(s, "Stop Loss:        {:.1}% ({})",
@@ -401,12 +413,15 @@ fn append_rotation_registry_entry(
         "feature_count": signal_meta.and_then(|meta| meta.feature_count),
         "export_ema_alpha": signal_meta.and_then(|meta| meta.export_ema_alpha),
         "top_n": config.top_n,
+        "entry_rank_limit": config.entry_rank_limit,
         "backtest_id": backtest_id,
         "input_signal_file": bt_core::relative_portable_path(&train_run_dir, data_path),
         "signal_path": signal_path_resolved.as_ref().map(|p| bt_core::relative_portable_path(&train_run_dir, p)),
         "signal_meta_path": signal_meta_resolved.as_ref().map(|p| bt_core::relative_portable_path(&train_run_dir, p)),
         "backtest_dir": bt_core::relative_portable_path(&train_run_dir, &report_dir),
         "git_commit": signal_meta.and_then(|meta| meta.git_commit.clone()),
+        "max_positions": config.max_positions,
+        "max_daily_buys": config.max_daily_buys,
         "hold_buffer": config.hold_buffer,
         "min_score": config.min_score,
         "max_hold_days": config.max_hold_days,

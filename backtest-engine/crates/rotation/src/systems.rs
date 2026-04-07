@@ -155,7 +155,7 @@ pub fn fill_positions(
     }
     let total_value = portfolio.cash + positions_value;
 
-    let available_slots = config.max_positions - current_positions;
+    let available_slots = (config.max_positions - current_positions).min(config.max_daily_buys);
     let cost_model = &config.cost_model;
     let mut bought_count = 0;
 

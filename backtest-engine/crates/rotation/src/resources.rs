@@ -25,6 +25,8 @@ pub struct ConfigFile {
 pub struct BacktestSection {
     pub initial_capital: f64,
     pub max_positions: usize,
+    #[serde(default)]
+    pub max_daily_buys: Option<usize>,
     pub position_size_pct: f64,
     pub max_hold_days: i32,
     #[serde(default)]
@@ -41,6 +43,8 @@ fn default_min_position_ratio() -> f64 { 0.5 }
 pub struct EntrySection {
     pub top_n: usize,
     pub hold_buffer: usize,
+    #[serde(default)]
+    pub entry_rank_limit: Option<usize>,
     #[serde(default)]
     pub min_score: f64,
 }
@@ -75,6 +79,7 @@ impl ConfigFile {
 pub struct RotationConfig {
     pub initial_capital: f64,
     pub max_positions: usize,
+    pub max_daily_buys: usize,
     pub position_size_pct: f64,
     pub max_hold_days: i32,
     pub start_date: Option<NaiveDate>,
@@ -83,6 +88,7 @@ pub struct RotationConfig {
 
     pub top_n: usize,
     pub hold_buffer: usize,
+    pub entry_rank_limit: usize,
     pub min_score: f64,
 
     pub stop_loss_enabled: bool,
@@ -100,6 +106,7 @@ impl Default for RotationConfig {
         Self {
             initial_capital: 100_000.0,
             max_positions: 20,
+            max_daily_buys: 20,
             position_size_pct: 0.05,
             max_hold_days: 30,
             start_date: None,
@@ -107,6 +114,7 @@ impl Default for RotationConfig {
             min_position_ratio: 0.5,
             top_n: 20,
             hold_buffer: 50,
+            entry_rank_limit: 20,
             min_score: 0.0,
             stop_loss_enabled: true,
             stop_loss_pct: 0.05,
@@ -120,9 +128,16 @@ impl Default for RotationConfig {
 
 impl From<ConfigFile> for RotationConfig {
     fn from(cfg: ConfigFile) -> Self {
+        let max_daily_buys = cfg.backtest.max_daily_buys
+            .unwrap_or(cfg.backtest.max_positions)
+            .min(cfg.backtest.max_positions);
+        let entry_rank_limit = cfg.entry.entry_rank_limit
+            .unwrap_or(cfg.entry.top_n)
+            .min(cfg.entry.top_n);
         Self {
             initial_capital: cfg.backtest.initial_capital,
             max_positions: cfg.backtest.max_positions,
+            max_daily_buys,
             position_size_pct: cfg.backtest.position_size_pct,
             max_hold_days: cfg.backtest.max_hold_days,
             start_date: bt_core::parse_date_opt(&cfg.backtest.start_date),
@@ -130,6 +145,7 @@ impl From<ConfigFile> for RotationConfig {
             min_position_ratio: cfg.backtest.min_position_ratio,
             top_n: cfg.entry.top_n,
             hold_buffer: cfg.entry.hold_buffer,
+            entry_rank_limit,
             min_score: cfg.entry.min_score,
             stop_loss_enabled: cfg.stop_loss.enabled,
             stop_loss_pct: cfg.stop_loss.pct,

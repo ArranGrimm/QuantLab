@@ -16,17 +16,23 @@
 - 主线候选: `core_plus_alpha158(kbar_shape)`
 - 比较锚点: `core_12 + fwd_ret_1d + EXPORT_EMA_ALPHA=0.30 + hold_buffer=50 + max_hold_days=10`
 - 当前优先工作:
-  - 压组合层成本 (`hold_buffer / min_score / top_n`)
-  - 继续按“三层解耦”架构推进 `Rotation` 研究流
+  - 固定 `core_plus_alpha158(kbar_shape)`, 暂不继续扩因子
+  - 先用训练侧 `Top-20` 专用诊断排查排序尾部与边界问题
+  - 回测层当前先验证 `hold_buffer=20` 这条更直接的持仓优化主线
+  - `max_daily_buys / entry_rank_limit` 暂作为附加实验工具保留
+  - 再考虑 `score_adj` 前的二次整形
 
 ### 三层解耦现状
 - 分析层: `notebooks/rotation_factor_lab.py`
   - 负责因子 IC、分组汇总、Alpha decay、Alpha158 top1 / 强子集筛选
+  - 已修复 marimo 的跨 cell 重名变量与分支 `return` 问题, `uv run marimo check` 通过
 - 清单层: `manifests/rotation_feature_sets.py`
   - 负责维护稳定特征集、状态标签 (`active / archived / experimental`) 与说明
+  - 现已支持运行时 `custom feature set` 解析, 可承接任意自定义因子组合训练
 - 训练层: `notebooks/cross_section_rotation.py`
   - 只消费 manifest 中冻结的特征集
   - 负责训练集构造、Walk-forward 打分、raw score 导出与 artifact 落盘
+  - 现已支持 `FEATURE_SET = "custom"` + `CUSTOM_FEATURE_COLS`
 
 ### 已收口路线
 - `46-all` / `36-pruned`: 不再作为主推版本
@@ -52,6 +58,7 @@
   - `append_jsonl_record()`
 - `notebooks/cross_section_rotation.py`: 训练入口 notebook
   - Cell 1: 读取 `FEATURE_SET` 并从 manifest 加载稳定特征集
+  - Cell 1: 现支持 `FEATURE_SET = "custom"` 运行时传入任意自定义因子组合
   - Cell 2: 数据加载 + 因子计算 + 涨跌停标记 + 截面标准化 + 标签构造
   - Cell 2: 仍支持 `zscore / rank_pct / rank_gauss` 与 `fwd_ret_{1/2/3/5}d_rank_pct`
   - Cell 2b: 校验 `amount / volume` 单位口径, 防止 `vwap_raw` 误放大 100 倍
@@ -59,11 +66,19 @@
   - Cell 6: LightGBM Walk-Forward 打分, 输出 `df_scores_raw + rotation_train_meta`
   - Cell 6b: 导出 parquet, 独立控制 `EXPORT_EMA_ALPHA`, 写入 artifact 元数据, 无需重训模型
   - Cell 7: 保留原始分数的 Signal Quality 诊断
+  - Cell 8: 新增 `Top-20 Tail Diagnostics`, 专看 rank-by-rank、20/21 边界和尾部拖累
+- `backtest-engine/crates/rotation`:
+  - 已支持 `max_daily_buys`, 用于限制每日新增仓位数量
+  - 已支持 `entry_rank_limit`, 用于限制新开仓只来自更前排的 rank
+  - 新旧配置兼容: 未声明新参数时, 自动回落到旧的“尽量补满 + Top-N 候选”行为
+  - 当前实验结论: 本轮收益改善首先由 `hold_buffer=50 -> 20` 带来, 入场控制能力尚未单独证明优于简单基线
 - `notebooks/rotation_factor_lab.py`: 独立分析 notebook
   - 负责 Rotation / Alpha158 因子 IC、分组汇总、Alpha decay、相关性诊断与 core 候选筛查
+  - 已通过 `uv run marimo check`, 可作为稳定分析入口使用
 - `manifests/rotation_feature_sets.py`:
   - 当前稳定训练入口: `core_12`, `core_plus_alpha158_kbar_shape`
   - `core_plus_alpha158_top1` 与 `pruned_rotation` 已降级为 `analysis-only`
+  - 已新增自定义组合解析能力, 不再要求所有训练组合都预先写死在 registry 中
 - 新增 `utils/factor_analysis.py`:
   - `build_ic_summary_frame`
   - `summarize_factor_groups`
@@ -91,10 +106,10 @@
 ### 我们的核心数据 (2026-03-31 更新, 排除涨停幻觉后的真实 alpha)
 | 指标 | 值 | 备注 |
 |---|---|---|
-| Gross Return (809天) | +48.12% | 约 15%/年, 真实 alpha |
-| Total Return | +10.51% | 0.1% 滑点 |
-| 最大回撤 | 21.34% | |
-| 胜率 | 45.6% | |
+| Gross Return (810天) | +76.05% | 当前最佳结果来自 `hold_buffer=20` 版本 |
+| Total Return | +24.27% | `core_plus_alpha158(kbar_shape)` + `EXPORT_EMA_ALPHA=0.30` |
+| 最大回撤 | 13.31% | 明显优于旧 `hold_buffer=50` 基线 |
+| 胜率 | 46.5% | |
 | 总交易笔数 | 2,202 | 日均 2.7 笔 |
 | 信号 IC Mean | +0.0376 | t-stat = 8.81 ✅ |
 | ICIR | +0.3096 | |
