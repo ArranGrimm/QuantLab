@@ -572,7 +572,7 @@ def _(df_scores_raw, pl, q_full, rotation_train_meta):
 
     def run_export():
         EXPORT_TOP_N = 20
-        EXPORT_EMA_ALPHA = 0.30  # 导出 parquet 用的分数平滑; 改这里仅需重跑本 Cell
+        EXPORT_EMA_ALPHA = 1.0  # 导出 parquet 用的分数平滑; 改这里仅需重跑本 Cell
 
         df_scores_export = df_scores_raw
 
@@ -974,7 +974,7 @@ def _(df_all, df_scores_raw, go, make_subplots, np, pl):
     #   - 经济评估固定使用 fwd_ret_1d
     # ==============================================================================
     def run_top20_tail_diagnostics():
-        _ema_alpha = 0.70
+        _ema_alpha = 1.0
         _top_n = 20
         _next_n = 20
         _eval_label_col = "fwd_ret_1d"

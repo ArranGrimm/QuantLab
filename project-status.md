@@ -305,6 +305,56 @@
 - 详细路线文档:
   - `experiments/b1-next-phase.md`
 
+### B1 条件挖掘当前收敛口径
+
+- 第一阶段只做最小实施版:
+  - `seed_loose / seed_mid / seed_strict`
+  - 先从第一批最小连续特征起步，再扩到第二批 B1 专属连续特征
+  - 单变量 / 双变量稳定性分析
+  - 浅树规则提取
+- 第一阶段暂不做:
+  - `manifest`
+  - 直接改主链信号收口
+  - 大规模规则组合搜索
+- 第一阶段目标:
+  - 先得到 `2~5` 组可解释候选条件
+  - 再决定是否接入全市场 ML 排序链
+
+### B1 条件挖掘当前实现进度
+
+- `notebooks/b1_condition_mining.py` 已新增第一版 notebook
+- 当前实现方式:
+  - 通过 `utils/b1_feature_pool.py` 统一构造研究底表
+  - 底层继续复用 `calc_b1_factors_wmacd`
+  - 在其上叠加 `seed pool`、连续特征、分箱分析、浅树规则提取与候选条件收敛
+- 当前第一版已具备:
+  - `manual bull regime` 样本切片
+  - `seed_loose / seed_mid / seed_strict`
+  - 第一批 + 第二批 B1 连续特征池
+  - 单变量条件得分榜
+  - 指定特征分箱深挖
+  - 浅树候选规则输出
+  - `Step 7b` 手工候选规则并排验证
+  - `Step 8` 候选条件收敛 (`2~5` 条)
+- 当前 notebook 已做第一轮可读性整理:
+  - 当前已改回 `print-first` 输出风格
+  - 关键结论和关键表格会在各 step 内直接打印
+  - 更便于把运行输出直接复制回对话继续分析
+- 当前状态:
+  - 条件挖掘线已能直接进入第一轮实际跑数与条件筛选
+
+### B1 双轨研究当前落地状态
+
+- 条件挖掘线:
+  - 主入口: `notebooks/b1_condition_mining.py`
+  - 当前目标: 收敛并验证 `2~5` 条可解释候选条件
+- seed 纯模型线:
+  - 主入口: `notebooks/b1_seed_ml_baseline.py`
+  - 当前已支持 `seed_mid / seed_strict` 两档切换
+  - 当前已打通 `walk-forward -> 评估 -> Rust 导出`
+- 当前统一结论文档:
+  - `experiments/b1-next-phase.md`
+
 ---
 
 ## 三、Renko 短线策略

@@ -1,6 +1,83 @@
 # Progress
 
+## 2026-04-09
+
+### [B1] 双轨研究路线第一轮已落地到代码
+- 已新增共享特征工具 `utils/b1_feature_pool.py`:
+  - 统一输出 `B1` 条件挖掘与 seed 纯模型共用的研究底表
+  - 保留原第一批连续特征
+  - 新增第二批 `17` 个 B1 专属连续特征，覆盖:
+    - 触发上下文 (`trigger_recent_10` / `key_k_recent_20` / `plry_cluster_recent_10` / `days_since_key_k_inv`)
+    - 形态结构 (`range_pct` / `body_to_range` / `close_pos_in_bar` / `gap_from_prev_close_pct`)
+    - 量价结构 (`vol_to_prev_vol` / `vol_to_avg40` / `vol_shrink_20_delta_5` / `red_green_ratio_delta_5`)
+    - regime / 周月动能 (`rw_hist_delta_5` / `rm_hist_delta_5` / `bias_wl_yl_delta_5` / `close_above_yl_pct_5` / `close_above_wl_pct_5`)
+- 已更新 `utils/__init__.py` 导出新的 B1 特征池与底表构造函数
+
+### [B1] `b1_condition_mining` 已进入“候选条件收敛”阶段
+- `notebooks/b1_condition_mining.py` 已改为直接复用 `build_b1_research_frame()`
+- 当前 notebook 已从“第一批最小特征集”升级为“第一批 + 第二批”统一特征池
+- 已新增 `Step 8. 候选条件收敛`:
+  - 自动汇总 `Step 7` 浅树候选
+  - 自动汇总 `Step 7b` 手工规则验证
+  - 自动收敛出 `2~5` 条可解释候选条件，供下一轮规则增强或纯模型对照直接复用
+- 当前已验证:
+  - `python -m py_compile notebooks/b1_condition_mining.py`
+  - `uv run marimo check notebooks/b1_condition_mining.py`
+
+### [B1] seed 纯模型对照线已打通第一版
+- 已新增 `notebooks/b1_seed_ml_baseline.py`
+- 当前支持:
+  - 直接切换 `SEED_COL="seed_mid"` 或 `SEED_COL="seed_strict"`
+  - 在 seed 内做 `LightGBM walk-forward`
+  - 输出 `IC / ICIR / t-stat / q4-q0`
+  - 导出 `score` 到 Rust B1 回测 parquet
+- 当前已验证:
+  - `python -m py_compile notebooks/b1_seed_ml_baseline.py`
+  - `uv run marimo check notebooks/b1_seed_ml_baseline.py`
+
+### [Docs] B1 路线文档已收敛为单一入口
+- 已将原先分散的“条件挖掘计划文档”和“四路线对比板”合并回 `experiments/b1-next-phase.md`
+- 当前 `b1-next-phase.md` 已统一承载:
+  - 双轨研究框架
+  - 最新条件挖掘结论
+  - 最小四路线对照集
+  - 当前推荐执行顺序
+
 ## 2026-04-08
+
+### [B1] `b1_condition_mining` 第一版 notebook 已开工落地
+- 已新增 `notebooks/b1_condition_mining.py` 第一版骨架，当前直接复用 `calc_b1_factors_wmacd()` 作为底层主链，不再另写一套 `B1` 计算逻辑
+- 当前 notebook 已包含最小研究闭环:
+  - 原始数据加载 + `ST` 过滤
+  - `B1` 主链因子计算
+  - 三档 `seed pool` (`seed_loose / seed_mid / seed_strict`)
+  - 第一批连续特征列
+  - `manual bull regime` 标注
+  - 单变量分箱得分榜
+  - 指定特征深挖
+  - 浅树候选规则提取
+  - `Step 7b` 手工候选规则验证
+- 已进一步收敛输出风格:
+  - 改回 `print-first`，更接近 `cross_section_rotation.py`
+  - 将关键结论和关键表格直接打印在各 step 内
+  - 方便直接复制终端输出到对话框继续分析
+- 当前已验证:
+  - `python -m py_compile notebooks/b1_condition_mining.py`
+  - `uv run marimo check notebooks/b1_condition_mining.py`
+
+### [B1] 条件挖掘计划已收敛为第一阶段最小实施版
+- 已收敛到统一 B1 路线文档，当前第一阶段只保留:
+  - 三档 `seed pool` (`loose / mid / strict`)
+  - 第一批最小连续特征集 (`12~18` 个)
+  - 单变量 / 双变量稳定性分析 + 浅树规则提取
+  - 三条最小对照基线
+- 当前明确延后:
+  - `manifest` 注册
+  - 直接回写 `utils/b1_factors_opt.py`
+  - 大规模 rule sweep
+- 当前目标:
+  - 先产出 `2~5` 组可解释候选条件
+  - 再决定哪些值得接入全市场 ML 精排主线
 
 ### [Docs] 新增 B1 下一阶段路线文档
 - 已新增 `experiments/b1-next-phase.md`，集中记录:

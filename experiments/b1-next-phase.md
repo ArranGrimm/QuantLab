@@ -2,109 +2,127 @@
 
 ## 当前结论
 
-- `B1` 当前应视为可随市场 regime 切回的候选主线, 但不等于立即放弃 `Rotation`
-- `活跃市值` 继续保留为**人工日常判断**，当前不做自动化复刻
-- 当前最稳定的 `B1` 主链不是旧 notebook，而是:
+- `B1` 当前已经不适合再拆成多份实验文档维护，后续统一以本文档作为主结论文档。
+- `活跃市值` 继续保留为**人工 regime 判断**，当前不做自动化复刻。
+- `B1` 主链已经稳定在:
   - `utils/b1_factors_opt.py::calc_b1_factors_wmacd`
+  - `notebooks/b1_condition_mining.py`
+  - `notebooks/b1_seed_ml_baseline.py`
   - `utils/signal_export.py::export_for_rust`
   - `backtest-engine/crates/b1`
-  - `agent/`
+- 历史结论仍成立:
+  - 全市场 ML 排序有价值
+  - 旧 `B1 dedicated ML` 因最终候选日截面过窄而不该作为默认主线
 
-## 现状梳理
+## 当前研究框架
 
-### 规则侧
+### 路线 A：条件挖掘
 
-- `calc_b1_factors_wmacd` 已不只是通达信原公式直译，而是:
-  - `B1 V3.0` 日线条件
-  - `running weekly MACD`
-  - `monthly MACD`
-  - 可选 `WEEKLY_WL_YL_FILTER / WEEKLY_TREND_FILTER / WAVE_OVERHEAT_FILTER`
-- `agent/` 当前默认使用:
-  - 规则版 `B1` 候选
-  - `rw_dif_pct` 排序
-  - 大模型图表 + 结构化指标评审
+- 在 `seed_loose / seed_mid / seed_strict` 上继续做可解释条件挖掘
+- 当前目标不是“发现完整 B1 公式”，而是收敛出 `2~5` 条真正有增量的条件
+- 当前 notebook:
+  - `notebooks/b1_condition_mining.py`
 
-### ML 侧
+### 路线 B：seed 内纯模型
 
-- 全市场 ML 排序 (`experiments/b1-ml-fullmarket.md`)：
-  - 近期优于手搓 `rw_dif_pct`
-  - 长周期与手搓基本持平
-  - 回撤高于手搓
-- `B1` 专属 ML (`experiments/b1-ml-dedicated.md`)：
-  - 因候选池太窄，截面噪声大
-  - 当前整体弱于全市场 ML
+- 在同一批扩充后的 B1 连续特征上，直接训练:
+  - `seed_mid + 纯模型`
+  - `seed_strict + 纯模型`
+- 当前 notebook:
+  - `notebooks/b1_seed_ml_baseline.py`
 
-### 执行侧
+## 当前实现状态
 
-- `bt-b1` 的交易语义已经稳定:
-  - `T` 日收盘确认信号
-  - `T+1` 开盘买入
-  - 分批止盈 / 弱势清仓 / 最大持有天数 / 跌破 `WL` / 移动止损
-- `is_loose` 目前仍来自手工 `LOOSE_PERIODS`
+- 共享特征底表已统一到 `utils/b1_feature_pool.py`
+- 条件挖掘线已具备:
+  - 三档 `seed pool`
+  - 第一批 + 第二批 B1 连续特征池
+  - `Step 5 / 6 / 7 / 7b / 8`
+  - 自动收敛 `2~5` 条候选条件
+- 纯模型线已具备:
+  - `seed_mid / seed_strict` 切换
+  - `LightGBM walk-forward`
+  - `IC / ICIR / q4-q0`
+  - Rust parquet 导出
 
-## 明确不做的事
+## 最新研究结论
+
+### 1. seed 选择
+
+- `bull_only` 下:
+  - `seed_mid`: `rows=72118`, `avg/day=157.81`, `mfe10_mean=0.0898`, `mfe_hit_rate=39.20%`
+  - `seed_strict`: `rows=60016`, `avg/day=131.33`, `mfe10_mean=0.0899`, `mfe_hit_rate=39.21%`
+- 结论:
+  - `seed_strict` 质量只比 `seed_mid` 略高一点点
+  - 当前不能再把 `seed_strict` 视作绝对主战场
+  - 更合理的理解是:
+    - `seed_mid` 更宽，适合模型与条件搜索
+    - `seed_strict` 更干净，适合做更保守的对照
+
+### 2. 当前最强特征
+
+- 单变量分箱当前最强的 4 个方向:
+  - `Bias_WL_YL`
+  - `range_pct`
+  - `rw_dif_pct`
+  - `Bias_C_YL`
+- 其中新增最有价值的信息是:
+  - `range_pct` 已进入第一梯队
+  - 且单调性非常强 (`monotonicity=0.9947`)
+- 当前主线不再只是“均线关系 + 周动能”，而是:
+  - 趋势强度
+  - 波动展开
+  - 周动能
+  - 价格相对黄线位置
+
+### 3. 当前候选规则
+
+- 浅树当前第一候选:
+  - `range_pct > 3.6248 & Bias_WL_YL > 8.0843`
+  - `samples=13936`
+  - `positive_rate=57.32%`
+  - `lift_vs_base=+0.1812`
+- 手工规则当前第一候选:
+  - `Bias_WL_YL > 9 & rw_dif_pct > 10 & Bias_C_YL > 7.65`
+  - `samples=5553`
+  - `positive_rate=59.59%`
+  - `hit_lift=+0.2039`
+  - `mfe10_lift=+0.0472`
+- 当前已经不是“继续盲挖”，而是已形成可直接进入下一轮验证的候选条件清单
+
+## 最小对照集
+
+当前只保留 4 条路线，避免同时比较过多变量:
+
+| Route | 宇宙 | 主要入口 | 当前作用 |
+| --- | --- | --- | --- |
+| 规则基线 | `seed_mid` 或 `seed_strict` | `b1_condition_mining.py` Step 7b | 保留最简单手工基线 |
+| 条件增强 | `seed_mid` 或 `seed_strict` | `b1_condition_mining.py` Step 8 | 验证候选条件是否能升级为增强版规则 |
+| `seed_mid + 纯模型` | `seed_mid` | `b1_seed_ml_baseline.py` | 验证更宽宇宙上的排序能力 |
+| `seed_strict + 纯模型` | `seed_strict` | `b1_seed_ml_baseline.py` | 验证更干净宇宙上的排序能力 |
+
+## 当前推荐顺序
+
+1. 先继续以 `b1_condition_mining.py` 收敛和验证条件增强版规则。
+2. 纯模型先跑 `seed_mid`，因为它更宽，更适合作为模型主对照。
+3. 再跑 `seed_strict`，看更窄但更干净的宇宙是否能换来更稳定的排序结果。
+4. 最后再决定主线更偏:
+   - 条件增强
+   - 还是 `seed` 内纯模型排序
+
+## 当前不做的事
 
 - 暂不自动化 `活跃市值`
-- 暂不把 `B1` 重新退回“完全手工看图挑股”的旧工作流
-- 暂不把 `B1` 主线直接切成“纯 B1 专属 ML”
+- 暂不把 `B1` 重新退回完全手工看图工作流
+- 暂不把主线直接切成旧意义上的“B1 专属窄截面纯模型”
+- 暂不升格 `manifest`
+- 暂不做大规模 rule sweep
 
-## 下一步可选路线
+## 当前推荐方向
 
-### 路线 A：规则版 B1 先回主线
-
-- 用 `calc_b1_factors_wmacd + rw_dif_pct + bt-b1` 直接重启
-- 优点:
-  - 最贴近历史实盘经验
-  - 主链最稳定
-  - 调试成本最低
-- 风险:
-  - 每日候选偏多
-  - 最终仍容易回到人工图形决策
-
-### 路线 B：规则召回 + 全市场 ML 精排
-
-- 先用规则版 `B1` 生成候选池
-- 再用全市场 ML 分数排序候选
-- 优点:
-  - 保留 `B1` 策略边界
-  - 避免把最终选股完全交给人工
-  - 已有历史实验支持
-- 风险:
-  - 需要重新确认当前 regime 下 ML 排序是否仍稳定
-  - 回撤控制仍需配合 `bt-b1` 出场规则优化
-
-### 路线 C：规则召回 + Agent 辅助决策
-
-- 规则先筛
-- `Agent` 负责图表与结构化指标二次评审
-- 优点:
-  - 最接近原始实盘工作流
-  - 容易解释
-- 风险:
-  - 仍带有人机协作链路
-  - 一致性和吞吐量取决于 `Agent` 评审质量
-
-## 当前更推荐的方向
-
-- 当前默认优先考虑 **路线 B**
-- 即:
-  - `活跃市值` 人工判断是否进入多头区间
-  - 规则版 `B1` 负责召回候选
-  - 全市场 ML 负责精排
-  - `Agent` 作为辅助审查层，而非唯一决策层
-
-## 重新切回 B1 前的准备工作
-
-1. 先确认最新一段 `活跃市值` 是否已进入新的多头区间
-2. 明确第一版主线到底采用:
-   - `rw_dif_pct`
-   - 还是全市场 ML `score`
-3. 重新核对 `bt-b1` 当前配置是否仍适配新 regime
-4. 明确 `Agent` 在第一版里是:
-   - 仅解释辅助
-   - 还是参与准入过滤
-
-## 备注
-
-- 如果后续确认多头区间持续，`B1` 的研究优先级可正式升回主线
-- `Rotation` 当前可先保留为已验证可用的辅线基线，不必继续优先深挖
+- 当前默认优先考虑:
+  - `规则增强 + seed 内纯模型并行对照`
+- 若后续要正式切回 B1 主线，优先顺序仍是:
+  - 规则负责定义 B1 边界
+  - 模型负责在边界内排序
+  - `Agent` 只做辅助解释和审查，不做唯一决策层
