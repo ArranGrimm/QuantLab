@@ -11,12 +11,13 @@ def _():
     import polars as pl
 
     from utils import (
-        B1_MINING_FEATURE_COLS,
         build_b1_research_frame,
         calc_b1_factors_wmacd,
+        describe_b1_feature_set,
         export_for_rust,
         get_st_blacklist_pl,
         load_daily_data_full,
+        resolve_b1_feature_set,
     )
 
     pl.Config(tbl_rows=-1, tbl_cols=-1)
@@ -35,6 +36,7 @@ def _():
     USE_BULL_ONLY = True
 
     LABEL_COL = "fwd_mfe_10d"
+    FEATURE_SET_NAME = "selected"
     TRAIN_WINDOW = 480
     RETRAIN_FREQ = 20
     EMA_ALPHA = 1.0
@@ -53,13 +55,16 @@ def _():
         ("2026-01-05", "2026-02-02"),
     ]
 
-    FEATURE_COLS = list(B1_MINING_FEATURE_COLS)
+    FEATURE_COLS = list(resolve_b1_feature_set(FEATURE_SET_NAME))
+    FEATURE_SET_DESC = describe_b1_feature_set(FEATURE_SET_NAME)
     return (
         DB_PATH,
         EMA_ALPHA,
         END_DATE,
         EXPORT_START_DATE,
         FEATURE_COLS,
+        FEATURE_SET_DESC,
+        FEATURE_SET_NAME,
         LABEL_COL,
         LOOSE_PERIODS,
         MIN_LIST_DAYS,
@@ -74,24 +79,28 @@ def _():
         USE_BULL_ONLY,
         build_b1_research_frame,
         calc_b1_factors_wmacd,
+        describe_b1_feature_set,
         duckdb,
         export_for_rust,
         get_st_blacklist_pl,
         load_daily_data_full,
         np,
         pl,
+        resolve_b1_feature_set,
     )
 
 
 @app.cell
-def _(EMA_ALPHA, FEATURE_COLS, LABEL_COL, RETRAIN_FREQ, SEED_COL, TRAIN_WINDOW, USE_BULL_ONLY):
+def _(EMA_ALPHA, FEATURE_COLS, FEATURE_SET_DESC, FEATURE_SET_NAME, LABEL_COL, RETRAIN_FREQ, SEED_COL, TRAIN_WINDOW, USE_BULL_ONLY):
     print("=" * 72)
-    print("  B1 Seed Pure Model Baseline")
+    print("  B1 Seed Train / Export Entry")
     print("=" * 72)
     print(f"  seed_col:          {SEED_COL}")
     print(f"  bull_regime_only:  {USE_BULL_ONLY}")
     print(f"  label_col:         {LABEL_COL}")
+    print(f"  feature_set:       {FEATURE_SET_NAME}")
     print(f"  feature_count:     {len(FEATURE_COLS)}")
+    print(f"  feature_desc:      {FEATURE_SET_DESC}")
     print(f"  train_window:      {TRAIN_WINDOW}")
     print(f"  retrain_freq:      {RETRAIN_FREQ}")
     print(f"  ema_alpha:         {EMA_ALPHA}")
@@ -132,6 +141,7 @@ def _(DB_PATH, END_DATE, START_DATE, ST_SNAPSHOT_DATE, duckdb, get_st_blacklist_
 @app.cell
 def _(
     FEATURE_COLS,
+    FEATURE_SET_NAME,
     LOOSE_PERIODS,
     MIN_LIST_DAYS,
     MV_MAX,
@@ -168,6 +178,7 @@ def _(
                 {"item": "rows_seed", "value": f"{df_seed.height:,}"},
                 {"item": "date_count_seed", "value": str(df_seed["date"].n_unique()) if df_seed.height else "0"},
                 {"item": "code_count_seed", "value": str(df_seed["code"].n_unique()) if df_seed.height else "0"},
+                {"item": "feature_set", "value": FEATURE_SET_NAME},
                 {"item": "feature_count", "value": str(len(valid_feature_cols))},
             ]
         )
@@ -363,6 +374,7 @@ def _(EMA_ALPHA, LABEL_COL, df_scores_raw, df_seed, np, pl):
 @app.cell
 def _(
     EXPORT_START_DATE,
+    FEATURE_SET_NAME,
     LOOSE_PERIODS,
     MV_MIN,
     SEED_COL,
@@ -379,7 +391,7 @@ def _(
     if df_scores_raw.is_empty():
         print("  结论: 当前没有分数可导出。")
     else:
-        output_path = f"data/signals/b1_{SEED_COL}_pure_model.parquet"
+        output_path = f"data/signals/b1_{SEED_COL}_{FEATURE_SET_NAME}_pure_model.parquet"
         df_export = (
             calc_b1_factors_wmacd(q_full, {"MV_THRESHOLD": MV_MIN})
             .join(df_scores_raw.lazy(), on=["date", "code"], how="left")

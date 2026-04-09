@@ -2,6 +2,37 @@
 
 ## 2026-04-09
 
+### [B1] Lab / Train 拆分已落地主入口
+- 已将 `notebooks/b1_condition_mining.py` 重构为纯 `B1 factor lab`:
+  - 主线改为 `seed overview -> IC -> group summary -> bin scoreboard -> decay -> corr diagnostics`
+  - 不再把浅树规则、手工规则验证和条件收敛写在主线里
+  - 训练入口需要的冻结特征观察也改为 lab 内单独输出
+- 当前已验证:
+  - `python -m py_compile notebooks/b1_condition_mining.py`
+
+### [B1] 冻结特征集已接入训练入口
+- `utils/b1_feature_pool.py` 当前已统一维护:
+  - `core`
+  - `candidate`
+  - `selected`
+- `notebooks/b1_seed_ml_baseline.py` 已改为默认消费 `FEATURE_SET_NAME="selected"`
+- 当前训练 notebook 已进一步收敛为纯入口:
+  - 读底表
+  - 训练 `LightGBM walk-forward`
+  - 输出 `IC / ICIR / q4-q0`
+  - 导出 Rust parquet
+- 当前导出文件名已带上 `feature_set`
+- 当前已验证:
+  - `python -m py_compile notebooks/b1_seed_ml_baseline.py`
+
+### [Docs] B1 叙事已切换为 `Lab -> Train -> Export`
+- 已重写 `experiments/b1-next-phase.md`
+- 已更新 `project-status.md`
+- 当前统一口径:
+  - 规则链独立运行
+  - ML 链严格按 `Lab -> Train -> Export` 拆分
+  - lab 先证明因子，再手工更新 `selected`，最后由训练 notebook 稳定消费
+
 ### [B1] 双轨研究路线第一轮已落地到代码
 - 已新增共享特征工具 `utils/b1_feature_pool.py`:
   - 统一输出 `B1` 条件挖掘与 seed 纯模型共用的研究底表

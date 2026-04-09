@@ -2,127 +2,114 @@
 
 ## 当前结论
 
-- `B1` 当前已经不适合再拆成多份实验文档维护，后续统一以本文档作为主结论文档。
+- `B1` 后续统一以本文档作为主结论文档，不再拆散维护。
 - `活跃市值` 继续保留为**人工 regime 判断**，当前不做自动化复刻。
-- `B1` 主链已经稳定在:
-  - `utils/b1_factors_opt.py::calc_b1_factors_wmacd`
-  - `notebooks/b1_condition_mining.py`
-  - `notebooks/b1_seed_ml_baseline.py`
-  - `utils/signal_export.py::export_for_rust`
-  - `backtest-engine/crates/b1`
+- `B1` 当前必须拆成两条互不混淆的链路:
+  - 规则链独立运行: `utils/b1_factors_opt.py::calc_b1_factors_wmacd` -> `utils/signal_export.py::export_for_rust` -> `backtest-engine/crates/b1`
+  - ML 链严格按 `Lab -> Train -> Export` 拆分:
+    - `notebooks/b1_condition_mining.py`
+    - `notebooks/b1_seed_ml_baseline.py`
+    - `utils/b1_feature_pool.py`
 - 历史结论仍成立:
   - 全市场 ML 排序有价值
-  - 旧 `B1 dedicated ML` 因最终候选日截面过窄而不该作为默认主线
+  - 旧 `B1 dedicated ML` 因最终候选日截面过窄，不适合作为默认主线
 
-## 当前研究框架
+## 当前工作流
 
-### 路线 A：条件挖掘
+### 规则链
 
-- 在 `seed_loose / seed_mid / seed_strict` 上继续做可解释条件挖掘
-- 当前目标不是“发现完整 B1 公式”，而是收敛出 `2~5` 条真正有增量的条件
-- 当前 notebook:
-  - `notebooks/b1_condition_mining.py`
+- 规则链已经有自己的完整导出与 Rust 回测闭环。
+- 规则链的目标是定义 `B1` 边界，而不是在 ML notebook 里做旁路验证。
+- 当前主入口仍是:
+  - `utils/b1_factors_opt.py::calc_b1_factors_wmacd`
+  - `utils/signal_export.py::export_for_rust`
+  - `backtest-engine/crates/b1`
 
-### 路线 B：seed 内纯模型
+### ML 链
 
-- 在同一批扩充后的 B1 连续特征上，直接训练:
-  - `seed_mid + 纯模型`
-  - `seed_strict + 纯模型`
-- 当前 notebook:
-  - `notebooks/b1_seed_ml_baseline.py`
+#### 1. Factor Lab
 
-## 当前实现状态
+- 主入口: `notebooks/b1_condition_mining.py`
+- 当前只负责统计研究，不再承担规则收敛主线。
+- 当前固定产出:
+  - `seed_loose / seed_mid / seed_strict` 样本概览
+  - 因子 `IC / ICIR / t-stat`
+  - 特征分组汇总
+  - 单变量分箱得分榜
+  - 多周期衰减 (`1d / 2d / 3d / 5d`)
+  - 相关性与冗余诊断
+  - watchlist / 下一版冻结特征集候选
 
-- 共享特征底表已统一到 `utils/b1_feature_pool.py`
-- 条件挖掘线已具备:
-  - 三档 `seed pool`
-  - 第一批 + 第二批 B1 连续特征池
-  - `Step 5 / 6 / 7 / 7b / 8`
-  - 自动收敛 `2~5` 条候选条件
-- 纯模型线已具备:
-  - `seed_mid / seed_strict` 切换
+#### 2. Train / Export Entry
+
+- 主入口: `notebooks/b1_seed_ml_baseline.py`
+- 当前只负责训练、评估、导出，不再承担特征探索叙事。
+- 当前固定流程:
+  - 读取统一研究底表
+  - 消费冻结特征集
   - `LightGBM walk-forward`
-  - `IC / ICIR / q4-q0`
-  - Rust parquet 导出
+  - 输出 `IC / ICIR / q4-q0`
+  - 导出 Rust parquet
 
-## 最新研究结论
+#### 3. Shared Feature Base
+
+- 共享入口: `utils/b1_feature_pool.py`
+- 当前统一提供:
+  - `core / candidate / selected` 三档特征集
+  - 第一批 + 第二批 B1 连续特征池
+  - `fwd_ret_1d / 2d / 3d / 5d`
+  - `fwd_mfe_10d / fwd_mae_10d`
+  - `seed pool` 与手工 bull regime 标注
+
+## 当前研究口径
 
 ### 1. seed 选择
 
-- `bull_only` 下:
-  - `seed_mid`: `rows=72118`, `avg/day=157.81`, `mfe10_mean=0.0898`, `mfe_hit_rate=39.20%`
-  - `seed_strict`: `rows=60016`, `avg/day=131.33`, `mfe10_mean=0.0899`, `mfe_hit_rate=39.21%`
-- 结论:
-  - `seed_strict` 质量只比 `seed_mid` 略高一点点
-  - 当前不能再把 `seed_strict` 视作绝对主战场
-  - 更合理的理解是:
-    - `seed_mid` 更宽，适合模型与条件搜索
-    - `seed_strict` 更干净，适合做更保守的对照
+- `bull_only` 下，`seed_strict` 质量只比 `seed_mid` 略高一点点。
+- 当前更合理的分工是:
+  - `seed_mid` 更宽，适合作为默认 lab / train 宇宙
+  - `seed_strict` 更干净，适合作为保守对照
 
-### 2. 当前最强特征
+### 2. 当前最值得关注的方向
 
-- 单变量分箱当前最强的 4 个方向:
-  - `Bias_WL_YL`
-  - `range_pct`
-  - `rw_dif_pct`
-  - `Bias_C_YL`
-- 其中新增最有价值的信息是:
-  - `range_pct` 已进入第一梯队
-  - 且单调性非常强 (`monotonicity=0.9947`)
-- 当前主线不再只是“均线关系 + 周动能”，而是:
-  - 趋势强度
-  - 波动展开
-  - 周动能
-  - 价格相对黄线位置
+- `Bias_WL_YL`
+- `range_pct`
+- `rw_dif_pct`
+- `Bias_C_YL`
 
-### 3. 当前候选规则
+当前主线不再只看“均线关系 + 周动能”，而是同时关注:
 
-- 浅树当前第一候选:
-  - `range_pct > 3.6248 & Bias_WL_YL > 8.0843`
-  - `samples=13936`
-  - `positive_rate=57.32%`
-  - `lift_vs_base=+0.1812`
-- 手工规则当前第一候选:
-  - `Bias_WL_YL > 9 & rw_dif_pct > 10 & Bias_C_YL > 7.65`
-  - `samples=5553`
-  - `positive_rate=59.59%`
-  - `hit_lift=+0.2039`
-  - `mfe10_lift=+0.0472`
-- 当前已经不是“继续盲挖”，而是已形成可直接进入下一轮验证的候选条件清单
+- 趋势强度
+- 波动展开
+- 周月动能
+- 价格相对黄线位置
+- 量价结构
 
-## 最小对照集
+### 3. 冻结训练特征集
 
-当前只保留 4 条路线，避免同时比较过多变量:
-
-| Route | 宇宙 | 主要入口 | 当前作用 |
-| --- | --- | --- | --- |
-| 规则基线 | `seed_mid` 或 `seed_strict` | `b1_condition_mining.py` Step 7b | 保留最简单手工基线 |
-| 条件增强 | `seed_mid` 或 `seed_strict` | `b1_condition_mining.py` Step 8 | 验证候选条件是否能升级为增强版规则 |
-| `seed_mid + 纯模型` | `seed_mid` | `b1_seed_ml_baseline.py` | 验证更宽宇宙上的排序能力 |
-| `seed_strict + 纯模型` | `seed_strict` | `b1_seed_ml_baseline.py` | 验证更干净宇宙上的排序能力 |
+- 当前训练 notebook 默认消费 `selected` 特征集。
+- 当前目的不是每次 lab 跑完都动态改训练列，而是:
+  - 先用 lab 证明一批因子稳定有效
+  - 再手工更新 `selected`
+  - 之后由训练 notebook 稳定消费
 
 ## 当前推荐顺序
 
-1. 先继续以 `b1_condition_mining.py` 收敛和验证条件增强版规则。
-2. 纯模型先跑 `seed_mid`，因为它更宽，更适合作为模型主对照。
-3. 再跑 `seed_strict`，看更窄但更干净的宇宙是否能换来更稳定的排序结果。
-4. 最后再决定主线更偏:
-   - 条件增强
-   - 还是 `seed` 内纯模型排序
+1. 先在 `b1_condition_mining.py` 里看 `seed_mid` 的 IC、分组、分箱、衰减和相关性诊断。
+2. 如果 lab 结论稳定，再决定是否更新 `utils/b1_feature_pool.py` 里的 `selected` 冻结特征集。
+3. 再用 `b1_seed_ml_baseline.py` 跑 `seed_mid` 训练 / 评估 / 导出。
+4. 最后用 `seed_strict` 做保守对照，判断更窄宇宙是否能换来更稳的排序结果。
 
 ## 当前不做的事
 
 - 暂不自动化 `活跃市值`
-- 暂不把 `B1` 重新退回完全手工看图工作流
+- 暂不把规则链和 ML 链重新揉成一个 notebook
 - 暂不把主线直接切成旧意义上的“B1 专属窄截面纯模型”
-- 暂不升格 `manifest`
-- 暂不做大规模 rule sweep
+- 暂不在 lab notebook 内做大规模 rule sweep
+- 暂不引入更重的 manifest 体系
 
 ## 当前推荐方向
 
-- 当前默认优先考虑:
-  - `规则增强 + seed 内纯模型并行对照`
-- 若后续要正式切回 B1 主线，优先顺序仍是:
-  - 规则负责定义 B1 边界
-  - 模型负责在边界内排序
-  - `Agent` 只做辅助解释和审查，不做唯一决策层
+- 规则链继续独立负责 `B1` 边界定义。
+- ML 链默认走 `Lab -> Train -> Export`。
+- `Agent` 只做辅助解释与审查，不作为唯一决策层。

@@ -52,6 +52,104 @@ B1_MINING_FEATURE_COLS: list[str] = [
     *B1_MINING_SECOND_BATCH_FEATURE_COLS,
 ]
 
+B1_SELECTED_FEATURE_COLS: list[str] = [
+    "Bias_WL_YL",
+    "Bias_C_YL",
+    "Bias_C_WL",
+    "rw_dif_pct",
+    "rw_hist",
+    "rm_hist",
+    "range_pct",
+    "vol_shrink_20",
+    "red_green_ratio_20",
+    "retrace_ratio_20",
+    "days_since_key_k",
+    "vol_to_avg40",
+    "close_pos_in_bar",
+    "bias_wl_yl_delta_5",
+]
+
+B1_FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
+    "trend_strength": (
+        "Bias_C_WL",
+        "Bias_C_YL",
+        "Bias_WL_YL",
+        "bias_wl_yl_delta_5",
+        "close_above_yl_pct_5",
+        "close_above_wl_pct_5",
+    ),
+    "weekly_momentum": (
+        "rw_dif_pct",
+        "rw_hist",
+        "rm_hist",
+        "rw_hist_delta_5",
+        "rm_hist_delta_5",
+    ),
+    "trigger_context": (
+        "J",
+        "bad_k_count",
+        "days_since_key_k",
+        "trigger_recent_10",
+        "key_k_recent_20",
+        "plry_cluster_recent_10",
+        "days_since_key_k_inv",
+    ),
+    "price_structure": (
+        "body_pct",
+        "upper_shadow_pct",
+        "lower_shadow_pct",
+        "retrace_ratio_20",
+        "range_pct",
+        "body_to_range",
+        "close_pos_in_bar",
+        "gap_from_prev_close_pct",
+    ),
+    "volume_structure": (
+        "vol_shrink_20",
+        "vol_shrink_40",
+        "red_green_ratio_20",
+        "vol_to_prev_vol",
+        "vol_to_avg40",
+        "vol_shrink_20_delta_5",
+        "red_green_ratio_delta_5",
+    ),
+}
+
+B1_FEATURE_GROUP_LABELS: dict[str, str] = {
+    "trend_strength": "趋势强度",
+    "weekly_momentum": "周月动能",
+    "trigger_context": "触发上下文",
+    "price_structure": "价格结构",
+    "volume_structure": "量价结构",
+}
+
+B1_FEATURE_TO_GROUP: dict[str, str] = {
+    feature_name: group_key
+    for group_key, feature_cols in B1_FEATURE_GROUPS.items()
+    for feature_name in feature_cols
+}
+
+B1_FEATURE_SET_REGISTRY: dict[str, tuple[str, ...]] = {
+    "core": tuple(B1_MINING_CORE_FEATURE_COLS),
+    "candidate": tuple(B1_MINING_FEATURE_COLS),
+    "selected": tuple(B1_SELECTED_FEATURE_COLS),
+}
+
+
+def resolve_b1_feature_set(name: str = "selected") -> tuple[str, ...]:
+    try:
+        return B1_FEATURE_SET_REGISTRY[name]
+    except KeyError as exc:
+        valid_names = ", ".join(B1_FEATURE_SET_REGISTRY)
+        raise ValueError(
+            f"Unsupported B1 feature set: {name}. Expected one of: {valid_names}"
+        ) from exc
+
+
+def describe_b1_feature_set(name: str = "selected") -> str:
+    feature_cols = resolve_b1_feature_set(name)
+    return f"name={name}, feature_count={len(feature_cols)}, features={', '.join(feature_cols)}"
+
 
 def _manual_regime_expr(loose_periods: Sequence[tuple[str, str]]) -> pl.Expr:
     expr = pl.lit(False)
@@ -200,6 +298,9 @@ def build_b1_research_frame(
                 (pl.col("close_adj").gt(pl.col("WL")).cast(pl.Float64).rolling_mean(5).over("code")).alias(
                     "close_above_wl_pct_5"
                 ),
+                (pl.col("close_adj").shift(-2).over("code") / pl.col("close_adj") - 1).alias("fwd_ret_2d"),
+                (pl.col("close_adj").shift(-3).over("code") / pl.col("close_adj") - 1).alias("fwd_ret_3d"),
+                (pl.col("close_adj").shift(-5).over("code") / pl.col("close_adj") - 1).alias("fwd_ret_5d"),
             ]
         )
         .select(
@@ -241,6 +342,9 @@ def build_b1_research_frame(
                         "is_manual_bull",
                         *B1_MINING_FEATURE_COLS,
                         "fwd_ret_1d",
+                        "fwd_ret_2d",
+                        "fwd_ret_3d",
+                        "fwd_ret_5d",
                         "fwd_mfe_10d",
                         "fwd_mae_10d",
                     ]

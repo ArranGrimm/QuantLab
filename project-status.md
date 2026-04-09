@@ -284,8 +284,10 @@
 ### B1 后续方向
 
 1. **切回主线前先确认 regime**: `活跃市值` 继续手工判断, 当前不做自动化复刻
-2. **优先路线**: 规则版 `B1` 负责候选召回, 全市场 ML 负责排序增强
-3. **Agent 角色待定**: 第一版先明确它是解释辅助层还是准入过滤层
+2. **规则链保持独立**: `calc_b1_factors_wmacd -> export_for_rust -> bt-b1` 不再和 ML notebook 混写
+3. **ML 链改为 Lab / Train 拆分**:
+   - `notebooks/b1_condition_mining.py`: 纯统计特征研究
+   - `notebooks/b1_seed_ml_baseline.py`: 纯训练 / 评估 / 导出
 4. **降低回撤**: 若切回 `B1`, 再回头细调 `bt-b1` 出场逻辑 (止损比例、弱势天数、WL 跌破)
 
 ### B1 当前判断
@@ -295,62 +297,46 @@
   - `calc_b1_factors_wmacd`
   - `export_for_rust`
   - `bt-b1`
-  - `agent/`
+- 当前 ML 辅助链:
+  - `utils/b1_feature_pool.py`
+  - `notebooks/b1_condition_mining.py`
+  - `notebooks/b1_seed_ml_baseline.py`
 - 当前不建议:
   - 把 `活跃市值` 自动化
-  - 直接回到完全手工看图挑股
+  - 把规则链和 ML 链重新揉成一个 notebook
   - 直接把 `B1` 主线切成“纯 B1 专属 ML”
 - 现阶段更推荐:
-  - `规则召回 + 全市场 ML 精排 + Agent 辅助`
+  - `规则链独立 + Seed 内 ML 排序链`
 - 详细路线文档:
   - `experiments/b1-next-phase.md`
 
-### B1 条件挖掘当前收敛口径
+### B1 Factor Lab 当前口径
 
-- 第一阶段只做最小实施版:
-  - `seed_loose / seed_mid / seed_strict`
-  - 先从第一批最小连续特征起步，再扩到第二批 B1 专属连续特征
-  - 单变量 / 双变量稳定性分析
-  - 浅树规则提取
-- 第一阶段暂不做:
-  - `manifest`
-  - 直接改主链信号收口
-  - 大规模规则组合搜索
-- 第一阶段目标:
-  - 先得到 `2~5` 组可解释候选条件
-  - 再决定是否接入全市场 ML 排序链
+- `notebooks/b1_condition_mining.py` 当前只负责统计特征研究，不再承担规则收敛主线
+- 当前固定研究闭环:
+  - `seed_loose / seed_mid / seed_strict` 样本概览
+  - 因子 `IC / ICIR / t-stat`
+  - 特征分组汇总
+  - 单变量分箱得分榜
+  - 多周期衰减
+  - 相关性与冗余诊断
+- 当前目标:
+  - 先证明一批连续特征稳定有效
+  - 再决定是否更新冻结训练特征集 `selected`
 
-### B1 条件挖掘当前实现进度
+### B1 Lab / Train 当前实现进度
 
-- `notebooks/b1_condition_mining.py` 已新增第一版 notebook
-- 当前实现方式:
-  - 通过 `utils/b1_feature_pool.py` 统一构造研究底表
-  - 底层继续复用 `calc_b1_factors_wmacd`
-  - 在其上叠加 `seed pool`、连续特征、分箱分析、浅树规则提取与候选条件收敛
-- 当前第一版已具备:
-  - `manual bull regime` 样本切片
-  - `seed_loose / seed_mid / seed_strict`
-  - 第一批 + 第二批 B1 连续特征池
-  - 单变量条件得分榜
-  - 指定特征分箱深挖
-  - 浅树候选规则输出
-  - `Step 7b` 手工候选规则并排验证
-  - `Step 8` 候选条件收敛 (`2~5` 条)
-- 当前 notebook 已做第一轮可读性整理:
-  - 当前已改回 `print-first` 输出风格
-  - 关键结论和关键表格会在各 step 内直接打印
-  - 更便于把运行输出直接复制回对话继续分析
-- 当前状态:
-  - 条件挖掘线已能直接进入第一轮实际跑数与条件筛选
-
-### B1 双轨研究当前落地状态
-
-- 条件挖掘线:
-  - 主入口: `notebooks/b1_condition_mining.py`
-  - 当前目标: 收敛并验证 `2~5` 条可解释候选条件
-- seed 纯模型线:
-  - 主入口: `notebooks/b1_seed_ml_baseline.py`
-  - 当前已支持 `seed_mid / seed_strict` 两档切换
+- 共享底座:
+  - `utils/b1_feature_pool.py` 统一输出研究底表与 `core / candidate / selected` 三档特征集
+  - 当前已补齐 `fwd_ret_2d / fwd_ret_3d / fwd_ret_5d`
+- factor lab:
+  - `notebooks/b1_condition_mining.py`
+  - 当前已改成 `print-first` 的纯研究面板
+  - 当前输出 `seed 概览 -> IC -> group summary -> bin scoreboard -> decay -> corr diagnostics`
+- train / export:
+  - `notebooks/b1_seed_ml_baseline.py`
+  - 当前默认消费冻结特征集 `selected`
+  - 当前已支持 `seed_mid / seed_strict` 切换
   - 当前已打通 `walk-forward -> 评估 -> Rust 导出`
 - 当前统一结论文档:
   - `experiments/b1-next-phase.md`
