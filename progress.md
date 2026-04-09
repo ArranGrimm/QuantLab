@@ -43,6 +43,15 @@
   - 最小四路线对照集
   - 当前推荐执行顺序
 
+### [Deps] `uv` 默认源已收敛为项目级配置
+- 已在 `pyproject.toml` 中新增 `[[tool.uv.index]]` 默认源:
+  - `https://mirrors.aliyun.com/pypi/simple/`
+- 当前目标:
+  - 固定项目级默认 index
+  - 避免 macOS / Windows 因各自终端里的 `UV_INDEX_URL` 导致 `uv.lock` 来回漂移
+- 当前保留:
+  - `torch / torchvision` 在 Windows 下继续显式走 `pytorch-cu130`
+
 ## 2026-04-08
 
 ### [B1] `b1_condition_mining` 第一版 notebook 已开工落地

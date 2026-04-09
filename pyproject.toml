@@ -40,13 +40,19 @@ dependencies = [
     "lightgbm>=4.6.0",
 ]
 
-# 1. 定义源：根据截图中的 URL，我们指向 cu130
+# 1. 默认源：统一锁到阿里云镜像，避免不同设备因终端环境变量导致 `uv.lock` 漂移
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
+
+# 2. 定义源：Windows 上的 torch / torchvision 继续显式走 cu130
 [[tool.uv.index]]
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
-# 2. 路由规则：Windows 强制走 CUDA 13.0，Mac 继续走默认
+# 3. 路由规则：Windows 强制走 CUDA 13.0，其余平台走默认源
 [tool.uv.sources]
 torch = [
     { index = "pytorch-cu130", marker = "sys_platform == 'win32'" },

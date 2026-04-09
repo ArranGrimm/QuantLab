@@ -432,6 +432,17 @@ Python (信号层)                    Rust (回测/执行层)
   - 将 `bt-b1`
   - 逐步接入同一套 `bt-core` artifact/report bundle I/O, 但保留各策略独立配置与额外统计
 
+### Python 依赖配置约定
+- `uv` 默认 index 已固定在 `pyproject.toml`:
+  - `https://mirrors.aliyun.com/pypi/simple/`
+- 设计目的:
+  - 避免不同设备依赖各自终端环境变量里的 `UV_INDEX_URL`
+  - 减少 `uv.lock` 因默认 registry 不一致而产生的无意义漂移
+- 特殊源仍保留显式路由:
+  - `torch / torchvision` 在 Windows 下继续走 `pytorch-cu130`
+- 跨设备推荐习惯:
+  - 日常安装优先使用 `uv sync --locked`
+
 ### 实验记录
 
 详见 `experiments/` 目录:
