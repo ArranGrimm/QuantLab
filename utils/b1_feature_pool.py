@@ -55,18 +55,18 @@ B1_MINING_FEATURE_COLS: list[str] = [
 B1_SELECTED_FEATURE_COLS: list[str] = [
     "Bias_WL_YL",
     "Bias_C_YL",
-    "Bias_C_WL",
     "rw_dif_pct",
     "rw_hist",
     "rm_hist",
     "range_pct",
     "vol_shrink_20",
-    "red_green_ratio_20",
     "retrace_ratio_20",
-    "days_since_key_k",
     "vol_to_avg40",
     "close_pos_in_bar",
-    "bias_wl_yl_delta_5",
+    "body_pct",
+    "vol_shrink_40",
+    "rw_hist_delta_5",
+    "rm_hist_delta_5",
 ]
 
 B1_FEATURE_GROUPS: dict[str, tuple[str, ...]] = {

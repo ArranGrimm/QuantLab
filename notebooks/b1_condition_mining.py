@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.22.4"
+__generated_with = "0.23.0"
 app = marimo.App(width="full")
 
 
@@ -73,8 +73,8 @@ def _():
     return (
         ACTIVE_SEED_COL,
         ANALYSIS_FEATURE_SET_NAME,
-        B1_FEATURE_GROUP_LABELS,
         B1_FEATURE_GROUPS,
+        B1_FEATURE_GROUP_LABELS,
         CORR_SAMPLE_N,
         CORR_THRESHOLD,
         DB_PATH,
@@ -115,7 +115,16 @@ def _():
 
 
 @app.cell
-def _(ANALYSIS_FEATURE_SET_NAME, ACTIVE_SEED_COL, LABEL_COL, N_BINS, TRAIN_FEATURE_SET_NAME, USE_BULL_ONLY, analysis_feature_desc, train_feature_desc):
+def _(
+    ACTIVE_SEED_COL,
+    ANALYSIS_FEATURE_SET_NAME,
+    LABEL_COL,
+    N_BINS,
+    TRAIN_FEATURE_SET_NAME,
+    USE_BULL_ONLY,
+    analysis_feature_desc,
+    train_feature_desc,
+):
     print("=" * 72)
     print("  B1 Factor Lab")
     print("=" * 72)
@@ -372,11 +381,26 @@ def _(np, pl):
             return pl.DataFrame(schema={"factor": pl.String})
         return pl.DataFrame(rows)
 
-    return build_bin_scoreboard, build_decay_table, build_feature_bin_detail, build_seed_summary, ordered_unique
+    return (
+        build_bin_scoreboard,
+        build_decay_table,
+        build_feature_bin_detail,
+        build_seed_summary,
+        ordered_unique,
+    )
 
 
 @app.cell
-def _(DB_PATH, END_DATE, START_DATE, ST_SNAPSHOT_DATE, duckdb, get_st_blacklist_pl, load_daily_data_full, pl):
+def _(
+    DB_PATH,
+    END_DATE,
+    START_DATE,
+    ST_SNAPSHOT_DATE,
+    duckdb,
+    get_st_blacklist_pl,
+    load_daily_data_full,
+    pl,
+):
     conn = duckdb.connect(DB_PATH, read_only=True)
     st_blacklist = get_st_blacklist_pl(ST_SNAPSHOT_DATE)
     st_blacklist_df = pl.DataFrame({"code": st_blacklist}).lazy()
@@ -403,11 +427,22 @@ def _(DB_PATH, END_DATE, START_DATE, ST_SNAPSHOT_DATE, duckdb, get_st_blacklist_
     print("  Step 1. 数据范围")
     print("=" * 72)
     print(data_scope)
-    return conn, q_full
+    return (q_full,)
 
 
 @app.cell
-def _(LOOSE_PERIODS, MIN_LIST_DAYS, MV_MAX, MV_MIN, SEED_J_MAX, analysis_feature_cols, build_b1_research_frame, pl, q_full, train_feature_cols):
+def _(
+    LOOSE_PERIODS,
+    MIN_LIST_DAYS,
+    MV_MAX,
+    MV_MIN,
+    SEED_J_MAX,
+    analysis_feature_cols,
+    build_b1_research_frame,
+    pl,
+    q_full,
+    train_feature_cols,
+):
     df_all = build_b1_research_frame(
         q_full,
         mv_min=MV_MIN,
@@ -433,7 +468,11 @@ def _(LOOSE_PERIODS, MIN_LIST_DAYS, MV_MAX, MV_MIN, SEED_J_MAX, analysis_feature
     print("  Step 2. 研究底表")
     print("=" * 72)
     print(universe_summary)
-    return available_analysis_feature_cols, available_train_feature_cols, df_all
+    return (
+        available_analysis_feature_cols,
+        available_train_feature_cols,
+        df_all,
+    )
 
 
 @app.cell
@@ -443,11 +482,20 @@ def _(POSITIVE_MFE_THRESHOLD, build_seed_summary, df_all):
     print("  Step 3. Seed Pool 概览")
     print("=" * 72)
     print(seed_summary)
-    return (seed_summary,)
+    return
 
 
 @app.cell
-def _(ACTIVE_SEED_COL, LABEL_COL, POSITIVE_MFE_THRESHOLD, USE_BULL_ONLY, available_analysis_feature_cols, available_train_feature_cols, df_all, pl):
+def _(
+    ACTIVE_SEED_COL,
+    LABEL_COL,
+    POSITIVE_MFE_THRESHOLD,
+    USE_BULL_ONLY,
+    available_analysis_feature_cols,
+    available_train_feature_cols,
+    df_all,
+    pl,
+):
     lab_mask = pl.col(ACTIVE_SEED_COL)
     if USE_BULL_ONLY:
         lab_mask = lab_mask & pl.col("is_manual_bull")
@@ -474,11 +522,23 @@ def _(ACTIVE_SEED_COL, LABEL_COL, POSITIVE_MFE_THRESHOLD, USE_BULL_ONLY, availab
     print("  Step 4. Lab 样本")
     print("=" * 72)
     print(lab_summary)
-    return df_lab, lab_summary
+    return (df_lab,)
 
 
 @app.cell
-def _(B1_FEATURE_GROUP_LABELS, B1_FEATURE_GROUPS, LABEL_COL, MIN_DAILY_SAMPLES, available_analysis_feature_cols, available_train_feature_cols, build_ic_summary_frame, calc_factor_ic, df_lab, pl, summarize_factor_groups):
+def _(
+    B1_FEATURE_GROUPS,
+    B1_FEATURE_GROUP_LABELS,
+    LABEL_COL,
+    MIN_DAILY_SAMPLES,
+    available_analysis_feature_cols,
+    available_train_feature_cols,
+    build_ic_summary_frame,
+    calc_factor_ic,
+    df_lab,
+    pl,
+    summarize_factor_groups,
+):
     print("\n" + "=" * 72)
     print("  Step 5. 因子 IC 画像")
     print("=" * 72)
@@ -509,7 +569,14 @@ def _(B1_FEATURE_GROUP_LABELS, B1_FEATURE_GROUPS, LABEL_COL, MIN_DAILY_SAMPLES, 
 
 
 @app.cell
-def _(LABEL_COL, N_BINS, POSITIVE_MFE_THRESHOLD, available_analysis_feature_cols, build_bin_scoreboard, df_lab):
+def _(
+    LABEL_COL,
+    N_BINS,
+    POSITIVE_MFE_THRESHOLD,
+    available_analysis_feature_cols,
+    build_bin_scoreboard,
+    df_lab,
+):
     bin_scoreboard = build_bin_scoreboard(
         df_lab,
         available_analysis_feature_cols,
@@ -525,7 +592,16 @@ def _(LABEL_COL, N_BINS, POSITIVE_MFE_THRESHOLD, available_analysis_feature_cols
 
 
 @app.cell
-def _(LABEL_COL, N_BINS, POSITIVE_MFE_THRESHOLD, REVIEW_FEATURE, available_analysis_feature_cols, bin_scoreboard, build_feature_bin_detail, df_lab):
+def _(
+    LABEL_COL,
+    N_BINS,
+    POSITIVE_MFE_THRESHOLD,
+    REVIEW_FEATURE,
+    available_analysis_feature_cols,
+    bin_scoreboard,
+    build_feature_bin_detail,
+    df_lab,
+):
     review_feature = REVIEW_FEATURE
     if review_feature not in available_analysis_feature_cols and bin_scoreboard.height:
         review_feature = bin_scoreboard["feature"][0]
@@ -542,11 +618,20 @@ def _(LABEL_COL, N_BINS, POSITIVE_MFE_THRESHOLD, REVIEW_FEATURE, available_analy
     print(f"  Step 7. 特征深挖: {review_feature}")
     print("=" * 72)
     print(review_table)
-    return review_feature, review_table
+    return
 
 
 @app.cell
-def _(DECAY_HORIZONS, available_train_feature_cols, build_decay_table, compute_factor_decay, ic_summary, ordered_unique, df_lab, pl):
+def _(
+    DECAY_HORIZONS,
+    available_train_feature_cols,
+    build_decay_table,
+    compute_factor_decay,
+    df_lab,
+    ic_summary,
+    ordered_unique,
+    pl,
+):
     decay_factor_cols = ordered_unique(
         [
             *available_train_feature_cols,
@@ -576,11 +661,24 @@ def _(DECAY_HORIZONS, available_train_feature_cols, build_decay_table, compute_f
     print(decay_table)
     print("\n  平均绝对 ICIR 曲线:")
     print(decay_curve)
-    return decay_curve, decay_factor_cols, decay_table
+    return
 
 
 @app.cell
-def _(CORR_SAMPLE_N, CORR_THRESHOLD, RUN_CORR_DIAGNOSTICS, available_train_feature_cols, calc_factor_corr, find_redundant_factors, group_summary, ic_results, ic_summary, ordered_unique, pl, df_lab):
+def _(
+    CORR_SAMPLE_N,
+    CORR_THRESHOLD,
+    RUN_CORR_DIAGNOSTICS,
+    available_train_feature_cols,
+    calc_factor_corr,
+    df_lab,
+    find_redundant_factors,
+    group_summary,
+    ic_results,
+    ic_summary,
+    ordered_unique,
+    pl,
+):
     corr_candidates = ordered_unique(
         [
             *available_train_feature_cols,
@@ -630,12 +728,20 @@ def _(CORR_SAMPLE_N, CORR_THRESHOLD, RUN_CORR_DIAGNOSTICS, available_train_featu
         print(f"  keep: {corr_keep_cols}")
         print(f"  drop: {corr_drop_cols}")
         print(corr_decisions)
-
-    return corr_decisions, corr_drop_cols, corr_keep_cols
+    return corr_drop_cols, corr_keep_cols
 
 
 @app.cell
-def _(available_train_feature_cols, corr_drop_cols, corr_keep_cols, frozen_train_ic, group_summary, ic_summary, ordered_unique, pl):
+def _(
+    available_train_feature_cols,
+    corr_drop_cols,
+    corr_keep_cols,
+    frozen_train_ic,
+    group_summary,
+    ic_summary,
+    ordered_unique,
+    pl,
+):
     frozen_train_cols = list(available_train_feature_cols)
     group_top_cols = ordered_unique(group_summary["top_factor"].to_list() if group_summary.height else [])
     watchlist = (
@@ -645,31 +751,67 @@ def _(available_train_feature_cols, corr_drop_cols, corr_keep_cols, frozen_train
         if ic_summary.height
         else pl.DataFrame(schema={"factor": pl.String})
     )
+    watchlist_cols = watchlist["factor"].to_list() if watchlist.height else []
+    ic_abs_map = {
+        row["factor"]: float(row["abs_ICIR"])
+        for row in (
+            ic_summary.select(["factor", "abs_ICIR"]).to_dicts()
+            if ic_summary.height
+            else []
+        )
+    }
 
-    pruned_train_cols = [
+    pruned_train_cols = [factor for factor in frozen_train_cols if factor not in corr_drop_cols]
+    replacement_candidates = [
         factor
-        for factor in frozen_train_cols
-        if factor in corr_keep_cols or factor not in corr_drop_cols
+        for factor in ordered_unique([*watchlist_cols, *group_top_cols])
+        if factor not in pruned_train_cols and factor not in corr_drop_cols
     ]
-    suggested_next_freeze = ordered_unique([*pruned_train_cols, *group_top_cols])[: len(frozen_train_cols)]
-    final_snapshot = pl.DataFrame(
-        [
-            {"bucket": "frozen_train_cols", "value": ", ".join(frozen_train_cols)},
-            {"bucket": "pruned_train_cols", "value": ", ".join(pruned_train_cols)},
-            {"bucket": "group_top_cols", "value": ", ".join(group_top_cols)},
-            {"bucket": "suggested_next_freeze", "value": ", ".join(suggested_next_freeze)},
+
+    suggested_next_freeze = list(pruned_train_cols)
+    recommended_drops: list[str] = []
+    recommended_adds: list[str] = []
+    for candidate in replacement_candidates:
+        weakest_factor = min(
+            suggested_next_freeze,
+            key=lambda factor: ic_abs_map.get(factor, 0.0),
+            default=None,
+        )
+        if weakest_factor is None:
+            break
+
+        candidate_strength = ic_abs_map.get(candidate, 0.0)
+        weakest_strength = ic_abs_map.get(weakest_factor, 0.0)
+        if candidate_strength <= weakest_strength:
+            continue
+
+        suggested_next_freeze = [
+            factor for factor in suggested_next_freeze if factor != weakest_factor
         ]
-    )
+        suggested_next_freeze.append(candidate)
+        recommended_drops.append(weakest_factor)
+        recommended_adds.append(candidate)
+
+    final_snapshot = [
+        {"bucket": "frozen_train_cols", "value": ", ".join(frozen_train_cols)},
+        {"bucket": "pruned_train_cols", "value": ", ".join(pruned_train_cols)},
+        {"bucket": "group_top_cols", "value": ", ".join(group_top_cols)},
+        {"bucket": "replacement_candidates", "value": ", ".join(replacement_candidates)},
+        {"bucket": "recommended_drops", "value": ", ".join(recommended_drops)},
+        {"bucket": "recommended_adds", "value": ", ".join(recommended_adds)},
+        {"bucket": "suggested_next_freeze", "value": ", ".join(suggested_next_freeze)},
+    ]
 
     print("\n" + "=" * 72)
     print("  Step 10. Lab 结论")
     print("=" * 72)
-    print(final_snapshot)
+    for i in final_snapshot:
+        print(i)
     print("\n  当前冻结训练集画像:")
     print(frozen_train_ic)
     print("\n  尚未冻结但值得观察的 watchlist:")
     print(watchlist)
-    return final_snapshot, pruned_train_cols, suggested_next_freeze, watchlist
+    return final_snapshot, recommended_adds, recommended_drops, suggested_next_freeze, watchlist
 
 
 if __name__ == "__main__":

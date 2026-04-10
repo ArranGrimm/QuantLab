@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.22.4"
+__generated_with = "0.23.0"
 app = marimo.App(width="full")
 
 
@@ -12,7 +12,6 @@ def _():
 
     from utils import (
         build_b1_research_frame,
-        calc_b1_factors_wmacd,
         describe_b1_feature_set,
         export_for_rust,
         get_st_blacklist_pl,
@@ -33,7 +32,7 @@ def _():
     MIN_LIST_DAYS = 60
     SEED_J_MAX = 20.0
     SEED_COL = "seed_mid"
-    USE_BULL_ONLY = True
+    USE_BULL_ONLY = False
 
     LABEL_COL = "fwd_mfe_10d"
     FEATURE_SET_NAME = "selected"
@@ -78,20 +77,27 @@ def _():
         TRAIN_WINDOW,
         USE_BULL_ONLY,
         build_b1_research_frame,
-        calc_b1_factors_wmacd,
-        describe_b1_feature_set,
         duckdb,
         export_for_rust,
         get_st_blacklist_pl,
         load_daily_data_full,
         np,
         pl,
-        resolve_b1_feature_set,
     )
 
 
 @app.cell
-def _(EMA_ALPHA, FEATURE_COLS, FEATURE_SET_DESC, FEATURE_SET_NAME, LABEL_COL, RETRAIN_FREQ, SEED_COL, TRAIN_WINDOW, USE_BULL_ONLY):
+def _(
+    EMA_ALPHA,
+    FEATURE_COLS,
+    FEATURE_SET_DESC,
+    FEATURE_SET_NAME,
+    LABEL_COL,
+    RETRAIN_FREQ,
+    SEED_COL,
+    TRAIN_WINDOW,
+    USE_BULL_ONLY,
+):
     print("=" * 72)
     print("  B1 Seed Train / Export Entry")
     print("=" * 72)
@@ -108,7 +114,16 @@ def _(EMA_ALPHA, FEATURE_COLS, FEATURE_SET_DESC, FEATURE_SET_NAME, LABEL_COL, RE
 
 
 @app.cell
-def _(DB_PATH, END_DATE, START_DATE, ST_SNAPSHOT_DATE, duckdb, get_st_blacklist_pl, load_daily_data_full, pl):
+def _(
+    DB_PATH,
+    END_DATE,
+    START_DATE,
+    ST_SNAPSHOT_DATE,
+    duckdb,
+    get_st_blacklist_pl,
+    load_daily_data_full,
+    pl,
+):
     _conn = duckdb.connect(DB_PATH, read_only=True)
     st_blacklist = get_st_blacklist_pl(ST_SNAPSHOT_DATE)
     st_blacklist_df = pl.DataFrame({"code": st_blacklist}).lazy()
@@ -187,14 +202,38 @@ def _(
 
 
 @app.cell
-def _(LABEL_COL, RETRAIN_FREQ, TRAIN_WINDOW, df_seed, np, pl, valid_feature_cols):
+def _(
+    FEATURE_SET_NAME,
+    LABEL_COL,
+    MIN_LIST_DAYS,
+    MV_MAX,
+    MV_MIN,
+    RETRAIN_FREQ,
+    SEED_COL,
+    TRAIN_WINDOW,
+    USE_BULL_ONLY,
+    df_seed,
+    np,
+    pl,
+    valid_feature_cols,
+):
     df_scores_raw = pl.DataFrame(schema={"date": pl.Date, "code": pl.Utf8, "score": pl.Float64})
+    b1_train_meta = None
     print("\n" + "=" * 72)
     print("  Step 3. LightGBM Walk-Forward")
     print("=" * 72)
 
     try:
         from lightgbm import LGBMRegressor
+        import warnings
+        from datetime import datetime
+        from utils.signal_export import (
+            build_b1_train_run_id,
+            build_feature_hash,
+            get_git_commit,
+        )
+
+        warnings.filterwarnings("ignore", category=UserWarning)
     except Exception as exc:
         print(f"⚠️ LightGBM 不可用，跳过训练: {exc}")
     else:
@@ -209,7 +248,10 @@ def _(LABEL_COL, RETRAIN_FREQ, TRAIN_WINDOW, df_seed, np, pl, valid_feature_cols
             all_dates = df_valid["date"].unique().sort().to_list()
 
             if len(all_dates) <= TRAIN_WINDOW:
-                print("⚠️ 交易日数量不足以跑 walk-forward。")
+                print(
+                    f"⚠️ 交易日数量不足以跑 walk-forward: "
+                    f"n_dates={len(all_dates)}, train_window={TRAIN_WINDOW}"
+                )
             else:
                 x_all = df_valid.select(valid_feature_cols).to_numpy().astype(np.float32)
                 y_all = df_valid[LABEL_COL].to_numpy().astype(np.float64)
@@ -237,7 +279,19 @@ def _(LABEL_COL, RETRAIN_FREQ, TRAIN_WINDOW, df_seed, np, pl, valid_feature_cols
                 model = None
                 last_train_idx = TRAIN_WINDOW - RETRAIN_FREQ
 
-                print(f"  有效样本: {df_valid.height:,} 行, {len(all_dates)} 个交易日")
+                print("🤖 LightGBM Walk-Forward 打分", flush=True)
+                print(
+                    f"   训练窗口: {TRAIN_WINDOW}天, 重训: 每{RETRAIN_FREQ}天, 标签: {LABEL_COL}",
+                    flush=True,
+                )
+                print(
+                    f"   特征集: {FEATURE_SET_NAME} ({len(valid_feature_cols)} 个)",
+                    flush=True,
+                )
+                print(
+                    f"   有效样本: {df_valid.height:,} 行, {len(all_dates)} 个交易日",
+                    flush=True,
+                )
                 for i in range(TRAIN_WINDOW, len(all_dates)):
                     cur_date = all_dates[i]
 
@@ -252,6 +306,12 @@ def _(LABEL_COL, RETRAIN_FREQ, TRAIN_WINDOW, df_seed, np, pl, valid_feature_cols
                         model.fit(x_tr, y_tr)
                         last_train_idx = i
 
+                        pct = (i - TRAIN_WINDOW) / (len(all_dates) - TRAIN_WINDOW) * 100
+                        print(
+                            f"   [{cur_date}] 重训 ({pct:.0f}%), 样本: {len(y_tr):,}",
+                            flush=True,
+                        )
+
                     mask_te = dates_all == np.datetime64(cur_date)
                     if not mask_te.any() or model is None:
                         continue
@@ -263,10 +323,47 @@ def _(LABEL_COL, RETRAIN_FREQ, TRAIN_WINDOW, df_seed, np, pl, valid_feature_cols
 
                 if score_values:
                     df_scores_raw = pl.DataFrame({"date": score_dates, "code": score_codes, "score": score_values})
-                    print(f"  打分完成: {df_scores_raw.height:,} 条")
+                    train_timestamp_token = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    trained_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    feature_hash = build_feature_hash(valid_feature_cols)
+                    b1_train_meta = {
+                        "strategy": "b1",
+                        "label": LABEL_COL,
+                        "model_name": "lightgbm",
+                        "feature_set_name": FEATURE_SET_NAME,
+                        "feature_mode": FEATURE_SET_NAME,
+                        "feature_hash": feature_hash,
+                        "features": valid_feature_cols,
+                        "feature_count": len(valid_feature_cols),
+                        "train_timestamp_token": train_timestamp_token,
+                        "train_run_id": build_b1_train_run_id(
+                            LABEL_COL,
+                            SEED_COL,
+                            "lightgbm",
+                            train_timestamp_token,
+                            feature_hash,
+                        ),
+                        "trained_at": trained_at,
+                        "git_commit": get_git_commit(),
+                        "notebook": "notebooks/b1_seed_ml_baseline.py",
+                        "model_params": lgb_params,
+                        "train_window": TRAIN_WINDOW,
+                        "retrain_freq": RETRAIN_FREQ,
+                        "seed_col": SEED_COL,
+                        "use_bull_only": USE_BULL_ONLY,
+                        "signal_source": SEED_COL,
+                        "sort_field": "score",
+                        "sort_ascending": False,
+                        "universe": {
+                            "mv_min": MV_MIN,
+                            "mv_max": MV_MAX,
+                            "min_list_days": MIN_LIST_DAYS,
+                        },
+                    }
+                    print(f"\n   ✅ 打分完成: {df_scores_raw.height:,} 条", flush=True)
                 else:
                     print("⚠️ 没有生成任何预测分数。")
-    return (df_scores_raw,)
+    return b1_train_meta, df_scores_raw
 
 
 @app.cell
@@ -368,7 +465,7 @@ def _(EMA_ALPHA, LABEL_COL, df_scores_raw, df_seed, np, pl):
         print(eval_summary)
         print("\n  分层结果:")
         print(quintile_table)
-    return eval_summary, quintile_table
+    return
 
 
 @app.cell
@@ -376,13 +473,13 @@ def _(
     EXPORT_START_DATE,
     FEATURE_SET_NAME,
     LOOSE_PERIODS,
-    MV_MIN,
+    USE_BULL_ONLY,
     SEED_COL,
-    calc_b1_factors_wmacd,
+    b1_train_meta,
+    df_all,
     df_scores_raw,
     export_for_rust,
     pl,
-    q_full,
 ):
     print("\n" + "=" * 72)
     print("  Step 5. 导出到 Rust")
@@ -391,21 +488,40 @@ def _(
     if df_scores_raw.is_empty():
         print("  结论: 当前没有分数可导出。")
     else:
-        output_path = f"data/signals/b1_{SEED_COL}_{FEATURE_SET_NAME}_pure_model.parquet"
+        output_path = f"data/signals/b1_{SEED_COL}_{FEATURE_SET_NAME}_seed_signal_score.parquet"
         df_export = (
-            calc_b1_factors_wmacd(q_full, {"MV_THRESHOLD": MV_MIN})
+            df_all.lazy()
+            .with_columns(pl.col(SEED_COL).fill_null(False).alias("b1_signal"))
             .join(df_scores_raw.lazy(), on=["date", "code"], how="left")
             .with_columns(pl.col("score").fill_null(-999.0))
         )
+        seed_signal_rows = df_all.filter(pl.col(SEED_COL)).height
+        export_meta = {
+            **(b1_train_meta or {}),
+            "feature_set_name": FEATURE_SET_NAME,
+            "seed_col": SEED_COL,
+            "use_bull_only": USE_BULL_ONLY,
+            "signal_source": SEED_COL,
+            "sort_field": "score",
+            "sort_ascending": False,
+            "export_ema_alpha": 1.0,
+        }
+        print(f"  候选定义: b1_signal <- {SEED_COL}")
+        print(f"  seed signal rows: {seed_signal_rows:,}")
+        print("  排序字段: score (降序)")
         export_file = export_for_rust(
             df_export,
             output_path=output_path,
             loose_periods=LOOSE_PERIODS,
             start_date=EXPORT_START_DATE,
             extra_sort_cols=["score"],
+            raw_scores=df_scores_raw,
+            artifact_metadata=export_meta,
+            write_latest_alias=True,
         )
         print(f"  导出完成: {export_file}")
         print("  Rust 回测命令:")
+        print("  backtest-engine\\run_b1.bat")
         print(f'  cargo run -p bt-b1 --release -- --data ../../{export_file} --config crates/b1/config_wmacd_ml.toml')
     return
 

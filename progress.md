@@ -1,5 +1,59 @@
 # Progress
 
+## 2026-04-10
+
+### [B1] Artifact 导出与选择式回测已接入第一版
+- `utils/signal_export.py::export_for_rust()` 当前已支持 `artifact_metadata`:
+  - 训练后可直接落盘到 `artifacts/b1/<train_run_id>/...`
+  - 生成 `train.meta.json` / `signal.meta.json` / `signals.jsonl` / `backtest.jsonl`
+  - 可选同时写出 `data/signals/...` alias parquet
+- `backtest-engine/crates/b1` 当前已接入 `bt-core` 的 signal meta / report bundle / registry append
+- 已新增 `scripts/b1_backtest.py` 与 `backtest-engine/run_b1.bat`:
+  - 支持 `--pick` 交互式选择 B1 signal
+  - 自动创建 `backtests/<timestamp>/effective.config.toml`
+  - 回测结果自动写回对应 signal 目录
+- 当前已验证:
+  - `python -m py_compile utils/signal_export.py`
+  - `python -m py_compile notebooks/b1_seed_ml_baseline.py`
+  - `python -m py_compile scripts/b1_backtest.py`
+  - `uv run marimo check notebooks/b1_seed_ml_baseline.py`
+  - `cargo check -p bt-b1`
+
+### [B1] Seed 纯模型导出已切到“seed 信号 + score 排序”口径
+- 已更新 `notebooks/b1_seed_ml_baseline.py` 的 `Step 5. 导出到 Rust`
+- 当前导出逻辑改为:
+  - 使用 `build_b1_research_frame()` 产出的研究底表作为导出底座
+  - 直接将 `SEED_COL` 映射为 parquet 里的 `b1_signal`
+  - `score` 继续作为额外排序列导出给 Rust
+- 当前目标:
+  - 保持 `bt-b1` 的时钟流、买卖规则与成本模型不变
+  - 仅替换“谁是候选”与“候选内排序”两件事
+  - 让规则版 `B1` 与 `seed + ML score` 版只通过不同 parquet 做可比回测
+
+### [B1] Seed 训练入口已补齐 walk-forward 进度打印
+- `notebooks/b1_seed_ml_baseline.py` 的 `Step 3. LightGBM Walk-Forward` 当前已新增:
+  - 训练窗口 / 重训频率 / 标签 / 特征集打印
+  - 每次重训时打印当前日期、进度百分比与训练样本量
+  - 训练结束后打印最终打分条数
+- 当前效果对齐 `notebooks/cross_section_rotation.py` 的训练入口风格，便于长时间运行时观察进度
+
+### [B1] `selected` 冻结特征集已做第一轮保守升级
+- 基于 `notebooks/b1_condition_mining.py` 在 `seed_mid + bull_only + fwd_mfe_10d` 下的新一轮 lab 结果，已更新 `utils/b1_feature_pool.py` 中的 `B1_SELECTED_FEATURE_COLS`
+- 本轮调整:
+  - 移除较弱尾部: `Bias_C_WL` / `red_green_ratio_20` / `days_since_key_k` / `bias_wl_yl_delta_5`
+  - 新增更强候选: `body_pct` / `vol_shrink_40` / `rw_hist_delta_5` / `rm_hist_delta_5`
+
+### [B1] Factor Lab 的 freeze 建议逻辑已改为“弱尾替换”
+- `notebooks/b1_condition_mining.py` 的 `Step 10. Lab 结论` 不再只做“旧冻结集 + group top 后截断”
+- 当前改为:
+  - 先保留相关性诊断后未被剪掉的冻结列
+  - 再按 `abs_ICIR` 用更强的 watchlist / group top 候选替换最弱尾部
+  - 额外打印 `replacement_candidates / recommended_drops / recommended_adds / suggested_next_freeze`
+- 当前已验证:
+  - `python -m py_compile utils/b1_feature_pool.py`
+  - `python -m py_compile notebooks/b1_condition_mining.py`
+  - `uv run marimo check notebooks/b1_condition_mining.py`
+
 ## 2026-04-09
 
 ### [B1] Lab / Train 拆分已落地主入口

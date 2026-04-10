@@ -329,15 +329,23 @@
 - 共享底座:
   - `utils/b1_feature_pool.py` 统一输出研究底表与 `core / candidate / selected` 三档特征集
   - 当前已补齐 `fwd_ret_2d / fwd_ret_3d / fwd_ret_5d`
+  - `selected` 已按最新一轮 `seed_mid + bull_only` lab 做第一轮保守升级:
+    - 移除 `Bias_C_WL / red_green_ratio_20 / days_since_key_k / bias_wl_yl_delta_5`
+    - 新增 `body_pct / vol_shrink_40 / rw_hist_delta_5 / rm_hist_delta_5`
 - factor lab:
   - `notebooks/b1_condition_mining.py`
   - 当前已改成 `print-first` 的纯研究面板
   - 当前输出 `seed 概览 -> IC -> group summary -> bin scoreboard -> decay -> corr diagnostics`
+  - `Step 10. Lab 结论` 当前已支持按 `abs_ICIR` 对冻结集做“弱尾替换”建议，不再只做追加后截断
 - train / export:
   - `notebooks/b1_seed_ml_baseline.py`
   - 当前默认消费冻结特征集 `selected`
   - 当前已支持 `seed_mid / seed_strict` 切换
   - 当前已打通 `walk-forward -> 评估 -> Rust 导出`
+  - 当前导出已支持“`seed_mid` 顶替 parquet 内 `b1_signal` + `score` 排序”口径，可与规则版 `B1` 在相同 Rust 回测流程下做 parquet 级对照
+  - 当前训练入口已补齐重训进度打印，长时间运行时可直接观察 walk-forward 进度
+  - 当前已接入 `artifacts/b1/<train_run_id>/...` 导出与 `signal.meta.json` 元数据
+  - 当前可通过 `scripts/b1_backtest.py` / `backtest-engine/run_b1.bat` 交互式选择 signal 并回测
 - 当前统一结论文档:
   - `experiments/b1-next-phase.md`
 

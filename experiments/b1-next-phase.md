@@ -50,6 +50,10 @@
   - `LightGBM walk-forward`
   - 输出 `IC / ICIR / q4-q0`
   - 导出 Rust parquet
+- 当前已支持:
+  - 将 `seed_col` 直接映射为 parquet 内的 `b1_signal`
+  - 在相同 `bt-b1` 回测流程下，用不同 parquet 对照“规则版 B1”与“seed + score 版 B1”
+  - 训练后直接落盘 `artifacts/b1/...`，并通过 `scripts/b1_backtest.py` 选择 signal 回测
 
 #### 3. Shared Feature Base
 

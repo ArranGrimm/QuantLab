@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! B1 超跌反转策略回测引擎
 //!
 //! Usage:
@@ -13,10 +15,11 @@ use bevy_ecs::prelude::*;
 use chrono::NaiveDate;
 use clap::Parser;
 use polars::prelude::*;
+use serde_json::json;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use bt_core::{BacktestStats, Portfolio};
+use bt_core::{BacktestStats, Portfolio, SignalArtifactMeta};
 use components::Position;
 use resources::{BacktestConfig, ConfigFile, DailyData, MarketData, PriceBar};
 use systems::{check_sell_conditions, process_buy_signals, update_stats};
@@ -37,6 +40,7 @@ struct Args {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    let signal_meta = bt_core::load_signal_meta(&args.data);
 
     println!("========================================");
     println!("   B1 Backtest Engine (Bevy ECS)");
@@ -57,6 +61,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     print_config(&config);
 
     println!("\nLoading data from: {:?}", args.data);
+    if let Some(meta) = &signal_meta {
+        if let Some(signal_run_id) = &meta.signal_run_id {
+            println!("Signal Run ID: {}", signal_run_id);
+        }
+    }
 
     // 2. Load market data
     let df = LazyFrame::scan_parquet(&args.data, Default::default())?.collect()?;
@@ -147,7 +156,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !args.output_dir.is_empty() {
         let config = app.world().resource::<BacktestConfig>();
         let config_text = format_config(config, trading_dates.len());
-        bt_core::write_report("b1", &config_text, stats, portfolio, trading_dates.len(), &args.output_dir)?;
+        let report_paths = bt_core::write_report_bundle(
+            &args.output_dir,
+            "b1",
+            &args.data,
+            signal_meta.as_ref(),
+            &config_text,
+            json!({
+                "initial_capital": config.initial_capital,
+                "max_positions": config.max_positions,
+                "max_daily_buys": config.max_daily_buys,
+                "position_size_pct": config.position_size_pct,
+                "max_hold_days": config.max_hold_days,
+                "start_date": config.start_date.map(|d| d.to_string()),
+                "end_date": config.end_date.map(|d| d.to_string()),
+                "sort_field": config.sort_field,
+                "sort_ascending": config.sort_ascending,
+                "min_position_ratio": config.min_position_ratio,
+                "stop_loss_enabled": config.stop_loss_enabled,
+                "stop_loss_pct": config.stop_loss_pct,
+                "tp1_pct": config.tp1_pct,
+                "tp2_pct": config.tp2_pct,
+                "tp_sell_ratio": config.tp_sell_ratio,
+                "sell_on_break_wl": config.sell_on_break_wl,
+                "sell_on_break_yl": config.sell_on_break_yl,
+                "weak_enabled": config.weak_enabled,
+                "weak_days": config.weak_days,
+                "weak_min_gain_pct": config.weak_min_gain_pct,
+                "trailing_enabled": config.trailing_enabled,
+                "trailing_activation_pct": config.trailing_activation_pct,
+                "trailing_pct": config.trailing_pct,
+                "commission_rate": config.commission_rate,
+                "stamp_duty_rate": config.stamp_duty_rate,
+                "slippage_pct": config.slippage_pct,
+            }),
+            None,
+            None,
+            stats,
+            portfolio,
+            trading_dates.len(),
+        )?;
+        append_b1_registry_entry(
+            signal_meta.as_ref(),
+            &args.data,
+            config,
+            stats,
+            portfolio,
+            trading_dates.len(),
+            &report_paths.txt_path,
+            &report_paths.json_path,
+        )?;
     }
 
     Ok(())
@@ -218,6 +276,97 @@ fn format_config(config: &BacktestConfig, trading_days: usize) -> String {
     writeln!(s, "Slippage:         {:.2}%", config.slippage_pct * 100.0).unwrap();
 
     s
+}
+
+fn append_b1_registry_entry(
+    signal_meta: Option<&SignalArtifactMeta>,
+    data_path: &Path,
+    config: &BacktestConfig,
+    stats: &BacktestStats,
+    portfolio: &Portfolio,
+    trading_days: usize,
+    report_txt_path: &Path,
+    report_json_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use chrono::Local;
+
+    let registry_path = bt_core::resolve_registry_path(
+        signal_meta,
+        "../artifacts/b1/backtest.jsonl",
+    );
+    let derived = bt_core::calc_derived_metrics(stats, portfolio, trading_days);
+    let train_run_dir = registry_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let signal_path_resolved = signal_meta.and_then(bt_core::resolve_signal_path);
+    let signal_meta_resolved = signal_meta.and_then(|meta| {
+        bt_core::resolve_meta_relative_path(meta, meta.signal_meta_path.as_deref())
+    });
+    let report_dir = report_json_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let backtest_id = report_dir
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| Local::now().format("%Y%m%d_%H%M%S_%3f").to_string());
+
+    let record = json!({
+        "record_type": "backtest_run",
+        "recorded_at": Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        "strategy": "b1",
+        "train_run_id": signal_meta.and_then(|meta| meta.train_run_id.clone()),
+        "signal_id": signal_meta.and_then(|meta| meta.signal_id.clone()),
+        "signal_run_id": signal_meta.and_then(|meta| meta.signal_run_id.clone()),
+        "label": signal_meta.and_then(|meta| meta.label.clone()),
+        "model_name": signal_meta.and_then(|meta| meta.model_name.clone()),
+        "feature_mode": signal_meta.and_then(|meta| meta.feature_mode.clone()),
+        "feature_hash": signal_meta.and_then(|meta| meta.feature_hash.clone()),
+        "feature_count": signal_meta.and_then(|meta| meta.feature_count),
+        "export_ema_alpha": signal_meta.and_then(|meta| meta.export_ema_alpha),
+        "backtest_id": backtest_id,
+        "input_signal_file": bt_core::relative_portable_path(&train_run_dir, data_path),
+        "signal_path": signal_path_resolved.as_ref().map(|p| bt_core::relative_portable_path(&train_run_dir, p)),
+        "signal_meta_path": signal_meta_resolved.as_ref().map(|p| bt_core::relative_portable_path(&train_run_dir, p)),
+        "backtest_dir": bt_core::relative_portable_path(&train_run_dir, &report_dir),
+        "git_commit": signal_meta.and_then(|meta| meta.git_commit.clone()),
+        "max_positions": config.max_positions,
+        "max_daily_buys": config.max_daily_buys,
+        "position_size_pct": config.position_size_pct,
+        "max_hold_days": config.max_hold_days,
+        "sort_field": config.sort_field,
+        "sort_ascending": config.sort_ascending,
+        "min_position_ratio": config.min_position_ratio,
+        "stop_loss_enabled": config.stop_loss_enabled,
+        "stop_loss_pct": config.stop_loss_pct,
+        "tp1_pct": config.tp1_pct,
+        "tp2_pct": config.tp2_pct,
+        "tp_sell_ratio": config.tp_sell_ratio,
+        "sell_on_break_wl": config.sell_on_break_wl,
+        "sell_on_break_yl": config.sell_on_break_yl,
+        "weak_enabled": config.weak_enabled,
+        "weak_days": config.weak_days,
+        "weak_min_gain_pct": config.weak_min_gain_pct,
+        "trailing_enabled": config.trailing_enabled,
+        "trailing_activation_pct": config.trailing_activation_pct,
+        "trailing_pct": config.trailing_pct,
+        "commission_rate": config.commission_rate,
+        "stamp_duty_rate": config.stamp_duty_rate,
+        "slippage_pct": config.slippage_pct,
+        "gross_return_pct": derived.gross_return_pct,
+        "net_return_pct": derived.total_return_pct,
+        "max_drawdown_pct": stats.max_drawdown * 100.0,
+        "win_rate_pct": stats.win_rate() * 100.0,
+        "avg_trades_per_day": derived.avg_trades_per_day,
+        "total_trades": stats.total_trades,
+        "report_txt_path": bt_core::relative_portable_path(&train_run_dir, report_txt_path),
+        "report_json_path": bt_core::relative_portable_path(&train_run_dir, report_json_path),
+    });
+
+    bt_core::append_jsonl_record(&registry_path, &record)?;
+    println!("🗂️ Registry appended: {}", registry_path.display());
+    Ok(())
 }
 
 fn build_market_data(
