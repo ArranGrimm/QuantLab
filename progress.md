@@ -2,6 +2,28 @@
 
 ## 2026-04-12
 
+### [B1] baseline notebook 已补最新交易日打分与 threshold/top-k 诊断
+- `notebooks/b1_seed_ml_baseline.py` 当前已将 `Walk-Forward` 的训练样本与打分样本拆开:
+  - 训练仍只使用 `LABEL_COL` 非空的历史样本
+  - 打分则覆盖全部特征齐全的 `seed` 候选日期, 包括最后一个尚无 `fwd_mfe_10d` 标签的交易日
+- 当前目的:
+  - 保持原有 `20` 个交易日重训节奏不变
+  - 修复“行情更新到最新收盘后, 最后一天却没有 score, 无法生成次日候选”的致命问题
+- `Step 4. 纯模型基线评估` 当前已新增:
+  - `score` 分位数表
+  - `score threshold` 表现表
+  - `top-k` 表现表
+- 目的:
+  - 直接支持“要不要设开仓阈值”和“冷启动是否买满 `5` 只”的定量判断
+
+### [Docs] B1 主文档已补充实盘前待办与运行口径
+- 已在 `experiments/b1-next-phase.md` 补充:
+  - `ML B1` 用 `10万元` 作为实验仓试运行的前提
+  - 当前模型仍按约 `20` 个交易日重训一次，而非日更重训
+  - 当前日常运行链“必须从头重跑整套流程才能刷新次日候选”的不灵活点
+  - 周一前优先待办: `2026` 近端利润回吐复盘、`score threshold` 分析、`selected` 一轮受控迭代、冷启动分批建仓
+- 已同步更新 `project-status.md` 的 `B1 实盘前待办` 摘要
+
 ### [B1] `SELL / CLOSE` 日志已拆分清仓收益与整笔收益
 - `backtest-engine/crates/b1/src/systems.rs` 与 `backtest-engine/crates/b1/src/main.rs` 当前已将最终平仓日志改为同时显示:
   - `ExitPnL`: 本次清仓这最后一腿的收益

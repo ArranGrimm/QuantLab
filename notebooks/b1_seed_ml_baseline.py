@@ -24,7 +24,7 @@ def _():
 
     DB_PATH = r"../QuantData/Ashare/qmt_data.duckdb"
     START_DATE = "2019-01-01"
-    END_DATE = "2026-03-31"
+    END_DATE = "2026-12-31"
     ST_SNAPSHOT_DATE = "2026-03-31"
     EXPORT_START_DATE = "2021-06-16"
 
@@ -36,10 +36,13 @@ def _():
     USE_BULL_ONLY = False
 
     LABEL_COL = "fwd_mfe_10d"
+    POSITIVE_MFE_THRESHOLD = 0.08
     FEATURE_SET_NAME = "selected"
     TRAIN_WINDOW = 480
     RETRAIN_FREQ = 20
     EMA_ALPHA = 1.0
+    SCORE_THRESHOLD_QUANTILES = (0.50, 0.70, 0.80, 0.90, 0.95)
+    TOPK_LIST = (1, 3, 5)
 
     LOOSE_PERIODS = [
         ("2019-02-11", "2019-04-10"),
@@ -53,6 +56,7 @@ def _():
         ("2024-09-24", "2024-10-15"),
         ("2025-04-09", "2025-09-04"),
         ("2026-01-05", "2026-02-02"),
+        ("2026-04-08", "2026-04-30"),
     ]
 
     FEATURE_COLS = list(resolve_b1_feature_set(FEATURE_SET_NAME))
@@ -70,11 +74,14 @@ def _():
         MIN_LIST_DAYS,
         MV_MAX,
         MV_MIN,
+        POSITIVE_MFE_THRESHOLD,
         RETRAIN_FREQ,
+        SCORE_THRESHOLD_QUANTILES,
         SEED_COL,
         SEED_J_MAX,
         START_DATE,
         ST_SNAPSHOT_DATE,
+        TOPK_LIST,
         TRAIN_WINDOW,
         USE_BULL_ONLY,
         build_b1_research_frame,
@@ -95,8 +102,11 @@ def _(
     FEATURE_SET_DESC,
     FEATURE_SET_NAME,
     LABEL_COL,
+    POSITIVE_MFE_THRESHOLD,
     RETRAIN_FREQ,
+    SCORE_THRESHOLD_QUANTILES,
     SEED_COL,
+    TOPK_LIST,
     TRAIN_WINDOW,
     USE_BULL_ONLY,
 ):
@@ -106,12 +116,15 @@ def _(
     print(f"  seed_col:          {SEED_COL}")
     print(f"  bull_regime_only:  {USE_BULL_ONLY}")
     print(f"  label_col:         {LABEL_COL}")
+    print(f"  positive_mfe:      {POSITIVE_MFE_THRESHOLD:.2%}")
     print(f"  feature_set:       {FEATURE_SET_NAME}")
     print(f"  feature_count:     {len(FEATURE_COLS)}")
     print(f"  feature_desc:      {FEATURE_SET_DESC}")
     print(f"  train_window:      {TRAIN_WINDOW}")
     print(f"  retrain_freq:      {RETRAIN_FREQ}")
     print(f"  ema_alpha:         {EMA_ALPHA}")
+    print(f"  score_threshold_q: {SCORE_THRESHOLD_QUANTILES}")
+    print(f"  topk_list:         {TOPK_LIST}")
     return
 
 
@@ -242,24 +255,34 @@ def _(
         if df_seed.is_empty():
             print("⚠️ 当前 seed 样本为空，跳过训练。")
         else:
-            df_valid = (
+            df_train = (
                 df_seed.filter(pl.col(LABEL_COL).is_not_null())
                 .filter(pl.all_horizontal(*[pl.col(col).is_not_null() for col in valid_feature_cols]))
                 .sort(["date", "code"])
             )
-            all_dates = df_valid["date"].unique().sort().to_list()
+            df_score = (
+                df_seed
+                .filter(pl.all_horizontal(*[pl.col(col).is_not_null() for col in valid_feature_cols]))
+                .sort(["date", "code"])
+            )
+            train_dates = df_train["date"].unique().sort().to_list()
+            score_universe_dates = df_score["date"].unique().sort().to_list()
 
-            if len(all_dates) <= TRAIN_WINDOW:
+            if len(train_dates) <= TRAIN_WINDOW:
                 print(
                     f"⚠️ 交易日数量不足以跑 walk-forward: "
-                    f"n_dates={len(all_dates)}, train_window={TRAIN_WINDOW}"
+                    f"n_train_dates={len(train_dates)}, train_window={TRAIN_WINDOW}"
                 )
             else:
-                x_all = df_valid.select(valid_feature_cols).to_numpy().astype(np.float32)
-                y_all = df_valid[LABEL_COL].to_numpy().astype(np.float64)
-                dates_all = df_valid["date"].to_numpy()
-                codes_all = df_valid["code"].to_numpy()
-                np.nan_to_num(x_all, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+                x_train_all = df_train.select(valid_feature_cols).to_numpy().astype(np.float32)
+                y_train_all = df_train[LABEL_COL].to_numpy().astype(np.float64)
+                dates_train_all = df_train["date"].to_numpy()
+                x_score_all = df_score.select(valid_feature_cols).to_numpy().astype(np.float32)
+                dates_score_all = df_score["date"].to_numpy()
+                codes_score_all = df_score["code"].to_numpy()
+                train_dates_np = np.asarray(train_dates, dtype="datetime64[us]")
+                np.nan_to_num(x_train_all, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+                np.nan_to_num(x_score_all, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
 
                 lgb_params = {
                     "n_estimators": 200,
@@ -279,7 +302,7 @@ def _(
                 score_codes = []
                 score_values = []
                 model = None
-                last_train_idx = TRAIN_WINDOW - RETRAIN_FREQ
+                last_train_cut_idx = -1
 
                 print("🤖 LightGBM Walk-Forward 打分", flush=True)
                 print(
@@ -291,36 +314,44 @@ def _(
                     flush=True,
                 )
                 print(
-                    f"   有效样本: {df_valid.height:,} 行, {len(all_dates)} 个交易日",
+                    f"   训练样本: {df_train.height:,} 行, {len(train_dates)} 个有标签交易日",
                     flush=True,
                 )
-                for i in range(TRAIN_WINDOW, len(all_dates)):
-                    cur_date = all_dates[i]
+                print(
+                    f"   打分样本: {df_score.height:,} 行, {len(score_universe_dates)} 个候选交易日",
+                    flush=True,
+                )
+                for i, cur_date in enumerate(score_universe_dates):
+                    cur_date_np = np.datetime64(cur_date)
+                    train_cut_idx = int(np.searchsorted(train_dates_np, cur_date_np, side="left"))
+                    if train_cut_idx < TRAIN_WINDOW:
+                        continue
 
-                    if i - last_train_idx >= RETRAIN_FREQ or model is None:
-                        train_start = all_dates[max(0, i - TRAIN_WINDOW)]
-                        mask_tr = (dates_all >= np.datetime64(train_start)) & (dates_all < np.datetime64(cur_date))
-                        x_tr = x_all[mask_tr]
-                        y_tr = y_all[mask_tr]
+                    if model is None or (train_cut_idx - last_train_cut_idx) >= RETRAIN_FREQ:
+                        train_start = train_dates[train_cut_idx - TRAIN_WINDOW]
+                        mask_tr = (dates_train_all >= np.datetime64(train_start)) & (dates_train_all < cur_date_np)
+                        x_tr = x_train_all[mask_tr]
+                        y_tr = y_train_all[mask_tr]
                         if len(y_tr) < 500:
                             continue
                         model = LGBMRegressor(**lgb_params)
                         model.fit(x_tr, y_tr)
-                        last_train_idx = i
+                        last_train_cut_idx = train_cut_idx
 
-                        pct = (i - TRAIN_WINDOW) / (len(all_dates) - TRAIN_WINDOW) * 100
+                        pct = (i + 1) / max(len(score_universe_dates), 1) * 100
+                        latest_label_date = train_dates[train_cut_idx - 1]
                         print(
-                            f"   [{cur_date}] 重训 ({pct:.0f}%), 样本: {len(y_tr):,}",
+                            f"   [{cur_date}] 重训 ({pct:.0f}%), 标签截至: {latest_label_date}, 样本: {len(y_tr):,}",
                             flush=True,
                         )
 
-                    mask_te = dates_all == np.datetime64(cur_date)
+                    mask_te = dates_score_all == cur_date_np
                     if not mask_te.any() or model is None:
                         continue
 
-                    preds = model.predict(x_all[mask_te])
+                    preds = model.predict(x_score_all[mask_te])
                     score_dates.extend([cur_date] * int(mask_te.sum()))
-                    score_codes.extend(codes_all[mask_te].tolist())
+                    score_codes.extend(codes_score_all[mask_te].tolist())
                     score_values.extend(preds.tolist())
 
                 if score_values:
@@ -363,13 +394,28 @@ def _(
                         },
                     }
                     print(f"\n   ✅ 打分完成: {df_scores_raw.height:,} 条", flush=True)
+                    print(
+                        f"   分数覆盖日期: {df_scores_raw['date'].min()} ~ {df_scores_raw['date'].max()} "
+                        f"(输入最新日期: {score_universe_dates[-1]})",
+                        flush=True,
+                    )
                 else:
                     print("⚠️ 没有生成任何预测分数。")
-    return b1_train_meta, df_scores_raw
+    return b1_train_meta, datetime, df_scores_raw
 
 
 @app.cell
-def _(EMA_ALPHA, LABEL_COL, df_scores_raw, df_seed, np, pl):
+def _(
+    EMA_ALPHA,
+    LABEL_COL,
+    POSITIVE_MFE_THRESHOLD,
+    SCORE_THRESHOLD_QUANTILES,
+    TOPK_LIST,
+    df_scores_raw,
+    df_seed,
+    np,
+    pl,
+):
     eval_summary = pl.DataFrame(
         schema={
             "metric": pl.Utf8,
@@ -381,6 +427,33 @@ def _(EMA_ALPHA, LABEL_COL, df_scores_raw, df_seed, np, pl):
             "bucket": pl.Int64,
             "samples": pl.Int64,
             "mfe10_mean": pl.Float64,
+        }
+    )
+    score_quantile_table = pl.DataFrame(
+        schema={
+            "quantile": pl.Utf8,
+            "score_cut": pl.Float64,
+        }
+    )
+    threshold_table = pl.DataFrame(
+        schema={
+            "threshold_q": pl.Utf8,
+            "score_cut": pl.Float64,
+            "days_with_signal": pl.Int64,
+            "signal_day_ratio": pl.Float64,
+            "avg_candidates_signal_day": pl.Float64,
+            "mfe10_mean": pl.Float64,
+            "hit_rate": pl.Float64,
+        }
+    )
+    topk_table = pl.DataFrame(
+        schema={
+            "top_k": pl.Int64,
+            "rows": pl.Int64,
+            "days": pl.Int64,
+            "avg_candidates_per_day": pl.Float64,
+            "mfe10_mean": pl.Float64,
+            "hit_rate": pl.Float64,
         }
     )
 
@@ -453,6 +526,80 @@ def _(EMA_ALPHA, LABEL_COL, df_scores_raw, df_seed, np, pl):
             else None
         )
         spread = (_top_mean - _bottom_mean) if _top_mean is not None and _bottom_mean is not None else None
+        score_array = df_eval["score"].to_numpy().astype(np.float64)
+        total_eval_days = max(df_eval["date"].n_unique(), 1)
+
+        score_quantile_table = pl.DataFrame(
+            [
+                {
+                    "quantile": f"p{int(q * 100)}",
+                    "score_cut": round(float(np.quantile(score_array, q)), 4),
+                }
+                for q in SCORE_THRESHOLD_QUANTILES
+            ]
+        )
+
+        threshold_rows = []
+        for q in SCORE_THRESHOLD_QUANTILES:
+            score_cut = float(np.quantile(score_array, q))
+            df_cut = df_eval.filter(pl.col("score") >= score_cut)
+            days_with_signal = df_cut["date"].n_unique() if df_cut.height else 0
+            active_days = max(days_with_signal, 1)
+            threshold_rows.append(
+                {
+                    "threshold_q": f"p{int(q * 100)}",
+                    "score_cut": score_cut,
+                    "days_with_signal": days_with_signal,
+                    "signal_day_ratio": days_with_signal / total_eval_days,
+                    "avg_candidates_signal_day": df_cut.height / active_days,
+                    "mfe10_mean": float(df_cut[LABEL_COL].mean()) if df_cut.height else 0.0,
+                    "hit_rate": float((df_cut[LABEL_COL] >= POSITIVE_MFE_THRESHOLD).mean()) if df_cut.height else 0.0,
+                }
+            )
+        threshold_table = (
+            pl.DataFrame(threshold_rows)
+            .with_columns(
+                [
+                    pl.col("score_cut").round(4),
+                    pl.col("signal_day_ratio").round(4),
+                    pl.col("avg_candidates_signal_day").round(2),
+                    pl.col("mfe10_mean").round(4),
+                    pl.col("hit_rate").round(4),
+                ]
+            )
+        )
+
+        df_topk = df_eval.with_columns(
+            pl.col("score").rank("ordinal", descending=True).over("date").alias("_rank_desc")
+        )
+        topk_rows = []
+        for top_k in TOPK_LIST:
+            df_k = df_topk.filter(pl.col("_rank_desc") <= top_k)
+            if df_k.is_empty():
+                continue
+            day_count = max(df_k["date"].n_unique(), 1)
+            topk_rows.append(
+                {
+                    "top_k": top_k,
+                    "rows": df_k.height,
+                    "days": day_count,
+                    "avg_candidates_per_day": df_k.height / day_count,
+                    "mfe10_mean": float(df_k[LABEL_COL].mean()),
+                    "hit_rate": float((df_k[LABEL_COL] >= POSITIVE_MFE_THRESHOLD).mean()),
+                }
+            )
+        if topk_rows:
+            topk_table = (
+                pl.DataFrame(topk_rows)
+                .with_columns(
+                    [
+                        pl.col("avg_candidates_per_day").round(2),
+                        pl.col("mfe10_mean").round(4),
+                        pl.col("hit_rate").round(4),
+                    ]
+                )
+                .sort("top_k")
+            )
 
         eval_summary = pl.DataFrame(
             [
@@ -467,6 +614,12 @@ def _(EMA_ALPHA, LABEL_COL, df_scores_raw, df_seed, np, pl):
         print(eval_summary)
         print("\n  分层结果:")
         print(quintile_table)
+        print("\n  score 分位数:")
+        print(score_quantile_table)
+        print("\n  score threshold 表现 (raw score 会随重训漂移，当前先用 pooled quantile 做第一版校准):")
+        print(threshold_table)
+        print("\n  top-k 表现:")
+        print(topk_table)
     return
 
 
@@ -536,6 +689,25 @@ def _(
         print("  Rust 回测命令:")
         print("  backtest-engine\\run_b1.bat")
         print(f'  cargo run -p bt-b1 --release -- --data ../../{export_file} --config crates/b1/config_ml.toml')
+    return (df_export,)
+
+
+@app.cell
+def _(datetime, df_export, pl):
+    df_feb = df_export.filter(
+        pl.col("date") >= datetime(2026, 4, 9)
+    ).sort('score', descending=True).collect()
+    return (df_feb,)
+
+
+@app.cell
+def _(df_feb):
+    df_feb["date", "code", "score"]
+    return
+
+
+@app.cell
+def _():
     return
 
 
