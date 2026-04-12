@@ -44,6 +44,14 @@ pub fn process_buy_signals(
         }
     }
     let total_value = portfolio.cash + positions_value;
+    let mut running_total_asset = portfolio.cash;
+    for position in positions.iter() {
+        if let Some(prices) = market_data.prices.get(&position.code) {
+            if let Some(bar) = prices.get(&current_date) {
+                running_total_asset += position.shares as f64 * bar.open;
+            }
+        }
+    }
 
     let available_slots = (config.max_positions - current_positions).min(config.max_daily_buys);
     let mut bought_count = 0;
@@ -81,6 +89,7 @@ pub fn process_buy_signals(
         }
 
         portfolio.cash -= cost;
+        running_total_asset -= commission + slippage;
         stats.record_costs(commission, 0.0, slippage);
 
         commands.spawn(Position {
@@ -97,7 +106,14 @@ pub fn process_buy_signals(
             trailing_stop_active: false,
         });
 
-        println!("[{}] [BUY] {} @ {:.2} x {} shares", current_date, code, open_price, shares);
+        println!(
+            "[{}] [BUY] {} @ {:.2} x {} shares | Total Asset: {:.2}",
+            current_date,
+            code,
+            open_price,
+            shares,
+            running_total_asset
+        );
         bought_count += 1;
     }
 }
@@ -115,6 +131,15 @@ pub fn check_sell_conditions(
         Some(d) => d,
         None => return,
     };
+
+    let mut running_total_asset = portfolio.cash;
+    for (_, position) in positions.iter_mut() {
+        if let Some(prices) = market_data.prices.get(&position.code) {
+            if let Some(bar) = prices.get(&current_date) {
+                running_total_asset += position.shares as f64 * bar.close;
+            }
+        }
+    }
 
     for (entity, mut position) in positions.iter_mut() {
         let bar = match market_data.prices.get(&position.code) {
@@ -163,12 +188,20 @@ pub fn check_sell_conditions(
                 position.cost -= sell_cost;
                 position.realized_pnl += pnl;
                 position.take_profit_stage = 1;
+                running_total_asset -= commission + stamp_duty + slippage;
                 stats.record_costs(commission, stamp_duty, slippage);
 
                 println!(
-                    "[{}] [TP1] {} @ {:.2} | +{:.1}% | Sold {}/{} shares | PnL: {:+.2}",
-                    current_date, position.code, bar.close, current_gain_pct * 100.0,
-                    sell_shares, position.initial_shares, pnl
+                    "[{}] [TP1] {} @ {:.2} | +{:.1}% | Sold {} shares | Remaining {}/{} | PnL: {:+.2} | Total Asset: {:.2}",
+                    current_date,
+                    position.code,
+                    bar.close,
+                    current_gain_pct * 100.0,
+                    sell_shares,
+                    position.shares,
+                    position.initial_shares,
+                    pnl,
+                    running_total_asset
                 );
             }
         } else if position.take_profit_stage == 1 && current_gain_pct >= config.tp2_pct {
@@ -187,12 +220,20 @@ pub fn check_sell_conditions(
                 position.cost -= sell_cost;
                 position.realized_pnl += pnl;
                 position.take_profit_stage = 2;
+                running_total_asset -= commission + stamp_duty + slippage;
                 stats.record_costs(commission, stamp_duty, slippage);
 
                 println!(
-                    "[{}] [TP2] {} @ {:.2} | +{:.1}% | Sold {}/{} shares | PnL: {:+.2}",
-                    current_date, position.code, bar.close, current_gain_pct * 100.0,
-                    sell_shares, position.initial_shares, pnl
+                    "[{}] [TP2] {} @ {:.2} | +{:.1}% | Sold {} shares | Remaining {}/{} | PnL: {:+.2} | Total Asset: {:.2}",
+                    current_date,
+                    position.code,
+                    bar.close,
+                    current_gain_pct * 100.0,
+                    sell_shares,
+                    position.shares,
+                    position.initial_shares,
+                    pnl,
+                    running_total_asset
                 );
             }
         }
@@ -237,6 +278,7 @@ pub fn check_sell_conditions(
             let pnl_pct = pnl / total_initial_cost;
 
             portfolio.cash += net;
+            running_total_asset -= commission + stamp_duty + slippage;
             stats.record_trade(pnl, commission, stamp_duty, slippage);
 
             let stage_info = match position.take_profit_stage {
@@ -247,8 +289,16 @@ pub fn check_sell_conditions(
             };
 
             println!(
-                "[{}] [SELL] {} @ {:.2} | PnL: {:+.2}%{} | Hold: {} days | {}",
-                current_date, position.code, bar.close, pnl_pct * 100.0, stage_info, hold_days, exit_reason
+                "[{}] [SELL] {} @ {:.2} | PnL: {:+.2} ({:+.2}%){} | Hold: {} days | {} | Total Asset: {:.2}",
+                current_date,
+                position.code,
+                bar.close,
+                pnl,
+                pnl_pct * 100.0,
+                stage_info,
+                hold_days,
+                exit_reason,
+                running_total_asset
             );
 
             commands.entity(entity).insert(ClosedTrade {

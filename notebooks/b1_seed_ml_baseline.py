@@ -12,6 +12,7 @@ def _():
 
     from utils import (
         build_b1_research_frame,
+        calc_b1_factors_wmacd,
         describe_b1_feature_set,
         export_for_rust,
         get_st_blacklist_pl,
@@ -77,6 +78,7 @@ def _():
         TRAIN_WINDOW,
         USE_BULL_ONLY,
         build_b1_research_frame,
+        calc_b1_factors_wmacd,
         duckdb,
         export_for_rust,
         get_st_blacklist_pl,
@@ -473,13 +475,16 @@ def _(
     EXPORT_START_DATE,
     FEATURE_SET_NAME,
     LOOSE_PERIODS,
+    MV_MIN,
     SEED_COL,
     USE_BULL_ONLY,
     b1_train_meta,
+    calc_b1_factors_wmacd,
     df_all,
     df_scores_raw,
     export_for_rust,
     pl,
+    q_full,
 ):
     print("\n" + "=" * 72)
     print("  Step 5. 导出到 Rust")
@@ -489,11 +494,19 @@ def _(
         print("  结论: 当前没有分数可导出。")
     else:
         output_path = f"data/signals/b1_{SEED_COL}_{FEATURE_SET_NAME}_seed_signal_score.parquet"
+        # 导出底座必须保留完整后续行情，避免已持仓股票因研究过滤而在回测里丢失价格。
+        df_export_base = calc_b1_factors_wmacd(q_full, {"MV_THRESHOLD": MV_MIN})
+        df_signal_flags = df_all.select(["date", "code", SEED_COL]).lazy()
         df_export = (
-            df_all.lazy()
-            .with_columns(pl.col(SEED_COL).fill_null(False).alias("b1_signal"))
+            df_export_base
+            .join(df_signal_flags, on=["date", "code"], how="left")
             .join(df_scores_raw.lazy(), on=["date", "code"], how="left")
-            .with_columns(pl.col("score").fill_null(-999.0))
+            .with_columns(
+                [
+                    pl.col(SEED_COL).fill_null(False).alias("b1_signal"),
+                    pl.col("score").fill_null(-999.0),
+                ]
+            )
         )
         seed_signal_rows = df_all.filter(pl.col(SEED_COL)).height
         export_meta = {

@@ -2,6 +2,48 @@
 
 ## 2026-04-12
 
+### [Docs] B1 六窗对比已切换为修复后 ML 结果
+- 已基于修复后的 `notebooks/b1_seed_ml_baseline.py` 导出结果，回填最新六窗 `ML` 回测结论到:
+  - `experiments/b1-next-phase.md`
+  - `project-status.md`
+- 当前文档口径:
+  - 规则版列沿用上一轮已确认结果
+  - `ML` 列改为修复“持仓后续行情丢失”后的新结果
+  - 旧文档中 `ML` 的 `24%~29%` 大回撤数字不再引用
+- 当前结论更新为:
+  - `2022~2025` 的 `ML MDD` 已收敛至 `9%~10%`
+  - `2021` 全窗 `ML MDD` 为 `19.32%`
+  - `2026` 近端窗口为 `+0.57% / 8.60%`，且最大回撤尚未恢复
+
+### [B1] ML 导出底座已修复“持仓后续行情丢失”问题
+- 问题现象:
+  - `notebooks/b1_seed_ml_baseline.py` 之前直接用 `df_all` 导出 `signal.parquet`
+  - 而 `df_all` 会受 `MV_MIN / MV_MAX / MIN_LIST_DAYS` 研究过滤影响
+  - 导致已买入股票在后续日期若跌出研究 universe，会从导出 parquet 中直接消失
+- 当前修复:
+  - 导出底座改为 `calc_b1_factors_wmacd(q_full, {"MV_THRESHOLD": MV_MIN})`
+  - 再把 `df_all` 里的 `seed_mid/seed_strict` 信号与 `df_scores_raw.score` 左连接回完整行情底座
+  - 即:
+    - 行情与持仓估值使用完整后续价格
+    - 候选池限制仍然只由研究过滤后的 signal/score 决定
+- 当前目的:
+  - 防止已持仓股票因研究过滤而在 Rust 回测中丢失估值
+  - 避免 `Total Asset / update_stats / Max Drawdown` 被错误低估
+
+### [B1] `TP1 / TP2` 日志口径已改为显示剩余仓位
+- `backtest-engine/crates/b1/src/systems.rs` 当前已将分批止盈日志从 `Sold x/y shares` 调整为:
+  - `Sold N shares | Remaining M/Initial`
+- 目的:
+  - 明确 `TP1 / TP2` 是按初始仓位的固定三分之一分批卖出
+  - 避免把第二次 `TP2` 的 `1300/3900` 误读成“当前剩余仓位仍是 3900”
+
+### [B1] 交易日志已补充 `Total Asset` 与统一收益口径
+- 当前 `BUY / TP1 / TP2 / SELL / CLOSE` 日志都会输出成交后的 `Total Asset`
+- 当前全平仓类日志已统一显示:
+  - 绝对收益 `PnL`
+  - 百分比收益 `PnL%`
+- 当前 `EndOfBacktest` 强平行也会显式打印原因，避免把最后一条 `CLOSE` 误解成“尚未结算”
+
 ### [B1] 回测报告已补充最大回撤的峰值/谷底/恢复日期
 - 已在 `backtest-engine/crates/core/src/lib.rs` 扩展 `BacktestStats::update_drawdown()`:
   - 保持原有 `max_drawdown` 数值口径不变

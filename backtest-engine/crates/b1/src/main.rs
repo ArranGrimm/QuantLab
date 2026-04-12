@@ -449,6 +449,11 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
         }
     }
 
+    let mut running_total_asset = world.resource::<Portfolio>().cash;
+    for (_, position, exit_price) in &to_close {
+        running_total_asset += position.shares as f64 * exit_price;
+    }
+
     for (entity, position, exit_price) in to_close {
         let gross = position.shares as f64 * exit_price;
         let commission = gross * config.commission_rate;
@@ -462,6 +467,7 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
         let hold_days = (end_date - position.entry_date).num_days() as i32;
 
         world.resource_mut::<Portfolio>().cash += net;
+        running_total_asset -= commission + stamp_duty + slippage;
         {
             let mut stats = world.resource_mut::<BacktestStats>();
             stats.record_trade(pnl, commission, stamp_duty, slippage);
@@ -474,8 +480,15 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
             _ => "",
         };
         println!(
-            "[{}] [CLOSE] {} @ {:.2} | PnL: {:+.2}%{} | Hold: {} days",
-            end_date, position.code, exit_price, pnl_pct * 100.0, stage_info, hold_days
+            "[{}] [CLOSE] {} @ {:.2} | PnL: {:+.2} ({:+.2}%){} | Hold: {} days | EndOfBacktest | Total Asset: {:.2}",
+            end_date,
+            position.code,
+            exit_price,
+            pnl,
+            pnl_pct * 100.0,
+            stage_info,
+            hold_days,
+            running_total_asset
         );
 
         world.entity_mut(entity).insert(ClosedTrade {
