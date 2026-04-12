@@ -1,6 +1,74 @@
 # Progress
 
+## 2026-04-12
+
+### [B1] 回测报告已补充最大回撤的峰值/谷底/恢复日期
+- 已在 `backtest-engine/crates/core/src/lib.rs` 扩展 `BacktestStats::update_drawdown()`:
+  - 保持原有 `max_drawdown` 数值口径不变
+  - 新增记录 `max_drawdown` 对应的 `peak / trough / recovery` 日期
+- 当前 `bt-b1 / bt-rotation / bt-renko` 的 `update_stats()` 已统一透传 `current_date`
+- 当前输出已补充到:
+  - `report.txt`
+  - `report.json.metrics`
+- 当前默认仍**不**写入 `backtest.jsonl` registry，先保持 registry 结构稳定
+- 当前已验证:
+  - `cargo test --manifest-path /Users/zhangyubo/Projects/QuantLab/backtest-engine/Cargo.toml -p bt-core`
+  - `cargo check --manifest-path /Users/zhangyubo/Projects/QuantLab/backtest-engine/Cargo.toml -p bt-b1 -p bt-rotation -p bt-renko`
+
+### [B1] 六组规则版 vs ML 回测对比已收口为统一结论
+- 已将 `2021-06-21 / 2022-01-01 / 2023-01-01 / 2024-01-01 / 2025-01-01 / 2026-01-01` 六组起始日期的 `B1` 回测结果统一整理到:
+  - `experiments/b1-next-phase.md`
+  - `project-status.md`
+- 当前统一结论:
+  - `seed_mid + ML score` 在 `2021~2025` 五组窗口里均显著跑赢规则版，当前仍是 `B1` 主线
+  - 规则版更适合作为低回撤基线与 regime sanity check
+  - `2026-01-01` 超短窗口里规则版阶段性反超，说明 `ML` 当前更需要解决的是近端 regime 适应与回撤控制
+- 当前下一步优先级:
+  - 优先压 `ML` 回撤
+  - 观察近端 regime 失配
+  - 不再重复做“ML 是否优于规则版”的主结论验证
+
 ## 2026-04-10
+
+### [B1] 配置文件已收口为 rule / ml 两套
+- `backtest-engine/crates/b1` 当前仅保留:
+  - `config.toml`: 规则版默认配置，`sort_field = "rw_dif_pct"`
+  - `config_ml.toml`: ML 版默认配置，`sort_field = "score"`
+- 已清理旧命名:
+  - `config_wmacd.toml`
+  - `config_wmacd_ml.toml`
+- `scripts/b1_backtest.py` 当前已支持:
+  - 不传 `--config` 时，按 signal metadata 自动选择 `config.toml / config_ml.toml`
+  - 使用 `--start-date YYYY-MM-DD` 覆盖回测起始时间
+
+### [B1] `bt-b1` 已修复同日买入又同日卖出的 T+1 bug
+- 问题现象:
+  - `process_buy_signals()` 在开盘建仓后
+  - `check_sell_conditions()` 又在同日收盘对新仓执行 `TP1 / TP2 / 止损 / Weak / Trailing`
+  - 导致规则版与 ML 版都会出现“同日买入、同日卖出”的错误成交
+- 当前修复:
+  - `backtest-engine/crates/b1/src/systems.rs` 已增加 `hold_days <= 0` 直接跳过卖出逻辑
+  - 即当日新仓只允许留到下一交易日后，才进入任何卖出判断
+- 当前已补回归测试:
+  - `does_not_sell_on_entry_day_even_if_take_profit_hits`
+  - `can_take_profit_after_entry_day`
+- 当前已验证:
+  - `cargo test --manifest-path /Users/zhangyubo/Projects/QuantLab/backtest-engine/Cargo.toml -p bt-b1`
+
+### [B1] 规则版导出已接入 artifact，并与 ML 版显式区分
+- `notebooks/simple_b1_lab.py` 当前已改为通过 `artifact_metadata` 导出规则版 `B1`
+- 当前规则版导出约定:
+  - 不再额外写 `data/signals/...` alias parquet，`artifacts/b1/.../signals/.../signal.parquet` 为唯一真源
+  - `train_run_id / signal_source / model_name / feature_mode` 均显式标记为规则链
+  - 回测结果会继续落回对应的 `artifacts/b1/<train_run_id>/signals/<signal_id>/backtests/...`
+- `scripts/b1_backtest.py` 的交互选择列表当前已改为直接显示:
+  - `source`
+  - `model`
+  - `label`
+  - `feature_set`
+- 当前目标:
+  - 让规则版 `B1` 与 `seed + ML score` 版共用同一套回测入口
+  - 但在导出、选择、回测登记三个层面都能一眼区分
 
 ### [B1] Artifact 导出与选择式回测已接入第一版
 - `utils/signal_export.py::export_for_rust()` 当前已支持 `artifact_metadata`:

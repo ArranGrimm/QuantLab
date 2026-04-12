@@ -266,33 +266,37 @@
 - `notebooks/b1_ml_dedicated.py`: B1 专属模型 (仅 B1 信号日训练, 38 因子)
 - Rust `bt-b1` 回测引擎: 止损/止盈/弱势出场/追踪止损/WL 跌破
 
-### B1 排序方案对比 (2026-03-25)
+### B1 六窗规则版 vs ML 对比 (2026-04-12)
 
-| 排序方式 | 近期收益 (290天) | 长周期收益 (774天) | 最大回撤 |
+| 起始日期 | ML 收益 / 回撤 | 规则收益 / 回撤 | 结论 |
 |---|---|---|---|
-| 手搓 `rw_dif_pct` | +30.49% | **+81.05%** | ~9.3% |
-| **全市场 ML** | **+36.63%** | +78.36% | ~13% |
-| B1 专属 ML | +21.38% | +43.83% | ~8% |
+| `2021-06-21` | `+244.87% / 27.69%` | `+101.99% / 9.69%` | `ML` 明显更强 |
+| `2022-01-01` | `+221.67% / 28.68%` | `+84.73% / 9.90%` | `ML` 明显更强 |
+| `2023-01-01` | `+153.49% / 25.54%` | `+74.11% / 9.47%` | `ML` 明显更强 |
+| `2024-01-01` | `+183.73% / 27.23%` | `+33.80% / 9.17%` | `ML` 显著碾压 |
+| `2025-01-01` | `+98.09% / 24.63%` | `+30.49% / 9.27%` | `ML` 显著更强 |
+| `2026-01-01` | `+1.74% / 25.81%` | `+22.12% / 4.87%` | 规则版短窗反超 |
 
-### 当前最优方案
+### 当前主线判断
 
-**全市场 ML 模型排序** (`b1_ml_explore.py`):
-- 近期跑赢手搓 +6pp, 长周期基本持平
-- IC +0.1373, L/S +3.95% — 信号质量远强于 B1 专属模型
-- 回撤偏大 (13% vs 9%), 但整体收益更高
+- `seed_mid + ML score` 在 `2021~2025` 五组窗口里优势稳定，当前仍是 `B1` 主线。
+- 规则版 `B1` 当前更适合承担:
+  - 低回撤基线
+  - regime sanity check
+- `2026 Q1` 的短窗反超说明 `ML` 当前的主要问题不是缺少 alpha，而是近端 regime 适应能力与回撤控制。
 
 ### B1 后续方向
 
 1. **切回主线前先确认 regime**: `活跃市值` 继续手工判断, 当前不做自动化复刻
 2. **规则链保持独立**: `calc_b1_factors_wmacd -> export_for_rust -> bt-b1` 不再和 ML notebook 混写
-3. **ML 链改为 Lab / Train 拆分**:
+3. **ML 链继续按 `Lab / Train / Export` 拆分**:
    - `notebooks/b1_condition_mining.py`: 纯统计特征研究
    - `notebooks/b1_seed_ml_baseline.py`: 纯训练 / 评估 / 导出
-4. **降低回撤**: 若切回 `B1`, 再回头细调 `bt-b1` 出场逻辑 (止损比例、弱势天数、WL 跌破)
+4. **优先压 `ML` 回撤并增强近端适应性**: 当前优化重点应从“证明 ML 更强”转向“控制 `24%~29%` 回撤并减少短窗失配”
 
 ### B1 当前判断
 
-- `B1` 当前仍是可随市场 regime 升回主线的候选策略
+- `B1` 当前已回到明确可执行状态，且主线是 `规则链独立 + seed 内 ML 排序链`
 - 当前最稳的主链:
   - `calc_b1_factors_wmacd`
   - `export_for_rust`
@@ -307,6 +311,7 @@
   - 直接把 `B1` 主线切成“纯 B1 专属 ML”
 - 现阶段更推荐:
   - `规则链独立 + Seed 内 ML 排序链`
+  - 规则版保留为低回撤对照，而不是继续与主线争默认入口
 - 详细路线文档:
   - `experiments/b1-next-phase.md`
 
@@ -346,6 +351,16 @@
   - 当前训练入口已补齐重训进度打印，长时间运行时可直接观察 walk-forward 进度
   - 当前已接入 `artifacts/b1/<train_run_id>/...` 导出与 `signal.meta.json` 元数据
   - 当前可通过 `scripts/b1_backtest.py` / `backtest-engine/run_b1.bat` 交互式选择 signal 并回测
+- rule export / backtest:
+  - `notebooks/simple_b1_lab.py`
+  - 当前规则版导出也已接入 `artifacts/b1/<train_run_id>/...`
+  - 当前不再额外写 `data/signals/...` alias parquet，`artifacts/b1/.../signals/.../signal.parquet` 为唯一真源
+  - 当前通过 `train_run_id / signal_source=rule_wmacd / model_name=wmacd_rule / feature_mode=rule` 与 ML 版显式区分
+  - B1 配置当前已收口为 `config.toml`(rule) / `config_ml.toml`(ml)
+  - `scripts/b1_backtest.py` 的选择列表当前会直接显示 `source / model / label / feature_set`
+  - `scripts/b1_backtest.py` 当前在不传 `--config` 时会按 signal metadata 自动选择 rule/ml 默认配置，并支持 `--start-date` 覆盖起始时间
+  - `bt-b1` 当前已修复 A 股 `T+1` 约束缺失导致的“同日买入、同日 TP/SELL”错误，规则版与 ML 版共用该修复
+  - 当前回测报告已支持输出最大回撤对应的 `peak date / trough date / recovery date`，便于直接判断 drawdown 是否集中在近端 regime
 - 当前统一结论文档:
   - `experiments/b1-next-phase.md`
 

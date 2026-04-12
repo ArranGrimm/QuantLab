@@ -25,7 +25,7 @@ def _():
     START_DATE = "2019-01-01"
     END_DATE = "2026-03-31"
     ST_SNAPSHOT_DATE = "2026-03-31"
-    EXPORT_START_DATE = "2023-01-01"
+    EXPORT_START_DATE = "2021-06-16"
 
     MV_MIN = 40
     MV_MAX = 1500
@@ -473,8 +473,8 @@ def _(
     EXPORT_START_DATE,
     FEATURE_SET_NAME,
     LOOSE_PERIODS,
-    USE_BULL_ONLY,
     SEED_COL,
+    USE_BULL_ONLY,
     b1_train_meta,
     df_all,
     df_scores_raw,
@@ -522,7 +522,7 @@ def _(
         print(f"  导出完成: {export_file}")
         print("  Rust 回测命令:")
         print("  backtest-engine\\run_b1.bat")
-        print(f'  cargo run -p bt-b1 --release -- --data ../../{export_file} --config crates/b1/config_wmacd_ml.toml')
+        print(f'  cargo run -p bt-b1 --release -- --data ../../{export_file} --config crates/b1/config_ml.toml')
     return
 
 

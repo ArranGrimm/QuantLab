@@ -128,6 +128,10 @@ pub fn check_sell_conditions(
         position.update_high(bar.high);
 
         let hold_days = (current_date - position.entry_date).num_days() as i32;
+        // A 股 T+1: 当天开仓的仓位不允许在同日收盘触发任何卖出逻辑。
+        if hold_days <= 0 {
+            continue;
+        }
         let current_gain_pct = (bar.close - position.entry_price) / position.entry_price;
 
         // ── 激活移动止损 ──
@@ -286,5 +290,132 @@ pub fn update_stats(
     }
 
     let total_value = portfolio.total_value(positions_value);
-    stats.update_drawdown(total_value);
+    stats.update_drawdown(total_value, current_date);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy_app::{App, Update};
+    use chrono::NaiveDate;
+    use std::collections::HashMap;
+
+    fn build_market_data_for_day(
+        code: &str,
+        date: NaiveDate,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+    ) -> MarketData {
+        let mut by_date = HashMap::new();
+        by_date.insert(
+            date,
+            crate::resources::PriceBar {
+                open,
+                high,
+                low,
+                close,
+                pre_close: open,
+                wl: close * 0.95,
+                yl: close * 0.90,
+                b1_signal: true,
+                pre_b1_signal: true,
+                is_loose: true,
+                sort_value: 1.0,
+            },
+        );
+
+        let mut prices = HashMap::new();
+        prices.insert(code.to_string(), by_date);
+        MarketData { prices }
+    }
+
+    #[test]
+    fn does_not_sell_on_entry_day_even_if_take_profit_hits() {
+        let trade_date = NaiveDate::from_ymd_opt(2026, 1, 22).unwrap();
+        let mut app = App::new();
+        let mut portfolio = Portfolio::new(100_000.0);
+        portfolio.current_date = Some(trade_date);
+
+        app.insert_resource(BacktestConfig::default());
+        app.insert_resource(portfolio);
+        app.insert_resource(BacktestStats::default());
+        app.insert_resource(build_market_data_for_day(
+            "sh.603778",
+            trade_date,
+            14.73,
+            18.50,
+            14.50,
+            18.01,
+        ));
+        app.add_systems(Update, check_sell_conditions);
+        app.world_mut().spawn(Position {
+            code: "sh.603778".to_string(),
+            entry_date: trade_date,
+            entry_price: 14.73,
+            stop_price: 14.00,
+            shares: 2700,
+            initial_shares: 2700,
+            cost: 2700.0 * 14.73,
+            realized_pnl: 0.0,
+            take_profit_stage: 0,
+            high_since_entry: 14.73,
+            trailing_stop_active: false,
+        });
+
+        app.update();
+
+        let world = app.world_mut();
+        let mut query = world.query::<&Position>();
+        let positions: Vec<Position> = query.iter(world).cloned().collect();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].shares, 2700);
+        assert_eq!(positions[0].take_profit_stage, 0);
+        assert_eq!(world.resource::<BacktestStats>().total_trades, 0);
+    }
+
+    #[test]
+    fn can_take_profit_after_entry_day() {
+        let entry_date = NaiveDate::from_ymd_opt(2026, 1, 21).unwrap();
+        let trade_date = NaiveDate::from_ymd_opt(2026, 1, 22).unwrap();
+        let mut app = App::new();
+        let mut portfolio = Portfolio::new(100_000.0);
+        portfolio.current_date = Some(trade_date);
+
+        app.insert_resource(BacktestConfig::default());
+        app.insert_resource(portfolio);
+        app.insert_resource(BacktestStats::default());
+        app.insert_resource(build_market_data_for_day(
+            "sh.603778",
+            trade_date,
+            14.73,
+            18.50,
+            14.50,
+            18.01,
+        ));
+        app.add_systems(Update, check_sell_conditions);
+        app.world_mut().spawn(Position {
+            code: "sh.603778".to_string(),
+            entry_date,
+            entry_price: 14.73,
+            stop_price: 14.00,
+            shares: 2700,
+            initial_shares: 2700,
+            cost: 2700.0 * 14.73,
+            realized_pnl: 0.0,
+            take_profit_stage: 0,
+            high_since_entry: 14.73,
+            trailing_stop_active: false,
+        });
+
+        app.update();
+
+        let world = app.world_mut();
+        let mut query = world.query::<&Position>();
+        let positions: Vec<Position> = query.iter(world).cloned().collect();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].shares, 1800);
+        assert_eq!(positions[0].take_profit_stage, 1);
+    }
 }

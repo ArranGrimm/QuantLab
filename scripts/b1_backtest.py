@@ -16,7 +16,8 @@ except ImportError:  # pragma: no cover
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT_ROOT = ROOT / "artifacts" / "b1"
 BACKTEST_ENGINE_DIR = ROOT / "backtest-engine"
-DEFAULT_CONFIG = ROOT / "backtest-engine" / "crates" / "b1" / "config.toml"
+DEFAULT_RULE_CONFIG = ROOT / "backtest-engine" / "crates" / "b1" / "config.toml"
+DEFAULT_ML_CONFIG = ROOT / "backtest-engine" / "crates" / "b1" / "config_ml.toml"
 
 
 def timestamp_ms_token() -> str:
@@ -159,6 +160,26 @@ def choose_index(items: list[str], title: str) -> int:
         print("无效输入，请重试。")
 
 
+def describe_b1_meta(meta: dict) -> str:
+    source = meta.get("signal_source") or meta.get("seed_col") or "na"
+    model_name = meta.get("model_name") or "na"
+    label = meta.get("label") or "na"
+    feature_set_name = meta.get("feature_set_name") or meta.get("feature_mode") or "na"
+    return (
+        f"source={source}, model={model_name}, "
+        f"label={label}, feature_set={feature_set_name}"
+    )
+
+
+def resolve_default_config_for_meta(meta: dict) -> Path:
+    is_rule_signal = (
+        meta.get("feature_mode") == "rule"
+        or meta.get("signal_source") == "rule_wmacd"
+        or meta.get("model_name") == "wmacd_rule"
+    )
+    return DEFAULT_RULE_CONFIG if is_rule_signal else DEFAULT_ML_CONFIG
+
+
 def pick_train_run() -> Path:
     train_dirs = sorted(
         [p for p in ARTIFACT_ROOT.iterdir() if p.is_dir() and (p / "signals.jsonl").exists()],
@@ -171,7 +192,11 @@ def pick_train_run() -> Path:
     display = []
     for train_dir in train_dirs:
         signals = read_jsonl(train_dir / "signals.jsonl")
-        display.append(f"{train_dir.name}  ({len(signals)} signals)")
+        train_meta_path = train_dir / "train.meta.json"
+        train_meta = read_json(train_meta_path) if train_meta_path.exists() else {}
+        display.append(
+            f"{train_dir.name}  ({describe_b1_meta(train_meta)}, signals={len(signals)})"
+        )
     return train_dirs[choose_index(display, "选择 B1 train run")]
 
 
@@ -186,13 +211,8 @@ def pick_signal_meta(train_dir: Path) -> Path:
     resolved_meta_paths = []
     for row in rows:
         signal_id = row.get("signal_id", "unknown")
-        label = row.get("label", "na")
-        seed_col = row.get("seed_col", "na")
-        feature_set_name = row.get("feature_set_name", "na")
         signal_meta_path = train_dir / row["signal_meta_path"]
-        display.append(
-            f"{signal_id}  (seed={seed_col}, label={label}, feature_set={feature_set_name})"
-        )
+        display.append(f"{signal_id}  ({describe_b1_meta(row)})")
         resolved_meta_paths.append(signal_meta_path.resolve())
     return resolved_meta_paths[choose_index(display, f"选择 signal ({train_dir.name})")]
 
@@ -252,9 +272,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="B1 signal backtest helper")
     parser.add_argument("signal", nargs="?", help="signal.meta.json / signal.parquet / signal directory")
     parser.add_argument("--pick", action="store_true", help="交互式选择 train run 和 signal")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="B1 config.toml 路径")
+    parser.add_argument(
+        "--config",
+        help="B1 config.toml 路径；不传时根据 signal 自动选择 rule=config.toml / ml=config_ml.toml",
+    )
     parser.add_argument("--debug", action="store_true", help="使用 debug 构建而非 release")
-    parser.add_argument("--start-date", help="覆盖 backtest.start_date")
+    parser.add_argument("--start-date", help="覆盖 backtest.start_date，例如 2025-01-05")
     parser.add_argument("--end-date", help="覆盖 backtest.end_date")
     parser.add_argument("--max-hold-days", type=int, help="覆盖 backtest.max_hold_days")
     parser.add_argument("--max-daily-buys", type=int, help="覆盖 backtest.max_daily_buys")
@@ -266,12 +289,6 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    config_path = Path(args.config).expanduser()
-    if not config_path.is_absolute():
-        config_path = (ROOT / config_path).resolve()
-    else:
-        config_path = config_path.resolve()
-
     if args.sort_ascending is not None:
         args.sort_ascending = args.sort_ascending == "true"
 
@@ -281,6 +298,16 @@ def main() -> int:
         train_dir = pick_train_run()
         signal_meta_path = pick_signal_meta(train_dir)
         signal_meta_path, signal_parquet_path = resolve_signal_input(str(signal_meta_path))
+
+    signal_meta = read_json(signal_meta_path)
+    if args.config:
+        config_path = Path(args.config).expanduser()
+        if not config_path.is_absolute():
+            config_path = (ROOT / config_path).resolve()
+        else:
+            config_path = config_path.resolve()
+    else:
+        config_path = resolve_default_config_for_meta(signal_meta)
 
     config_overrides = build_b1_config_overrides(args)
 

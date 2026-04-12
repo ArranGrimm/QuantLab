@@ -88,6 +88,11 @@ pub struct BacktestStats {
     pub total_pnl: f64,
     pub max_drawdown: f64,
     pub peak_value: f64,
+    pub peak_date: Option<NaiveDate>,
+    pub max_drawdown_peak_value: Option<f64>,
+    pub max_drawdown_peak_date: Option<NaiveDate>,
+    pub max_drawdown_trough_date: Option<NaiveDate>,
+    pub max_drawdown_recovery_date: Option<NaiveDate>,
     pub total_commission: f64,
     pub total_stamp_duty: f64,
     pub total_slippage: f64,
@@ -136,17 +141,36 @@ impl BacktestStats {
     }
 
     /// 更新最大回撤
-    pub fn update_drawdown(&mut self, total_value: f64) {
+    pub fn update_drawdown(&mut self, total_value: f64, as_of: NaiveDate) {
         if total_value > self.peak_value {
             self.peak_value = total_value;
+            self.peak_date = Some(as_of);
         }
+
+        if self.max_drawdown_recovery_date.is_none()
+            && self
+                .max_drawdown_peak_value
+                .is_some_and(|peak_value| total_value >= peak_value)
+        {
+            self.max_drawdown_recovery_date = Some(as_of);
+        }
+
         if self.peak_value > 0.0 {
             let drawdown = (self.peak_value - total_value) / self.peak_value;
             if drawdown > self.max_drawdown {
                 self.max_drawdown = drawdown;
+                self.max_drawdown_peak_value = Some(self.peak_value);
+                self.max_drawdown_peak_date = self.peak_date;
+                self.max_drawdown_trough_date = Some(as_of);
+                self.max_drawdown_recovery_date = None;
             }
         }
     }
+}
+
+fn format_date_or_na(date: Option<NaiveDate>) -> String {
+    date.map(|d| d.to_string())
+        .unwrap_or_else(|| "N/A".to_string())
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -263,6 +287,24 @@ pub fn format_results(stats: &BacktestStats, portfolio: &Portfolio, trading_days
     writeln!(s, "Final Portfolio:   {:.2}", portfolio.cash).unwrap();
     writeln!(s, "Total Return:     {:+.2}%", total_return).unwrap();
     writeln!(s, "Max Drawdown:     {:.2}%", stats.max_drawdown * 100.0).unwrap();
+    writeln!(
+        s,
+        "Drawdown Peak:    {}",
+        format_date_or_na(stats.max_drawdown_peak_date)
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Drawdown Trough:  {}",
+        format_date_or_na(stats.max_drawdown_trough_date)
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Drawdown Recovery: {}",
+        format_date_or_na(stats.max_drawdown_recovery_date)
+    )
+    .unwrap();
     writeln!(s).unwrap();
     writeln!(s, "--- Trading Costs ---").unwrap();
     writeln!(s, "Commission:       {:.2}", stats.total_commission).unwrap();
@@ -308,6 +350,9 @@ pub fn build_metrics_json(
         "final_portfolio": portfolio.cash,
         "total_return_pct": derived.total_return_pct,
         "max_drawdown_pct": stats.max_drawdown * 100.0,
+        "drawdown_peak_date": stats.max_drawdown_peak_date.map(|d| d.to_string()),
+        "drawdown_trough_date": stats.max_drawdown_trough_date.map(|d| d.to_string()),
+        "drawdown_recovery_date": stats.max_drawdown_recovery_date.map(|d| d.to_string()),
         "gross_pnl": derived.gross_pnl,
         "gross_return_pct": derived.gross_return_pct,
         "total_commission": stats.total_commission,
@@ -333,6 +378,18 @@ pub fn print_results(stats: &BacktestStats, portfolio: &Portfolio) {
         (portfolio.cash / portfolio.initial_capital - 1.0) * 100.0
     );
     println!("Max Drawdown: {:.2}%", stats.max_drawdown * 100.0);
+    println!(
+        "Drawdown Peak: {}",
+        format_date_or_na(stats.max_drawdown_peak_date)
+    );
+    println!(
+        "Drawdown Trough: {}",
+        format_date_or_na(stats.max_drawdown_trough_date)
+    );
+    println!(
+        "Drawdown Recovery: {}",
+        format_date_or_na(stats.max_drawdown_recovery_date)
+    );
     println!("----------------------------------------");
     println!("Trading Costs:");
     println!("  Commission: {:.2}", stats.total_commission);
@@ -657,4 +714,52 @@ pub fn write_report_bundle(
     println!("\n📄 Report saved: {}", txt_path.display());
     println!("🧾 Report JSON saved: {}", json_path.display());
     Ok(ReportBundlePaths { txt_path, json_path })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drawdown_recovery_stays_empty_until_recovered() {
+        let mut stats = BacktestStats::default();
+
+        stats.update_drawdown(100.0, NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());
+        stats.update_drawdown(80.0, NaiveDate::from_ymd_opt(2026, 1, 2).unwrap());
+        stats.update_drawdown(90.0, NaiveDate::from_ymd_opt(2026, 1, 3).unwrap());
+
+        assert!((stats.max_drawdown - 0.2).abs() < 1e-9);
+        assert_eq!(
+            stats.max_drawdown_peak_date,
+            NaiveDate::from_ymd_opt(2026, 1, 1)
+        );
+        assert_eq!(
+            stats.max_drawdown_trough_date,
+            NaiveDate::from_ymd_opt(2026, 1, 2)
+        );
+        assert_eq!(stats.max_drawdown_recovery_date, None);
+    }
+
+    #[test]
+    fn drawdown_dates_update_after_recovery() {
+        let mut stats = BacktestStats::default();
+
+        stats.update_drawdown(100.0, NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());
+        stats.update_drawdown(80.0, NaiveDate::from_ymd_opt(2026, 1, 2).unwrap());
+        stats.update_drawdown(101.0, NaiveDate::from_ymd_opt(2026, 1, 3).unwrap());
+
+        assert!((stats.max_drawdown - 0.2).abs() < 1e-9);
+        assert_eq!(
+            stats.max_drawdown_peak_date,
+            NaiveDate::from_ymd_opt(2026, 1, 1)
+        );
+        assert_eq!(
+            stats.max_drawdown_trough_date,
+            NaiveDate::from_ymd_opt(2026, 1, 2)
+        );
+        assert_eq!(
+            stats.max_drawdown_recovery_date,
+            NaiveDate::from_ymd_opt(2026, 1, 3)
+        );
+    }
 }

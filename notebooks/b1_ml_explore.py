@@ -589,8 +589,7 @@ def _(calc_b1_factors_wmacd, df_scores_raw, export_for_rust, pl, q_full):
             extra_sort_cols=["score"],
         )
         print(f"\n   🎯 Rust 回测命令:")
-        print(f'   cargo run -p bt-b1 --release -- --data ../../{output_path} --config crates/b1/config_wmacd.toml')
-        print(f'   (记得把 config 里 sort_field 改为 "score", sort_ascending = false)')
+        print(f'   cargo run -p bt-b1 --release -- --data ../../{output_path} --config crates/b1/config_ml.toml')
 
     run_export()
     return

@@ -231,5 +231,5 @@ pub fn update_stats(
     }
 
     let total_value = portfolio.total_value(positions_value);
-    stats.update_drawdown(total_value);
+    stats.update_drawdown(total_value, current_date);
 }
