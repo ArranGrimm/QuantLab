@@ -461,32 +461,34 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
         let slippage = gross * config.slippage_pct;
         let net = gross - commission - stamp_duty - slippage;
 
-        let pnl = (net - position.cost) + position.realized_pnl;
+        let exit_pnl = net - position.cost;
+        let trade_pnl = exit_pnl + position.realized_pnl;
         let total_initial_cost = position.initial_shares as f64 * position.entry_price;
-        let pnl_pct = pnl / total_initial_cost;
+        let trade_pnl_pct = trade_pnl / total_initial_cost;
         let hold_days = (end_date - position.entry_date).num_days() as i32;
 
         world.resource_mut::<Portfolio>().cash += net;
         running_total_asset -= commission + stamp_duty + slippage;
         {
             let mut stats = world.resource_mut::<BacktestStats>();
-            stats.record_trade(pnl, commission, stamp_duty, slippage);
+            stats.record_trade(trade_pnl, commission, stamp_duty, slippage);
         }
 
-        let stage_info = match position.take_profit_stage {
-            0 => "",
-            1 => " (TP1)",
-            2 => " (TP2)",
-            _ => "",
+        let stage_label = match position.take_profit_stage {
+            0 => "None",
+            1 => "TP1",
+            2 => "TP2",
+            _ => "Unknown",
         };
         println!(
-            "[{}] [CLOSE] {} @ {:.2} | PnL: {:+.2} ({:+.2}%){} | Hold: {} days | EndOfBacktest | Total Asset: {:.2}",
+            "[{}] [CLOSE] {} @ {:.2} | ExitPnL: {:+.2} | TradePnL: {:+.2} ({:+.2}%) | Stage: {} | Hold: {}d | EndOfBacktest | Asset: {:.2}",
             end_date,
             position.code,
             exit_price,
-            pnl,
-            pnl_pct * 100.0,
-            stage_info,
+            exit_pnl,
+            trade_pnl,
+            trade_pnl_pct * 100.0,
+            stage_label,
             hold_days,
             running_total_asset
         );
@@ -498,8 +500,8 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
             entry_price: position.entry_price,
             exit_price,
             shares: position.initial_shares,
-            pnl,
-            pnl_pct,
+            pnl: trade_pnl,
+            pnl_pct: trade_pnl_pct,
             hold_days,
             exit_reason: ExitReason::EndOfBacktest,
         });

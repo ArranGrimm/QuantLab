@@ -364,6 +364,7 @@
   - `scripts/b1_backtest.py` 的选择列表当前会直接显示 `source / model / label / feature_set`
   - `scripts/b1_backtest.py` 当前在不传 `--config` 时会按 signal metadata 自动选择 rule/ml 默认配置，并支持 `--start-date` 覆盖起始时间
   - `bt-b1` 当前已修复 A 股 `T+1` 约束缺失导致的“同日买入、同日 TP/SELL”错误，规则版与 ML 版共用该修复
+- `bt-b1` 当前最终平仓日志已拆分 `ExitPnL`(本次清仓收益) 与 `TradePnL`(整笔累计收益)，并显式输出 `Stage: None/TP1/TP2`
   - 当前回测报告已支持输出最大回撤对应的 `peak date / trough date / recovery date`，便于直接判断 drawdown 是否集中在近端 regime
 - 当前统一结论文档:
   - `experiments/b1-next-phase.md`

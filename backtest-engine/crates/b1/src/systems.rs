@@ -273,29 +273,31 @@ pub fn check_sell_conditions(
             let slippage = gross * config.slippage_pct;
             let net = gross - commission - stamp_duty - slippage;
 
-            let pnl = net - position.cost + position.realized_pnl;
+            let exit_pnl = net - position.cost;
+            let trade_pnl = exit_pnl + position.realized_pnl;
             let total_initial_cost = position.initial_shares as f64 * position.entry_price;
-            let pnl_pct = pnl / total_initial_cost;
+            let trade_pnl_pct = trade_pnl / total_initial_cost;
 
             portfolio.cash += net;
             running_total_asset -= commission + stamp_duty + slippage;
-            stats.record_trade(pnl, commission, stamp_duty, slippage);
+            stats.record_trade(trade_pnl, commission, stamp_duty, slippage);
 
-            let stage_info = match position.take_profit_stage {
-                0 => "",
-                1 => " (TP1)",
-                2 => " (TP2)",
-                _ => "",
+            let stage_label = match position.take_profit_stage {
+                0 => "None",
+                1 => "TP1",
+                2 => "TP2",
+                _ => "Unknown",
             };
 
             println!(
-                "[{}] [SELL] {} @ {:.2} | PnL: {:+.2} ({:+.2}%){} | Hold: {} days | {} | Total Asset: {:.2}",
+                "[{}] [SELL] {} @ {:.2} | ExitPnL: {:+.2} | TradePnL: {:+.2} ({:+.2}%) | Stage: {} | Hold: {}d | {} | Asset: {:.2}",
                 current_date,
                 position.code,
                 bar.close,
-                pnl,
-                pnl_pct * 100.0,
-                stage_info,
+                exit_pnl,
+                trade_pnl,
+                trade_pnl_pct * 100.0,
+                stage_label,
                 hold_days,
                 exit_reason,
                 running_total_asset
@@ -308,8 +310,8 @@ pub fn check_sell_conditions(
                 entry_price: position.entry_price,
                 exit_price: bar.close,
                 shares: position.initial_shares,
-                pnl,
-                pnl_pct,
+                pnl: trade_pnl,
+                pnl_pct: trade_pnl_pct,
                 hold_days,
                 exit_reason,
             });

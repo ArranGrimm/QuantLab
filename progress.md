@@ -2,6 +2,15 @@
 
 ## 2026-04-12
 
+### [B1] `SELL / CLOSE` 日志已拆分清仓收益与整笔收益
+- `backtest-engine/crates/b1/src/systems.rs` 与 `backtest-engine/crates/b1/src/main.rs` 当前已将最终平仓日志改为同时显示:
+  - `ExitPnL`: 本次清仓这最后一腿的收益
+  - `TradePnL`: 该标的从建仓到结束的累计总收益
+- 当前日志也把原来的裸 `TP1 / TP2` 标记改成了 `Stage: None/TP1/TP2`
+- 目的:
+  - 避免把最终 `[SELL]` / `[CLOSE]` 行里的收益误读为“只代表最后一次卖出”
+  - 让分批止盈后的最终清仓日志更直观可读
+
 ### [Docs] B1 六窗对比已切换为修复后 ML 结果
 - 已基于修复后的 `notebooks/b1_seed_ml_baseline.py` 导出结果，回填最新六窗 `ML` 回测结论到:
   - `experiments/b1-next-phase.md`
