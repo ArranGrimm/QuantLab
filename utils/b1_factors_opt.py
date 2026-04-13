@@ -414,9 +414,9 @@ def calc_b1_factors_wmacd(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame
 
     # --- 周线级别预计算 ---
     df_weekly = (
-        df_with_time.sort(["code", "date"])
+        df_with_time
         .group_by(["code", "week_start"])
-        .agg(pl.col("close_adj").last().alias("weekly_close"))
+        .agg(pl.col("close_adj").sort_by("date").last().alias("weekly_close"))
         .sort(["code", "week_start"])
         .with_columns([
             pl.col("weekly_close").ewm_mean(span=12, adjust=False).over("code").alias("w_ema12"),
@@ -468,9 +468,9 @@ def calc_b1_factors_wmacd(df: pl.LazyFrame, config: dict = None) -> pl.LazyFrame
 
     # --- 月线级别预计算 ---
     df_monthly = (
-        df_with_time.sort(["code", "date"])
+        df_with_time
         .group_by(["code", "month_start"])
-        .agg(pl.col("close_adj").last().alias("monthly_close"))
+        .agg(pl.col("close_adj").sort_by("date").last().alias("monthly_close"))
         .sort(["code", "month_start"])
         .with_columns([
             pl.col("monthly_close").ewm_mean(span=12, adjust=False).over("code").alias("m_ema12"),

@@ -60,13 +60,13 @@ B1_SELECTED_FEATURE_COLS: list[str] = [
     "rm_hist",
     "range_pct",
     "vol_shrink_20",
-    "retrace_ratio_20",
     "vol_to_avg40",
-    "close_pos_in_bar",
     "body_pct",
     "vol_shrink_40",
     "rw_hist_delta_5",
     "rm_hist_delta_5",
+    "close_above_yl_pct_5",
+    "bad_k_count",
 ]
 
 B1_FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
@@ -181,9 +181,41 @@ def build_b1_research_frame(
     future_high_names = [f"_fwd_high_{step}" for step in range(1, label_horizon + 1)]
     future_low_names = [f"_fwd_low_{step}" for step in range(1, label_horizon + 1)]
 
-    return (
+    # ── Phase A: 在全量数据上计算前瞻标签 ────────────────────────────
+    # 标签必须在 market_cap / _list_days 过滤之前计算，否则边界股票
+    # 过滤后剩余行不连续，shift(-step) 会跳到多年之后，产生错误标签，
+    # 且标签 null/non-null 状态随 END_DATE 变化，导致不可复现。
+    df_with_labels = (
         calc_b1_factors_wmacd(q_full, {"MV_THRESHOLD": mv_min})
         .with_columns(pl.col("date").cum_count().over("code").alias("_list_days"))
+        .with_columns(
+            future_high_cols
+            + future_low_cols
+            + [
+                (pl.col("close_adj").shift(-1).over("code") / pl.col("close_adj") - 1).alias("fwd_ret_1d"),
+                (pl.col("close_adj").shift(-2).over("code") / pl.col("close_adj") - 1).alias("fwd_ret_2d"),
+                (pl.col("close_adj").shift(-3).over("code") / pl.col("close_adj") - 1).alias("fwd_ret_3d"),
+                (pl.col("close_adj").shift(-5).over("code") / pl.col("close_adj") - 1).alias("fwd_ret_5d"),
+            ]
+        )
+        .with_columns(
+            [
+                (pl.max_horizontal(future_high_names) / pl.col("close_adj") - 1).alias("fwd_mfe_10d"),
+                (pl.min_horizontal(future_low_names) / pl.col("close_adj") - 1).alias("fwd_mae_10d"),
+                (pl.col("close_adj").shift(-10).over("code") / pl.col("close_adj") - 1).alias("fwd_ret_10d"),
+            ]
+        )
+        .with_columns(
+            [
+                (pl.col("fwd_mfe_10d") + pl.col("fwd_mae_10d")).alias("fwd_net_10d"),
+                (pl.col("fwd_mfe_10d") / (1 + pl.col("fwd_mae_10d").abs())).alias("fwd_mfe_risk_adj_10d"),
+            ]
+        )
+    )
+
+    # ── Phase B: 过滤宇宙 + 计算特征 ─────────────────────────────────
+    return (
+        df_with_labels
         .filter(
             (pl.col("_list_days") >= min_list_days)
             & (pl.col("market_cap_100m") >= mv_min)
@@ -218,8 +250,6 @@ def build_b1_research_frame(
                 pl.col("high_adj").rolling_max(20).over("code").alias("_peak_20"),
                 pl.col("low_adj").rolling_min(20).over("code").alias("_trough_20"),
             ]
-            + future_high_cols
-            + future_low_cols
         )
         .with_columns(
             [
@@ -235,6 +265,14 @@ def build_b1_research_frame(
                     & (pl.col("close_adj") > pl.col("YL"))
                     & pl.col("TRIGGER")
                 ).alias("seed_strict"),
+                (
+                    (pl.col("J") <= seed_j_max)
+                    & (pl.col("WL") > pl.col("YL"))
+                    & (pl.col("close_adj") > pl.col("YL"))
+                    & pl.col("TRIGGER")
+                    & pl.col("GOOD28")
+                    & pl.col("MAX28_OK")
+                ).alias("seed_strict_v2"),
                 (pl.col("volume") / pl.max_horizontal(pl.col("_vol_max_20"), pl.lit(1.0))).alias("vol_shrink_20"),
                 (pl.col("volume") / pl.max_horizontal(pl.col("_vol_max_40"), pl.lit(1.0))).alias("vol_shrink_40"),
                 (pl.col("_vol_yang_20") / pl.max_horizontal(pl.col("_vol_yin_20"), pl.lit(1.0))).alias(
@@ -256,9 +294,6 @@ def build_b1_research_frame(
                     / pl.max_horizontal(pl.col("_peak_20") - pl.col("_trough_20"), pl.lit(1e-8))
                 ).alias("retrace_ratio_20"),
                 (pl.col("date") - pl.col("_last_key_k_date")).dt.total_days().alias("days_since_key_k"),
-                (pl.col("close_adj").shift(-1).over("code") / pl.col("close_adj") - 1).alias("fwd_ret_1d"),
-                (pl.max_horizontal(future_high_names) / pl.col("close_adj") - 1).alias("fwd_mfe_10d"),
-                (pl.min_horizontal(future_low_names) / pl.col("close_adj") - 1).alias("fwd_mae_10d"),
             ]
         )
         .with_columns(
@@ -298,9 +333,6 @@ def build_b1_research_frame(
                 (pl.col("close_adj").gt(pl.col("WL")).cast(pl.Float64).rolling_mean(5).over("code")).alias(
                     "close_above_wl_pct_5"
                 ),
-                (pl.col("close_adj").shift(-2).over("code") / pl.col("close_adj") - 1).alias("fwd_ret_2d"),
-                (pl.col("close_adj").shift(-3).over("code") / pl.col("close_adj") - 1).alias("fwd_ret_3d"),
-                (pl.col("close_adj").shift(-5).over("code") / pl.col("close_adj") - 1).alias("fwd_ret_5d"),
             ]
         )
         .select(
@@ -339,14 +371,18 @@ def build_b1_research_frame(
                         "seed_loose",
                         "seed_mid",
                         "seed_strict",
+                        "seed_strict_v2",
                         "is_manual_bull",
                         *B1_MINING_FEATURE_COLS,
                         "fwd_ret_1d",
                         "fwd_ret_2d",
                         "fwd_ret_3d",
                         "fwd_ret_5d",
+                        "fwd_ret_10d",
                         "fwd_mfe_10d",
                         "fwd_mae_10d",
+                        "fwd_net_10d",
+                        "fwd_mfe_risk_adj_10d",
                     ]
                 )
             )

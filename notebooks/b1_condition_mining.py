@@ -30,7 +30,7 @@ def _():
 
     DB_PATH = r"../QuantData/Ashare/qmt_data.duckdb"
     START_DATE = "2019-01-01"
-    END_DATE = "2026-03-31"
+    END_DATE = "2026-12-31"
     ST_SNAPSHOT_DATE = "2026-03-31"
 
     MV_MIN = 40
@@ -38,10 +38,21 @@ def _():
     MIN_LIST_DAYS = 60
     SEED_J_MAX = 20.0
 
-    ACTIVE_SEED_COL = "seed_mid"
+    ACTIVE_SEED_COL = "seed_strict"
     USE_BULL_ONLY = True
     LABEL_COL = "fwd_mfe_10d"
-    POSITIVE_MFE_THRESHOLD = 0.08
+    POSITIVE_LABEL_THRESHOLDS: dict[str, float] = {
+        "fwd_mfe_10d": 0.08,
+        "fwd_mae_10d": -0.03,
+        "fwd_net_10d": 0.05,
+        "fwd_mfe_risk_adj_10d": 0.07,
+        "fwd_ret_10d": 0.07,
+        "fwd_ret_5d": 0.05,
+        "fwd_ret_3d": 0.04,
+        "fwd_ret_2d": 0.003,
+        "fwd_ret_1d": 0.002,
+    }
+    POSITIVE_LABEL_THRESHOLD = POSITIVE_LABEL_THRESHOLDS.get(LABEL_COL, 0.05)
     N_BINS = 5
     MIN_DAILY_SAMPLES = 30
     REVIEW_FEATURE = "range_pct"
@@ -87,7 +98,7 @@ def _():
         MV_MAX,
         MV_MIN,
         N_BINS,
-        POSITIVE_MFE_THRESHOLD,
+        POSITIVE_LABEL_THRESHOLD,
         REVIEW_FEATURE,
         RUN_CORR_DIAGNOSTICS,
         SEED_J_MAX,
@@ -476,8 +487,8 @@ def _(
 
 
 @app.cell
-def _(POSITIVE_MFE_THRESHOLD, build_seed_summary, df_all):
-    seed_summary = build_seed_summary(df_all, POSITIVE_MFE_THRESHOLD)
+def _(build_seed_summary, df_all):
+    seed_summary = build_seed_summary(df_all, 0.08)
     print("\n" + "=" * 72)
     print("  Step 3. Seed Pool 概览")
     print("=" * 72)
@@ -489,7 +500,7 @@ def _(POSITIVE_MFE_THRESHOLD, build_seed_summary, df_all):
 def _(
     ACTIVE_SEED_COL,
     LABEL_COL,
-    POSITIVE_MFE_THRESHOLD,
+    POSITIVE_LABEL_THRESHOLD,
     USE_BULL_ONLY,
     available_analysis_feature_cols,
     available_train_feature_cols,
@@ -511,8 +522,8 @@ def _(
             {"item": "codes", "value": str(df_lab["code"].n_unique()) if df_lab.height else "0"},
             {"item": "label_mean", "value": f"{float(df_lab[LABEL_COL].mean()):+.4f}" if df_lab.height else "0.0000"},
             {
-                "item": "positive_rate",
-                "value": f"{float((df_lab[LABEL_COL] >= POSITIVE_MFE_THRESHOLD).mean()):.2%}" if df_lab.height else "0.00%",
+                "item": f"positive_rate (>= {POSITIVE_LABEL_THRESHOLD:.2%})",
+                "value": f"{float((df_lab[LABEL_COL] >= POSITIVE_LABEL_THRESHOLD).mean()):.2%}" if df_lab.height else "0.00%",
             },
             {"item": "analysis_feature_count", "value": str(len(available_analysis_feature_cols))},
             {"item": "train_feature_count", "value": str(len(available_train_feature_cols))},
@@ -572,7 +583,7 @@ def _(
 def _(
     LABEL_COL,
     N_BINS,
-    POSITIVE_MFE_THRESHOLD,
+    POSITIVE_LABEL_THRESHOLD,
     available_analysis_feature_cols,
     build_bin_scoreboard,
     df_lab,
@@ -581,7 +592,7 @@ def _(
         df_lab,
         available_analysis_feature_cols,
         LABEL_COL,
-        POSITIVE_MFE_THRESHOLD,
+        POSITIVE_LABEL_THRESHOLD,
         N_BINS,
     )
     print("\n" + "=" * 72)
@@ -595,7 +606,7 @@ def _(
 def _(
     LABEL_COL,
     N_BINS,
-    POSITIVE_MFE_THRESHOLD,
+    POSITIVE_LABEL_THRESHOLD,
     REVIEW_FEATURE,
     available_analysis_feature_cols,
     bin_scoreboard,
@@ -610,7 +621,7 @@ def _(
         df_lab,
         review_feature,
         LABEL_COL,
-        POSITIVE_MFE_THRESHOLD,
+        POSITIVE_LABEL_THRESHOLD,
         N_BINS,
     )
 
@@ -728,14 +739,13 @@ def _(
         print(f"  keep: {corr_keep_cols}")
         print(f"  drop: {corr_drop_cols}")
         print(corr_decisions)
-    return corr_drop_cols, corr_keep_cols
+    return (corr_drop_cols,)
 
 
 @app.cell
 def _(
     available_train_feature_cols,
     corr_drop_cols,
-    corr_keep_cols,
     frozen_train_ic,
     group_summary,
     ic_summary,
@@ -811,7 +821,7 @@ def _(
     print(frozen_train_ic)
     print("\n  尚未冻结但值得观察的 watchlist:")
     print(watchlist)
-    return final_snapshot, recommended_adds, recommended_drops, suggested_next_freeze, watchlist
+    return
 
 
 if __name__ == "__main__":
