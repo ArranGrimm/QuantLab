@@ -35,7 +35,7 @@ def _():
     SEED_COL = "seed_strict"
     USE_BULL_ONLY = False
 
-    LABEL_COL = "fwd_mfe_risk_adj_10d"
+    LABEL_COL = "fwd_mfe_10d"
     POSITIVE_LABEL_THRESHOLDS: dict[str, float] = {
         "fwd_mfe_10d": 0.08,
         "fwd_mae_10d": -0.03,

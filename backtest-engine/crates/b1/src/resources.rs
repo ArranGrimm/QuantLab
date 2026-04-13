@@ -40,6 +40,8 @@ pub struct BacktestSection {
     pub sort_ascending: bool,
     #[serde(default = "default_min_position_ratio")]
     pub min_position_ratio: f64,
+    #[serde(default)]
+    pub min_score: f64,
 }
 
 fn default_sort_field() -> String { "vol_ratio".to_string() }
@@ -107,6 +109,7 @@ pub struct BacktestConfig {
     pub sort_field: String,
     pub sort_ascending: bool,
     pub min_position_ratio: f64,
+    pub min_score: f64,
 
     pub stop_loss_enabled: bool,
     pub stop_loss_pct: f64,
@@ -143,6 +146,7 @@ impl Default for BacktestConfig {
             sort_field: "vol_ratio".to_string(),
             sort_ascending: true,
             min_position_ratio: 0.5,
+            min_score: 0.0,
             stop_loss_enabled: true,
             stop_loss_pct: 0.03,
             tp1_pct: 0.15,
@@ -176,6 +180,7 @@ impl From<ConfigFile> for BacktestConfig {
             sort_field: cfg.backtest.sort_field,
             sort_ascending: cfg.backtest.sort_ascending,
             min_position_ratio: cfg.backtest.min_position_ratio,
+            min_score: cfg.backtest.min_score,
             stop_loss_enabled: cfg.stop_loss.enabled,
             stop_loss_pct: cfg.stop_loss.pct,
             tp1_pct: cfg.take_profit.tp1_pct,

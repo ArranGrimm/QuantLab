@@ -116,13 +116,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = world.resource::<BacktestConfig>();
         let sort_ascending = config.sort_ascending;
         let stop_loss_pct = config.stop_loss_pct;
+        let min_score = config.min_score;
 
         let mut candidates: Vec<_> = market_data
             .prices
             .iter()
             .filter_map(|(code, dates)| {
                 dates.get(date).and_then(|bar| {
-                    if bar.pre_b1_signal && bar.is_loose {
+                    if bar.pre_b1_signal && bar.is_loose && bar.sort_value >= min_score {
                         let stop_price = bar.low * (1.0 - stop_loss_pct);
                         Some((code.clone(), bar.sort_value, bar.open, stop_price))
                     } else {
@@ -173,6 +174,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "sort_field": config.sort_field,
                 "sort_ascending": config.sort_ascending,
                 "min_position_ratio": config.min_position_ratio,
+                "min_score": config.min_score,
                 "stop_loss_enabled": config.stop_loss_enabled,
                 "stop_loss_pct": config.stop_loss_pct,
                 "tp1_pct": config.tp1_pct,
@@ -221,6 +223,7 @@ fn print_config(config: &BacktestConfig) {
     let end_str = config.end_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".to_string());
     println!("Date Range: {} ~ {}", start_str, end_str);
     println!("Sort Field: {} ({})", config.sort_field, if config.sort_ascending { "ASC" } else { "DESC" });
+    println!("Min Score: {} ({})", config.min_score, if config.min_score > 0.0 { "ON" } else { "OFF" });
     println!("Stop Loss: {:.1}% ({})", config.stop_loss_pct * 100.0, if config.stop_loss_enabled { "ON" } else { "OFF" });
     println!("Take Profit: TP1={:.0}%, TP2={:.0}%", config.tp1_pct * 100.0, config.tp2_pct * 100.0);
     println!("Weak Filter: {} days @ {:.0}% ({})", config.weak_days, config.weak_min_gain_pct * 100.0, if config.weak_enabled { "ON" } else { "OFF" });
@@ -251,6 +254,7 @@ fn format_config(config: &BacktestConfig, trading_days: usize) -> String {
     writeln!(s, "Date Range:       {} ~ {}", start_str, end_str).unwrap();
     writeln!(s, "Trading Days:     {}", trading_days).unwrap();
     writeln!(s, "Sort Field:       {} ({})", config.sort_field, if config.sort_ascending { "ASC" } else { "DESC" }).unwrap();
+    writeln!(s, "Min Score:        {} ({})", config.min_score, if config.min_score > 0.0 { "ON" } else { "OFF" }).unwrap();
     writeln!(s, "Stop Loss:        {:.1}% ({})",
         config.stop_loss_pct * 100.0,
         if config.stop_loss_enabled { "ON" } else { "OFF" }
@@ -338,6 +342,7 @@ fn append_b1_registry_entry(
         "sort_field": config.sort_field,
         "sort_ascending": config.sort_ascending,
         "min_position_ratio": config.min_position_ratio,
+        "min_score": config.min_score,
         "stop_loss_enabled": config.stop_loss_enabled,
         "stop_loss_pct": config.stop_loss_pct,
         "tp1_pct": config.tp1_pct,
