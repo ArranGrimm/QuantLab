@@ -259,6 +259,20 @@
 
 ## 二、B1 超跌反转策略
 
+### `2026-04-14` 口径更新
+
+- 旧文档中的高收益 `ML B1` 结果，当前应按**人工 hindsight regime 上界**理解，而不再视为可直接执行的客观基线。
+- 原因:
+  - `LOOSE_PERIODS` 由手工事后圈定，存在明显 hindsight 成分
+  - 改用完全机械的 `活跃市值` 规则后，交易笔数翻倍、胜率显著下滑、长窗回撤显著抬升
+- 当前机械规则定义:
+  - 多头: 单根、2 根或 3 根累计涨幅超过 `4%`
+  - 空头: 单根下跌 `2.3%`
+- 当前结论:
+  - `ML` 排序器在理想 regime 中仍然证明过有价值
+  - 但 `活跃市值` 作为**硬开仓开关**的客观可执行性，目前没有被验证
+  - 后续优化应优先与机械 regime 基线比较，而不是继续与 hindsight 上界比较
+
 ### 已完成
 - `utils/b1_factors_opt.py`: B1 信号计算 (V3.0 + 周线 MACD 过滤)
 - `utils/signal_export.py`: B1 事件信号导出, `export_for_rust()` 支持 `extra_sort_cols`
@@ -282,20 +296,24 @@
 
 ### 当前主线判断
 
-- `seed_mid + ML score` 在 `2021~2025` 五组窗口里优势稳定，当前仍是 `B1` 主线；其中修复后 `2022~2025` 的 `MDD` 已收敛到 `9%~10%`。
+- `seed_mid/seed_strict + ML score` 的旧高收益结果，只能代表人工 hindsight regime 下的研究上界，不再自动等价为当前 `B1` 主线。
 - 规则版 `B1` 当前更适合承担:
   - 低回撤基线
   - regime sanity check
-- `2026 Q1` 的短窗反超说明 `ML` 当前更需要解决的是近端收益恢复与 regime 适应，而不是旧口径里那种被放大的异常大回撤。
+- 当前机械 `活跃市值` 规则下，`ML B1` 的主要问题已经从“近端短窗失配”升级为“整体开仓时钟失真”:
+  - 长窗交易数从约 `150` 笔抬升到 `300+`
+  - 胜率降到 `36% ~ 45%`
+  - 长窗 `MDD` 抬升到 `35% ~ 40%`
+- 因此当前最关键的问题，不是继续优化尾部特征，而是重新判断 `活跃市值` 是否适合当作硬择时开关。
 
 ### B1 后续方向
 
-1. **切回主线前先确认 regime**: `活跃市值` 继续手工判断, 当前不做自动化复刻
+1. **先收口 regime 口径**: 旧手工 hindsight 区间保留为研究上界；后续评估统一以机械可执行规则为基线
 2. **规则链保持独立**: `calc_b1_factors_wmacd -> export_for_rust -> bt-b1` 不再和 ML notebook 混写
 3. **ML 链继续按 `Lab / Train / Export` 拆分**:
    - `notebooks/b1_condition_mining.py`: 纯统计特征研究
    - `notebooks/b1_seed_ml_baseline.py`: 纯训练 / 评估 / 导出
-4. **优先解决近端恢复与历史单段回撤**: 当前优化重点应从“证明 ML 更强”转向“修复 `2026` 短窗失配，并复盘 `2021` 全窗 `19.32%` 回撤 episode”
+4. **先判断 `活跃市值` 的角色**: 是硬开关、软条件、还是退出主链；在此之前不再高频微调 `selected`
 
 ### B1 实盘前待办
 
@@ -318,8 +336,11 @@
 
 ### B1 当前判断
 
-- `B1` 当前已回到明确可执行状态，且主线是 `规则链独立 + seed 内 ML 排序链`
-- 当前最稳的主链:
+- `B1` 当前**不应再被表述为“已明确可执行”**；更准确的说法是:
+  - 规则链可执行
+  - `ML B1` 在人工 hindsight regime 下证明过上界
+  - 但在机械可执行 regime 下尚未验证通过
+- 当前最稳的可执行链:
   - `calc_b1_factors_wmacd`
   - `export_for_rust`
   - `bt-b1`
@@ -332,14 +353,19 @@
   - 把规则链和 ML 链重新揉成一个 notebook
   - 直接把 `B1` 主线切成“纯 B1 专属 ML”
 - 现阶段更推荐:
-  - `规则链独立 + Seed 内 ML 排序链`
-  - 规则版保留为低回撤对照，而不是继续与主线争默认入口
+  - `规则链独立`
+  - 将旧 `ML` 高收益结果降级为 hindsight 上界，不再当作默认实盘口径
+  - 在重新定义 `活跃市值` 的角色前，规则版继续承担低回撤对照与 sanity check
+  - `ML` 侧继续保留为研究链，而不是默认执行链
 - 详细路线文档:
   - `experiments/b1-next-phase.md`
 
 ### B1 Factor Lab 当前口径
 
 - `notebooks/b1_condition_mining.py` 当前只负责统计特征研究，不再承担规则收敛主线
+- `notebooks/b1_condition_mining.py` 与 `notebooks/b1_seed_ml_baseline.py` 的 `LOOSE_PERIODS` 现已对齐为同一份手工 `活跃市值` regime 列表，后续不再混用两套宽松期日期口径
+- `notebooks/b1_condition_mining.py` 当前默认分析特征集已切到 `rotation_core12_kbar`
+- 该实验集由 `Rotation core_12 + Alpha158 kbar_shape` 共 `21` 个因子组成，只用于 `Lab`
 - 当前固定研究闭环:
   - `seed_loose / seed_mid / seed_strict` 样本概览
   - 因子 `IC / ICIR / t-stat`
@@ -354,19 +380,25 @@
 ### B1 Lab / Train 当前实现进度
 
 - 共享底座:
-  - `utils/b1_feature_pool.py` 统一输出研究底表与 `core / candidate / selected` 三档特征集
+  - `utils/b1_feature_pool.py` 统一输出研究底表与 `core / candidate / selected / rotation_core12_kbar / selected_rotation_hybrid_v1` 五档特征集
   - 当前已补齐 `fwd_ret_2d / fwd_ret_3d / fwd_ret_5d`
+  - 当前已额外接入 `Rotation core_12` 与 `Alpha158 kbar_shape` 因子计算，并注册 `Rotation Core12 / Alpha158 KBAR` 分组
+  - 当前已新增实验冻结集 `selected_rotation_hybrid_v1`，用于验证 `B1` 骨架 + `Rotation/KBAR` 强迁移因子的受控融合效果
   - `selected` 已按最新一轮 `seed_mid + bull_only` lab 做第一轮保守升级:
     - 移除 `Bias_C_WL / red_green_ratio_20 / days_since_key_k / bias_wl_yl_delta_5`
     - 新增 `body_pct / vol_shrink_40 / rw_hist_delta_5 / rm_hist_delta_5`
 - factor lab:
   - `notebooks/b1_condition_mining.py`
   - 当前已改成 `print-first` 的纯研究面板
+  - 当前默认分析 `rotation_core12_kbar`，直接检验跨策略迁移因子在 `B1` 样本里的统计表现
+  - 当前已兼容 `analysis feature set != train feature set` 的展示与替换建议，不会再把训练冻结列误显示为空画像或 `ICIR=0`
   - 当前输出 `seed 概览 -> IC -> group summary -> bin scoreboard -> decay -> corr diagnostics`
   - `Step 10. Lab 结论` 当前已支持按 `abs_ICIR` 对冻结集做“弱尾替换”建议，不再只做追加后截断
 - train / export:
   - `notebooks/b1_seed_ml_baseline.py`
-  - 当前默认消费冻结特征集 `selected`
+  - 当前默认消费冻结特征集 `selected`，但仅作为研究默认配置
+  - 如需验证本轮 Lab 建议，可手动切换到 `selected_rotation_hybrid_v1` 做训练与回测对照
+  - 当前已支持按 `FEATURE_SET_NAME` 自动识别是否需要额外计算 `Rotation/KBAR` 因子，避免实验冻结集在训练侧触发列缺失
   - 当前已支持 `seed_mid / seed_strict` 切换
   - 当前已打通 `walk-forward -> 评估 -> Rust 导出`
   - 当前导出已支持“`seed_mid` 顶替 parquet 内 `b1_signal` + `score` 排序”口径，可与规则版 `B1` 在相同 Rust 回测流程下做 parquet 级对照
@@ -475,6 +507,33 @@ Python (信号层)                    Rust (回测/执行层)
   - `torch / torchvision` 在 Windows 下继续走 `pytorch-cu130`
 - 跨设备推荐习惯:
   - 日常安装优先使用 `uv sync --locked`
+
+### B1 双阶段目标状态
+
+- 状态: 已完成首版接线, 等待 notebook 实跑与回测验证
+- 目标:
+  - Stage 1 学 “教科书结构一致性”
+  - Stage 2 在结构合格样本里学 “风险调整收益排序”
+- 已完成:
+  - `utils/b1_feature_pool.py` 已把教科书案例转成研究底表标签与分数
+  - `notebooks/b1_seed_ml_baseline.py` 已支持 `TARGET_MODE = "two_stage_textbook"`
+  - `notebooks/b1_condition_mining.py` 已支持 `textbook_b1_score / is_textbook_b1` 诊断
+  - Rust 导出侧已保留 `score / structure_score / payoff_score`
+  - 已通过 `uv run` 导入与底表冒烟验证, 当前链路可实际运行
+- 当前默认口径:
+  - Stage 1 标签: `is_textbook_b1`
+  - Stage 1 连续分数: `textbook_b1_score`
+  - Stage 1 子分: `textbook_trend_score / textbook_kbar_score / textbook_volume_score / textbook_trigger_score`
+  - Stage 2 标签: `fwd_mfe_risk_adj_10d`
+  - 组合分数: `final_score = structure_score * payoff_score`
+- 当前使用路径:
+  - 先在 `notebooks/b1_condition_mining.py` 用 `LABEL_COL = "textbook_b1_score"` 看结构画像
+  - 再切 `LABEL_COL = "fwd_mfe_risk_adj_10d"` 看结构合格后的收益排序画像
+  - 最后在 `notebooks/b1_seed_ml_baseline.py` 设置 `TARGET_MODE = "two_stage_textbook"` 做训练、评估、导出
+- 当前风险:
+  - 教科书案例样本量仍然很少, `textbook_b1_threshold` 只是工程化起点, 不是最终标准
+  - `Step 4` 当前呈现“全截面负 IC, 但 top-tail / 近端样本有苗头”的分裂信号, 暂不能直接当成成熟主线
+  - 教科书案例全部来自 `2025`, 当前结构标签可能存在时间风格锚定, 需要继续观察 `2026` 的独立表现
 
 ### 实验记录
 

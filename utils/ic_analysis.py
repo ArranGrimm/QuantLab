@@ -17,6 +17,7 @@ def calc_factor_ic(
     label: str = "fwd_mfe_10d",
     min_samples: int = 30,
     prefix_highlight: str = "",
+    verbose: bool = True,
 ) -> dict:
     """
     计算所有因子的 Spearman 截面 IC (vs label)，并打印排行榜。
@@ -31,12 +32,14 @@ def calc_factor_ic(
     Returns:
         dict: {factor_name: {"ic_mean", "ic_std", "icir", "t_stat", "n_days"}}
     """
-    print(f"📊 计算因子 IC (Polars Spearman vs {label})...")
+    if verbose:
+        print(f"📊 计算因子 IC (Polars Spearman vs {label})...")
 
     available = [f for f in factor_cols if f in df.columns]
     if len(available) < len(factor_cols):
         missing = set(factor_cols) - set(available)
-        print(f"   ⚠️ 跳过缺失因子: {missing}")
+        if verbose:
+            print(f"   ⚠️ 跳过缺失因子: {missing}")
 
     df_valid = df.filter(
         pl.col(label).is_not_null() & pl.col(label).is_not_nan()
@@ -48,7 +51,8 @@ def calc_factor_ic(
     df_valid = df_valid.filter(pl.col("date").is_in(valid_dates))
 
     n_dates = df_valid["date"].n_unique()
-    print(f"   有效天数: {n_dates}, 样本: {df_valid.height:,}")
+    if verbose:
+        print(f"   有效天数: {n_dates}, 样本: {df_valid.height:,}")
 
     # Polars 原生 Spearman IC: group_by(date) + pl.corr
     ic_df = (
@@ -82,26 +86,27 @@ def calc_factor_ic(
     # 打印排行榜
     sorted_factors = sorted(ic_results.items(), key=lambda x: abs(x[1]["icir"]), reverse=True)
 
-    print(f"\n{'因子':<25} {'IC_Mean':>8} {'IC_Std':>8} {'ICIR':>8} {'t-stat':>8} {'显著':>4}")
-    print("-" * 75)
-    for name, r in sorted_factors:
-        sig = "✅" if abs(r["t_stat"]) > 2 else ""
-        prefix = "🔵" if (prefix_highlight and name.startswith(prefix_highlight)) else "  "
-        print(f"{prefix}{name:<23} {r['ic_mean']:>+8.4f} {r['ic_std']:>8.4f} "
-              f"{r['icir']:>+8.4f} {r['t_stat']:>+8.2f} {sig:>4}")
-    print("-" * 75)
+    if verbose:
+        print(f"\n{'因子':<25} {'IC_Mean':>8} {'IC_Std':>8} {'ICIR':>8} {'t-stat':>8} {'显著':>4}")
+        print("-" * 75)
+        for name, r in sorted_factors:
+            sig = "✅" if abs(r["t_stat"]) > 2 else ""
+            prefix = "🔵" if (prefix_highlight and name.startswith(prefix_highlight)) else "  "
+            print(f"{prefix}{name:<23} {r['ic_mean']:>+8.4f} {r['ic_std']:>8.4f} "
+                  f"{r['icir']:>+8.4f} {r['t_stat']:>+8.2f} {sig:>4}")
+        print("-" * 75)
 
-    n_sig = sum(1 for _, r in sorted_factors if abs(r["t_stat"]) > 2)
-    n_total = len(sorted_factors)
-    if prefix_highlight:
-        n_hl_sig = sum(1 for n, r in sorted_factors if n.startswith(prefix_highlight) and abs(r["t_stat"]) > 2)
-        n_hl = sum(1 for n, _ in sorted_factors if n.startswith(prefix_highlight))
-        n_other_sig = n_sig - n_hl_sig
-        n_other = n_total - n_hl
-        print(f"\n   {prefix_highlight}* 因子显著: {n_hl_sig}/{n_hl}")
-        print(f"   通用因子显著: {n_other_sig}/{n_other}")
-    else:
-        print(f"\n   显著因子: {n_sig} / {n_total}")
+        n_sig = sum(1 for _, r in sorted_factors if abs(r["t_stat"]) > 2)
+        n_total = len(sorted_factors)
+        if prefix_highlight:
+            n_hl_sig = sum(1 for n, r in sorted_factors if n.startswith(prefix_highlight) and abs(r["t_stat"]) > 2)
+            n_hl = sum(1 for n, _ in sorted_factors if n.startswith(prefix_highlight))
+            n_other_sig = n_sig - n_hl_sig
+            n_other = n_total - n_hl
+            print(f"\n   {prefix_highlight}* 因子显著: {n_hl_sig}/{n_hl}")
+            print(f"   通用因子显著: {n_other_sig}/{n_other}")
+        else:
+            print(f"\n   显著因子: {n_sig} / {n_total}")
 
     return ic_results
 

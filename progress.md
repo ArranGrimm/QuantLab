@@ -1,5 +1,91 @@
 # Progress
 
+## 2026-04-14
+
+### [B1] Rotation Core12 + KBAR 已接入 B1 Lab 实验特征集
+- 已更新:
+  - `utils/b1_feature_pool.py`
+  - `notebooks/b1_condition_mining.py`
+- 当前实现:
+  - `build_b1_research_frame()` 会在原有 `B1` 研究底表上额外计算 `Rotation core_12` 与 `Alpha158 kbar_shape` 9 因子
+  - `B1_FEATURE_SET_REGISTRY` 已新增 `rotation_core12_kbar`
+  - `B1_FEATURE_GROUPS / B1_FEATURE_GROUP_LABELS` 已补 `Rotation Core12` 与 `Alpha158 KBAR` 分组
+  - `b1_condition_mining.py` 当前默认 `ANALYSIS_FEATURE_SET_NAME = "rotation_core12_kbar"`
+  - `TRAIN_FEATURE_SET_NAME = "selected"` 保持不变，不影响 `b1_seed_ml_baseline.py` 训练默认
+- 当前目的:
+  - 只在 `Lab` 里验证“Rotation 强因子”迁移到 `B1` 后是否提供增量信息
+  - 避免把探索性结论误升格为 `ML B1` 的默认训练主线
+
+### [B1] Factor Lab 已兼容 analysis/train 分离展示
+- 已更新:
+  - `notebooks/b1_condition_mining.py`
+  - `utils/ic_analysis.py`
+  - `utils/factor_analysis.py`
+- 当前修复:
+  - 当 `ANALYSIS_FEATURE_SET_NAME` 与 `TRAIN_FEATURE_SET_NAME` 不同，`Step 5 / 9 / 10` 不再把训练冻结集误当成 `ICIR=0`
+  - 分组汇总改为只展示当前 analysis 特征集实际命中的 group，避免大量 `0 因子` 空组
+  - 冻结训练集画像改为基于 `analysis + train` 并集补算，替换建议会用真实训练特征强弱做比较
+  - 多周期衰减里的常量输入 `Spearman` 警告已跳过，不再额外刷 warning
+
+### [B1] 已新增 `selected_rotation_hybrid_v1` 实验冻结集
+- 已更新:
+  - `utils/b1_feature_pool.py`
+  - `utils/__init__.py`
+- 当前实现:
+  - 新增实验特征集 `selected_rotation_hybrid_v1`
+  - 由 `12` 个特征组成:
+    - `Bias_WL_YL`
+    - `Bias_C_YL`
+    - `rw_dif_pct`
+    - `rw_hist`
+    - `rm_hist`
+    - `body_pct`
+    - `vol_shrink_40`
+    - `atr_14_pct`
+    - `KLEN`
+    - `vol_60d`
+    - `turnover_rate`
+    - `KUP`
+- 当前目的:
+  - 将 `B1` 骨架特征与本轮 `Rotation/KBAR` 最强迁移因子做一轮受控融合
+  - 保持默认 `selected` 不变，方便在 `b1_seed_ml_baseline.py` 中做 A/B 训练与 Rust 回测对照
+
+### [B1] 训练 notebook 已自动识别 Rotation/KBAR 特征依赖
+- 已更新:
+  - `utils/b1_feature_pool.py`
+  - `utils/__init__.py`
+  - `notebooks/b1_seed_ml_baseline.py`
+- 当前修复:
+  - 新增 `b1_feature_set_requires_rotation_kbar()`
+  - `b1_seed_ml_baseline.py` 会根据 `FEATURE_SET_NAME` 自动判断是否需要额外计算 `Rotation core_12 + KBAR`
+  - 当使用 `selected_rotation_hybrid_v1` 或其他含迁移因子的特征集时，不再出现 `ret_max_5d / atr_14_pct / KLEN` 等列缺失报错
+
+### [Docs] B1 主文档已继续收口“默认主线”措辞
+- 已进一步更新:
+  - `experiments/b1-next-phase.md`
+  - `project-status.md`
+- 当前新增统一口径:
+  - `selected` / `seed_strict` / `fwd_mfe_10d` 仍可作为研究默认配置
+  - 但不再等价于默认实盘主线
+  - `ML B1` 当前保留为研究链，规则链仍是最稳的可执行链
+
+### [Docs] B1 口径已重写为“hindsight 上界 vs 机械基线”
+- 已更新:
+  - `experiments/b1-next-phase.md`
+  - `project-status.md`
+- 当前统一新口径:
+  - 旧手工 `LOOSE_PERIODS` 高收益结果只作为 **artificial hindsight upper bound / oracle regime benchmark**
+  - 新的完全机械 `活跃市值` 规则结果才是 **客观可执行基线**
+- 当前结论:
+  - `ML B1` 的旧高收益不再直接视为可落地收益率
+  - 当前系统级问题更像是 `活跃市值` 作为硬开仓开关不够稳，而不是冻结特征集的尾部细节
+
+### [B1] 手工活跃市值 regime 日期已在 Lab / Train 间对齐
+- 已将 `notebooks/b1_condition_mining.py` 里的 `LOOSE_PERIODS` 同步到与 `notebooks/b1_seed_ml_baseline.py` 一致的手工区间列表。
+- 当前目的:
+  - 避免 `Lab` 与 `Train` 使用两套不同的宽松期口径，导致因子分析、训练结果和回测结论彼此不可比。
+  - 后续所有关于 `活跃市值` 的讨论先基于同一份日期事实，再判断这套机械择时本身是否有效。
+
 ## 2026-04-12
 
 ### [B1] baseline notebook 已补最新交易日打分与 threshold/top-k 诊断
@@ -1138,3 +1224,51 @@
 - 修复 marimo 变量重定义: Cell 内逻辑包裹在函数中
 - 修复 numpy datetime64 → Polars Date 类型转换
 - 移除重复因子 `gap`（与 `overnight_ret` 公式完全相同）
+
+## 2026-04-14
+
+### B1 教科书双阶段目标首版落地
+
+- 在 `utils/b1_feature_pool.py` 新增 `B1_TEXTBOOK_CASES`、`B1_TEXTBOOK_SCORE_FEATURE_COLS`、`B1_TEXTBOOK_RULE_COLS`
+- 基于教科书案例在研究底表中动态生成:
+  - `textbook_similarity_score`
+  - `textbook_rule_score`
+  - `textbook_b1_score`
+  - `textbook_b1_threshold`
+  - `is_textbook_b1`
+  - `is_textbook_case`
+  - `textbook_case_name`
+- `Stage 1` 不再只盯周/月动能, 而是综合趋势位置、K 线几何、缩量/触发节奏、关键 K 上下文做案例相似度
+- 为了提升可解释性, `textbook_b1_score` 已拆成四个显式子分:
+  - `textbook_trend_score`
+  - `textbook_kbar_score`
+  - `textbook_volume_score`
+  - `textbook_trigger_score`
+- 当前总分口径改为四段式聚合:
+  - `trend 30% + kbar 25% + volume 20% + trigger 25%`
+  - 其中 `trigger_score = 0.7 * 触发上下文相似度 + 0.3 * 规则骨架分`
+- `notebooks/b1_seed_ml_baseline.py` 新增 `TARGET_MODE`
+  - `single_stage_mfe`: 保留原单阶段 `fwd_mfe_10d`
+  - `two_stage_textbook`: `LGBMClassifier(is_textbook_b1)` + `LGBMRegressor(fwd_mfe_risk_adj_10d)`
+- 双阶段最终分数口径:
+  - `structure_score = P(is_textbook_b1)`
+  - `payoff_score = E[fwd_mfe_risk_adj_10d | structure qualified]`
+  - `final_score = structure_score * payoff_score`
+- 导出链路同步保留 `structure_score / payoff_score`, 方便回测和排查“结构对了但收益排序错了”或相反
+- `notebooks/b1_condition_mining.py` 支持新标签阈值, 并在 Lab 摘要里额外展示 textbook 结构分数、正类占比、案例覆盖行数
+- 当前验证状态:
+  - `python -m py_compile notebooks/b1_seed_ml_baseline.py`
+  - `python -m py_compile notebooks/b1_condition_mining.py`
+  - `python -m py_compile utils/b1_feature_pool.py`
+  - `uv run python -c "import utils.b1_feature_pool"` 通过
+  - `uv run python -c "import importlib.util; ... b1_seed_ml_baseline.py"` 通过
+  - `uv run python -c "import importlib.util; ... b1_condition_mining.py"` 通过
+  - `uv run python -X utf8 -c "... build_b1_research_frame(...)"` 已确认 `textbook_*` 子分可正常落表
+- 首轮实跑结果:
+  - `Stage 1` 确实开始学到更接近教科书案例的量价结构, 人工抽样观察与 `trend / kbar` 子分方向一致
+  - 但 `Step 4` 全截面评估仍显示 `daily_ic_mean = -0.0792`, `q4_minus_q0 = -0.0232`
+  - 同时 `top-k / threshold` 尾部表现仍有一定改善, 说明当前更像“高分尾部筛选器”, 还不是稳定的全局排序器
+  - `2025+` 窗口回测出现一定苗头, 但由于教科书案例全部来自 `2025`, 暂不能排除时间风格锚定
+- 当前限制:
+  - 当前 Windows 终端若未显式使用 `uv run python -X utf8`，旧日志里的 emoji 可能触发 `UnicodeEncodeError`
+  - `textbook_b1_threshold` 目前按案例分数 `q20` 动态推导, 后续仍需结合正类占比和回测结果再校准

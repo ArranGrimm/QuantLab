@@ -40,7 +40,7 @@ def _():
 
     ACTIVE_SEED_COL = "seed_strict"
     USE_BULL_ONLY = True
-    LABEL_COL = "fwd_mfe_10d"
+    LABEL_COL = "textbook_b1_score"
     POSITIVE_LABEL_THRESHOLDS: dict[str, float] = {
         "fwd_mfe_10d": 0.08,
         "fwd_mae_10d": -0.03,
@@ -51,12 +51,18 @@ def _():
         "fwd_ret_3d": 0.04,
         "fwd_ret_2d": 0.003,
         "fwd_ret_1d": 0.002,
+        "textbook_b1_score": 0.65,
+        "is_textbook_b1": 0.5,
+        "textbook_trend_score": 0.65,
+        "textbook_kbar_score": 0.65,
+        "textbook_volume_score": 0.65,
+        "textbook_trigger_score": 0.65,
     }
     POSITIVE_LABEL_THRESHOLD = POSITIVE_LABEL_THRESHOLDS.get(LABEL_COL, 0.05)
     N_BINS = 5
     MIN_DAILY_SAMPLES = 30
     REVIEW_FEATURE = "range_pct"
-    ANALYSIS_FEATURE_SET_NAME = "candidate"
+    ANALYSIS_FEATURE_SET_NAME = "rotation_core12_kbar"
     TRAIN_FEATURE_SET_NAME = "selected"
     DECAY_HORIZONS = ("fwd_ret_1d", "fwd_ret_2d", "fwd_ret_3d", "fwd_ret_5d")
     CORR_SAMPLE_N = 250_000
@@ -68,13 +74,27 @@ def _():
         ("2019-12-16", "2020-03-02"),
         ("2020-06-19", "2020-07-15"),
         ("2020-12-24", "2021-01-25"),
-        ("2021-04-16", "2021-09-14"),
-        ("2022-04-27", "2022-07-05"),
-        ("2023-01-15", "2023-04-15"),
-        ("2024-02-06", "2024-03-20"),
-        ("2024-09-24", "2024-10-15"),
-        ("2025-04-09", "2025-09-04"),
-        ("2026-01-05", "2026-02-02"),
+        ("2021-04-20", "2021-06-16"),
+        ("2021-07-12", "2021-08-17"),
+        ("2021-08-25", "2021-09-16"),
+        ("2022-04-28", "2022-07-25"),
+        ("2022-10-14", "2022-12-19"),
+        ("2023-01-06", "2023-05-12"),
+        ("2023-08-01", "2023-08-11"),
+        ("2023-08-30", "2023-09-20"),
+        ("2023-10-26", "2023-12-20"),
+        ("2024-01-02", "2024-01-17"),
+        ("2024-01-25", "2024-01-30"),
+        ("2024-02-07", "2024-03-25"),
+        ("2024-04-18", "2024-05-15"),
+        ("2024-07-12", "2024-07-23"),
+        ("2024-08-01", "2024-08-12"),
+        ("2024-09-02", "2024-11-14"),
+        ("2025-01-15", "2025-01-27"),
+        ("2025-02-07", "2025-02-28"),
+        ("2025-04-09", "2025-04-18"),
+        ("2025-05-07", "2025-09-04"),
+        ("2026-01-06", "2026-02-02"),
     ]
 
     analysis_feature_cols = list(resolve_b1_feature_set(ANALYSIS_FEATURE_SET_NAME))
@@ -141,6 +161,11 @@ def _(
     print("=" * 72)
     print("  这本 notebook 只负责统计学特征研究，不再承担规则收敛主线。")
     print("  当前默认流程: Seed 样本概览 -> IC -> 分组归纳 -> 分箱 -> 衰减 -> 相关性诊断")
+    print("  quick_start:")
+    print('    1. 看结构总分: LABEL_COL = "textbook_b1_score"')
+    print('    2. 看结构子分: LABEL_COL = "textbook_trend_score" / "textbook_kbar_score" / "textbook_volume_score" / "textbook_trigger_score"')
+    print('    3. 看结构二分类: LABEL_COL = "is_textbook_b1"')
+    print('    4. 看结构合格后的收益排序: LABEL_COL = "fwd_mfe_risk_adj_10d"')
     print("")
     print(f"  active_seed:         {ACTIVE_SEED_COL}")
     print(f"  bull_regime_only:    {USE_BULL_ONLY}")
@@ -461,6 +486,7 @@ def _(
         min_list_days=MIN_LIST_DAYS,
         seed_j_max=SEED_J_MAX,
         loose_periods=LOOSE_PERIODS,
+        include_rotation_kbar_features=True,
     )
 
     available_analysis_feature_cols = [col for col in analysis_feature_cols if col in df_all.columns]
@@ -515,20 +541,53 @@ def _(
         lab_mask & pl.col(LABEL_COL).is_not_null() & pl.col(LABEL_COL).is_not_nan()
     )
 
-    lab_summary = pl.DataFrame(
-        [
-            {"item": "rows", "value": f"{df_lab.height:,}"},
-            {"item": "dates", "value": str(df_lab["date"].n_unique()) if df_lab.height else "0"},
-            {"item": "codes", "value": str(df_lab["code"].n_unique()) if df_lab.height else "0"},
-            {"item": "label_mean", "value": f"{float(df_lab[LABEL_COL].mean()):+.4f}" if df_lab.height else "0.0000"},
+    summary_rows = [
+        {"item": "rows", "value": f"{df_lab.height:,}"},
+        {"item": "dates", "value": str(df_lab["date"].n_unique()) if df_lab.height else "0"},
+        {"item": "codes", "value": str(df_lab["code"].n_unique()) if df_lab.height else "0"},
+        {"item": "label_mean", "value": f"{float(df_lab[LABEL_COL].mean()):+.4f}" if df_lab.height else "0.0000"},
+        {
+            "item": f"positive_rate (>= {POSITIVE_LABEL_THRESHOLD:.2%})",
+            "value": f"{float((df_lab[LABEL_COL] >= POSITIVE_LABEL_THRESHOLD).mean()):.2%}" if df_lab.height else "0.00%",
+        },
+        {"item": "analysis_feature_count", "value": str(len(available_analysis_feature_cols))},
+        {"item": "train_feature_count", "value": str(len(available_train_feature_cols))},
+    ]
+    if "textbook_b1_score" in df_lab.columns:
+        summary_rows.append(
             {
-                "item": f"positive_rate (>= {POSITIVE_LABEL_THRESHOLD:.2%})",
-                "value": f"{float((df_lab[LABEL_COL] >= POSITIVE_LABEL_THRESHOLD).mean()):.2%}" if df_lab.height else "0.00%",
-            },
-            {"item": "analysis_feature_count", "value": str(len(available_analysis_feature_cols))},
-            {"item": "train_feature_count", "value": str(len(available_train_feature_cols))},
-        ]
-    )
+                "item": "textbook_score_mean",
+                "value": f"{float(df_lab['textbook_b1_score'].mean()):.4f}" if df_lab.height else "0.0000",
+            }
+        )
+    for component_col in (
+        "textbook_trend_score",
+        "textbook_kbar_score",
+        "textbook_volume_score",
+        "textbook_trigger_score",
+    ):
+        if component_col in df_lab.columns:
+            summary_rows.append(
+                {
+                    "item": f"{component_col}_mean",
+                    "value": f"{float(df_lab[component_col].mean()):.4f}" if df_lab.height else "0.0000",
+                }
+            )
+    if "is_textbook_b1" in df_lab.columns:
+        summary_rows.append(
+            {
+                "item": "textbook_positive_rate",
+                "value": f"{float(df_lab['is_textbook_b1'].mean()):.2%}" if df_lab.height else "0.00%",
+            }
+        )
+    if "is_textbook_case" in df_lab.columns:
+        summary_rows.append(
+            {
+                "item": "textbook_case_rows",
+                "value": str(df_lab.filter(pl.col("is_textbook_case")).height) if df_lab.height else "0",
+            }
+        )
+    lab_summary = pl.DataFrame(summary_rows)
     print("\n" + "=" * 72)
     print("  Step 4. Lab 样本")
     print("=" * 72)
@@ -547,6 +606,7 @@ def _(
     build_ic_summary_frame,
     calc_factor_ic,
     df_lab,
+    ordered_unique,
     pl,
     summarize_factor_groups,
 ):
@@ -554,29 +614,63 @@ def _(
     print("  Step 5. 因子 IC 画像")
     print("=" * 72)
 
-    ic_results = calc_factor_ic(
+    analysis_ic_results = calc_factor_ic(
         df_lab,
         available_analysis_feature_cols,
         label=LABEL_COL,
         min_samples=MIN_DAILY_SAMPLES,
     )
-    ic_summary = build_ic_summary_frame(ic_results)
+    analysis_ic_summary = build_ic_summary_frame(analysis_ic_results)
+    comparison_feature_cols = ordered_unique(
+        [*available_analysis_feature_cols, *available_train_feature_cols]
+    )
+    comparison_ic_results = (
+        analysis_ic_results
+        if comparison_feature_cols == available_analysis_feature_cols
+        else calc_factor_ic(
+            df_lab,
+            comparison_feature_cols,
+            label=LABEL_COL,
+            min_samples=MIN_DAILY_SAMPLES,
+            verbose=False,
+        )
+    )
+    comparison_ic_summary = build_ic_summary_frame(comparison_ic_results)
+    active_group_defs = {
+        group_key: tuple(
+            factor for factor in factor_cols if factor in available_analysis_feature_cols
+        )
+        for group_key, factor_cols in B1_FEATURE_GROUPS.items()
+        if any(factor in available_analysis_feature_cols for factor in factor_cols)
+    }
+    active_group_labels = {
+        group_key: B1_FEATURE_GROUP_LABELS.get(group_key, group_key)
+        for group_key in active_group_defs
+    }
     group_summary = summarize_factor_groups(
-        ic_results,
-        B1_FEATURE_GROUPS,
-        B1_FEATURE_GROUP_LABELS,
+        analysis_ic_results,
+        active_group_defs,
+        active_group_labels,
     )
     frozen_train_ic = (
-        ic_summary.filter(pl.col("factor").is_in(available_train_feature_cols))
-        if ic_summary.height
-        else pl.DataFrame(schema=ic_summary.schema)
+        comparison_ic_summary.filter(pl.col("factor").is_in(available_train_feature_cols))
+        if comparison_ic_summary.height
+        else pl.DataFrame(schema=comparison_ic_summary.schema)
     )
 
     print("\n  分组汇总:")
     print(group_summary)
+    if set(available_analysis_feature_cols) != set(available_train_feature_cols):
+        print("\n  说明: 当前为 analysis/train 分离模式，下面训练冻结集画像基于并集补算。")
     print("\n  冻结训练特征当前画像:")
     print(frozen_train_ic)
-    return frozen_train_ic, group_summary, ic_results, ic_summary
+    return (
+        analysis_ic_summary,
+        comparison_ic_results,
+        comparison_ic_summary,
+        frozen_train_ic,
+        group_summary,
+    )
 
 
 @app.cell
@@ -635,11 +729,11 @@ def _(
 @app.cell
 def _(
     DECAY_HORIZONS,
+    analysis_ic_summary,
     available_train_feature_cols,
     build_decay_table,
     compute_factor_decay,
     df_lab,
-    ic_summary,
     ordered_unique,
     pl,
 ):
@@ -647,8 +741,8 @@ def _(
         [
             *available_train_feature_cols,
             *(
-                ic_summary["factor"].head(8).to_list()
-                if ic_summary.height
+                analysis_ic_summary["factor"].head(8).to_list()
+                if analysis_ic_summary.height
                 else []
             ),
         ]
@@ -680,13 +774,13 @@ def _(
     CORR_SAMPLE_N,
     CORR_THRESHOLD,
     RUN_CORR_DIAGNOSTICS,
+    analysis_ic_summary,
     available_train_feature_cols,
     calc_factor_corr,
+    comparison_ic_results,
     df_lab,
     find_redundant_factors,
     group_summary,
-    ic_results,
-    ic_summary,
     ordered_unique,
     pl,
 ):
@@ -694,7 +788,11 @@ def _(
         [
             *available_train_feature_cols,
             *(group_summary["top_factor"].to_list() if group_summary.height else []),
-            *(ic_summary["factor"].head(10).to_list() if ic_summary.height else []),
+            *(
+                analysis_ic_summary["factor"].head(10).to_list()
+                if analysis_ic_summary.height
+                else []
+            ),
         ]
     )
     corr_keep_cols = list(corr_candidates)
@@ -723,7 +821,7 @@ def _(
         corr_keep_cols, corr_drop_cols, decisions = find_redundant_factors(
             corr_matrix,
             corr_factor_names,
-            ic_results=ic_results,
+            ic_results=comparison_ic_results,
             threshold=CORR_THRESHOLD,
         )
         corr_decisions = (
@@ -744,29 +842,30 @@ def _(
 
 @app.cell
 def _(
+    analysis_ic_summary,
     available_train_feature_cols,
+    comparison_ic_summary,
     corr_drop_cols,
     frozen_train_ic,
     group_summary,
-    ic_summary,
     ordered_unique,
     pl,
 ):
     frozen_train_cols = list(available_train_feature_cols)
     group_top_cols = ordered_unique(group_summary["top_factor"].to_list() if group_summary.height else [])
     watchlist = (
-        ic_summary
+        analysis_ic_summary
         .filter(~pl.col("factor").is_in(frozen_train_cols))
         .head(6)
-        if ic_summary.height
+        if analysis_ic_summary.height
         else pl.DataFrame(schema={"factor": pl.String})
     )
     watchlist_cols = watchlist["factor"].to_list() if watchlist.height else []
     ic_abs_map = {
         row["factor"]: float(row["abs_ICIR"])
         for row in (
-            ic_summary.select(["factor", "abs_ICIR"]).to_dicts()
-            if ic_summary.height
+            comparison_ic_summary.select(["factor", "abs_ICIR"]).to_dicts()
+            if comparison_ic_summary.height
             else []
         )
     }

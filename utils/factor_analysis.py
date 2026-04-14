@@ -210,7 +210,12 @@ def compute_factor_decay(
                 if mask.sum() < min_samples:
                     continue
 
-                corr, _ = stats.spearmanr(factor_values[mask], ret_values[mask])
+                factor_slice = factor_values[mask]
+                ret_slice = ret_values[mask]
+                if np.nanstd(factor_slice) <= 1e-12 or np.nanstd(ret_slice) <= 1e-12:
+                    continue
+
+                corr, _ = stats.spearmanr(factor_slice, ret_slice)
                 if np.isfinite(corr):
                     ic_lists[horizon][factor].append(float(corr))
 

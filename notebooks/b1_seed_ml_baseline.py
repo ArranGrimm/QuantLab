@@ -11,6 +11,7 @@ def _():
     import polars as pl
 
     from utils import (
+        b1_feature_set_requires_rotation_kbar,
         build_b1_research_frame,
         calc_b1_factors_wmacd,
         describe_b1_feature_set,
@@ -35,7 +36,15 @@ def _():
     SEED_COL = "seed_strict"
     USE_BULL_ONLY = False
 
-    LABEL_COL = "fwd_mfe_10d"
+    TARGET_MODE = "two_stage_textbook"
+    STRUCTURE_LABEL_COL = "is_textbook_b1"
+    STRUCTURE_SCORE_COL = "textbook_b1_score"
+    STAGE2_LABEL_COL = "fwd_mfe_risk_adj_10d"
+    LABEL_BY_TARGET_MODE: dict[str, str] = {
+        "single_stage_mfe": "fwd_mfe_10d",
+        "two_stage_textbook": STAGE2_LABEL_COL,
+    }
+    LABEL_COL = LABEL_BY_TARGET_MODE[TARGET_MODE]
     POSITIVE_LABEL_THRESHOLDS: dict[str, float] = {
         "fwd_mfe_10d": 0.08,
         "fwd_mae_10d": -0.03,
@@ -46,9 +55,11 @@ def _():
         "fwd_ret_3d": 0.05,
         "fwd_ret_2d": 0.04,
         "fwd_ret_1d": 0.03,
+        "textbook_b1_score": 0.65,
+        "is_textbook_b1": 0.5,
     }
     POSITIVE_LABEL_THRESHOLD = POSITIVE_LABEL_THRESHOLDS.get(LABEL_COL, 0.05)
-    FEATURE_SET_NAME = "selected"
+    FEATURE_SET_NAME = "selected_rotation_hybrid_v1"
     TRAIN_WINDOW = 480
     RETRAIN_FREQ = 20
     EMA_ALPHA = 1.0
@@ -60,7 +71,9 @@ def _():
         ("2019-12-16", "2020-03-02"),
         ("2020-06-19", "2020-07-15"),
         ("2020-12-24", "2021-01-25"),
-        ("2021-04-16", "2021-09-14"),
+        ("2021-04-20", "2021-06-16"),
+        ("2021-07-12", "2021-08-17"),
+        ("2021-08-25", "2021-09-16"),
         ("2022-04-28", "2022-07-25"),
         ("2022-10-14", "2022-12-19"),
         ("2023-01-06", "2023-05-12"),
@@ -84,6 +97,7 @@ def _():
 
     FEATURE_COLS = list(resolve_b1_feature_set(FEATURE_SET_NAME))
     FEATURE_SET_DESC = describe_b1_feature_set(FEATURE_SET_NAME)
+    INCLUDE_ROTATION_KBAR_FEATURES = b1_feature_set_requires_rotation_kbar(FEATURE_SET_NAME)
     return (
         DB_PATH,
         EMA_ALPHA,
@@ -92,6 +106,7 @@ def _():
         FEATURE_COLS,
         FEATURE_SET_DESC,
         FEATURE_SET_NAME,
+        INCLUDE_ROTATION_KBAR_FEATURES,
         LABEL_COL,
         LOOSE_PERIODS,
         MIN_LIST_DAYS,
@@ -102,8 +117,12 @@ def _():
         SCORE_THRESHOLD_QUANTILES,
         SEED_COL,
         SEED_J_MAX,
+        STAGE2_LABEL_COL,
         START_DATE,
+        STRUCTURE_LABEL_COL,
+        STRUCTURE_SCORE_COL,
         ST_SNAPSHOT_DATE,
+        TARGET_MODE,
         TOPK_LIST,
         TRAIN_WINDOW,
         USE_BULL_ONLY,
@@ -124,11 +143,16 @@ def _(
     FEATURE_COLS,
     FEATURE_SET_DESC,
     FEATURE_SET_NAME,
+    INCLUDE_ROTATION_KBAR_FEATURES,
     LABEL_COL,
     POSITIVE_LABEL_THRESHOLD,
     RETRAIN_FREQ,
     SCORE_THRESHOLD_QUANTILES,
     SEED_COL,
+    STAGE2_LABEL_COL,
+    STRUCTURE_LABEL_COL,
+    STRUCTURE_SCORE_COL,
+    TARGET_MODE,
     TOPK_LIST,
     TRAIN_WINDOW,
     USE_BULL_ONLY,
@@ -137,17 +161,29 @@ def _(
     print("  B1 Seed Train / Export Entry")
     print("=" * 72)
     print(f"  seed_col:          {SEED_COL}")
+    print(f"  target_mode:       {TARGET_MODE}")
     print(f"  bull_regime_only:  {USE_BULL_ONLY}")
     print(f"  label_col:         {LABEL_COL}")
+    if TARGET_MODE == "two_stage_textbook":
+        print(f"  structure_label:   {STRUCTURE_LABEL_COL}")
+        print(f"  structure_score:   {STRUCTURE_SCORE_COL}")
+        print(f"  stage2_label:      {STAGE2_LABEL_COL}")
     print(f"  positive_thresh:   {POSITIVE_LABEL_THRESHOLD:.2%}")
     print(f"  feature_set:       {FEATURE_SET_NAME}")
     print(f"  feature_count:     {len(FEATURE_COLS)}")
+    print(f"  ext_rotation_kbar: {INCLUDE_ROTATION_KBAR_FEATURES}")
     print(f"  feature_desc:      {FEATURE_SET_DESC}")
     print(f"  train_window:      {TRAIN_WINDOW}")
     print(f"  retrain_freq:      {RETRAIN_FREQ}")
     print(f"  ema_alpha:         {EMA_ALPHA}")
     print(f"  score_threshold_q: {SCORE_THRESHOLD_QUANTILES}")
     print(f"  topk_list:         {TOPK_LIST}")
+    print("")
+    print("  quick_start:")
+    print('    1. 结构 Lab: `notebooks/b1_condition_mining.py` -> LABEL_COL = "textbook_b1_score"')
+    print('    2. 收益 Lab: `notebooks/b1_condition_mining.py` -> LABEL_COL = "fwd_mfe_risk_adj_10d"')
+    print('    3. 双阶段训练: 当前 notebook -> TARGET_MODE = "two_stage_textbook"')
+    print("    4. 看 Step 4 的 structure 摘要和 top-k，再导出给 Rust")
     return
 
 
@@ -195,6 +231,7 @@ def _(
 def _(
     FEATURE_COLS,
     FEATURE_SET_NAME,
+    INCLUDE_ROTATION_KBAR_FEATURES,
     LOOSE_PERIODS,
     MIN_LIST_DAYS,
     MV_MAX,
@@ -213,6 +250,7 @@ def _(
         min_list_days=MIN_LIST_DAYS,
         seed_j_max=SEED_J_MAX,
         loose_periods=LOOSE_PERIODS,
+        include_rotation_kbar_features=INCLUDE_ROTATION_KBAR_FEATURES,
     )
     valid_feature_cols = [col for col in FEATURE_COLS if col in df_all.columns]
 
@@ -248,6 +286,9 @@ def _(
     MV_MIN,
     RETRAIN_FREQ,
     SEED_COL,
+    STAGE2_LABEL_COL,
+    STRUCTURE_LABEL_COL,
+    TARGET_MODE,
     TRAIN_WINDOW,
     USE_BULL_ONLY,
     df_seed,
@@ -255,14 +296,22 @@ def _(
     pl,
     valid_feature_cols,
 ):
-    df_scores_raw = pl.DataFrame(schema={"date": pl.Date, "code": pl.Utf8, "score": pl.Float64})
+    df_scores_raw = pl.DataFrame(
+        schema={
+            "date": pl.Date,
+            "code": pl.Utf8,
+            "score": pl.Float64,
+            "structure_score": pl.Float64,
+            "payoff_score": pl.Float64,
+        }
+    )
     b1_train_meta = None
     print("\n" + "=" * 72)
     print("  Step 3. LightGBM Walk-Forward")
     print("=" * 72)
 
     try:
-        from lightgbm import LGBMRegressor
+        from lightgbm import LGBMClassifier, LGBMRegressor
         import warnings
         from datetime import datetime
         from utils.signal_export import (
@@ -278,11 +327,18 @@ def _(
         if df_seed.is_empty():
             print("⚠️ 当前 seed 样本为空，跳过训练。")
         else:
+            df_structure_train = (
+                df_seed.filter(pl.col(STRUCTURE_LABEL_COL).is_not_null())
+                .filter(pl.all_horizontal(*[pl.col(col).is_not_null() for col in valid_feature_cols]))
+                .sort(["date", "code"])
+            )
             df_train = (
                 df_seed.filter(pl.col(LABEL_COL).is_not_null())
                 .filter(pl.all_horizontal(*[pl.col(col).is_not_null() for col in valid_feature_cols]))
                 .sort(["date", "code"])
             )
+            if TARGET_MODE == "two_stage_textbook":
+                df_train = df_train.filter(pl.col(STRUCTURE_LABEL_COL))
             df_score = (
                 df_seed
                 .filter(pl.all_horizontal(*[pl.col(col).is_not_null() for col in valid_feature_cols]))
@@ -297,13 +353,16 @@ def _(
                     f"n_dates={len(all_dates)}, train_window={TRAIN_WINDOW}"
                 )
             else:
+                x_structure_all = df_structure_train.select(valid_feature_cols).to_numpy().astype(np.float32)
+                y_structure_all = df_structure_train[STRUCTURE_LABEL_COL].cast(pl.Int8).to_numpy().astype(np.int32)
+                dates_structure_all = df_structure_train["date"].to_numpy()
                 x_all = df_train.select(valid_feature_cols).to_numpy().astype(np.float32)
                 y_all = df_train[LABEL_COL].to_numpy().astype(np.float64)
                 dates_all = df_train["date"].to_numpy()
-                codes_all = df_train["code"].to_numpy()
                 x_score_all = df_score.select(valid_feature_cols).to_numpy().astype(np.float32)
                 dates_score_all = df_score["date"].to_numpy()
                 codes_score_all = df_score["code"].to_numpy()
+                np.nan_to_num(x_structure_all, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
                 np.nan_to_num(x_all, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
                 np.nan_to_num(x_score_all, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
 
@@ -320,18 +379,32 @@ def _(
                     "n_jobs": -1,
                     "random_state": 42,
                 }
+                lgb_cls_params = {
+                    **lgb_params,
+                    "objective": "binary",
+                    "class_weight": "balanced",
+                }
 
                 score_dates = []
                 score_codes = []
                 score_values = []
+                structure_values = []
+                payoff_values = []
                 model = None
+                structure_model = None
                 last_train_idx = TRAIN_WINDOW - RETRAIN_FREQ
 
                 print("🤖 LightGBM Walk-Forward 打分", flush=True)
                 print(
-                    f"   训练窗口: {TRAIN_WINDOW}天, 重训: 每{RETRAIN_FREQ}天, 标签: {LABEL_COL}",
+                    f"   训练窗口: {TRAIN_WINDOW}天, 重训: 每{RETRAIN_FREQ}天, 模式: {TARGET_MODE}",
                     flush=True,
                 )
+                print(f"   排序标签: {LABEL_COL}", flush=True)
+                if TARGET_MODE == "two_stage_textbook":
+                    print(
+                        f"   结构标签: {STRUCTURE_LABEL_COL}, 排序收益标签: {STAGE2_LABEL_COL}",
+                        flush=True,
+                    )
                 print(
                     f"   特征集: {FEATURE_SET_NAME} ({len(valid_feature_cols)} 个)",
                     flush=True,
@@ -343,11 +416,26 @@ def _(
                 for i in range(TRAIN_WINDOW, len(all_dates)):
                     cur_date = all_dates[i]
 
-                    if i - last_train_idx >= RETRAIN_FREQ or model is None:
+                    if i - last_train_idx >= RETRAIN_FREQ or model is None or (
+                        TARGET_MODE == "two_stage_textbook" and structure_model is None
+                    ):
                         train_start = all_dates[max(0, i - TRAIN_WINDOW)]
                         mask_tr = (dates_all >= np.datetime64(train_start)) & (dates_all < np.datetime64(cur_date))
                         x_tr = x_all[mask_tr]
                         y_tr = y_all[mask_tr]
+                        if TARGET_MODE == "two_stage_textbook":
+                            mask_structure = (
+                                (dates_structure_all >= np.datetime64(train_start))
+                                & (dates_structure_all < np.datetime64(cur_date))
+                            )
+                            x_structure_tr = x_structure_all[mask_structure]
+                            y_structure_tr = y_structure_all[mask_structure]
+                            if len(y_structure_tr) >= 500 and len(np.unique(y_structure_tr)) >= 2:
+                                structure_model = LGBMClassifier(**lgb_cls_params)
+                                structure_model.fit(x_structure_tr, y_structure_tr)
+                            else:
+                                structure_model = None
+
                         if len(y_tr) < 500:
                             continue
                         model = LGBMRegressor(**lgb_params)
@@ -355,19 +443,40 @@ def _(
                         last_train_idx = i
 
                         pct = (i - TRAIN_WINDOW) / (len(all_dates) - TRAIN_WINDOW) * 100
-                        print(
-                            f"   [{cur_date}] 重训 ({pct:.0f}%), 样本: {len(y_tr):,}",
-                            flush=True,
-                        )
+                        if TARGET_MODE == "two_stage_textbook":
+                            structure_rows = int(mask_structure.sum())
+                            structure_pos = int(y_structure_tr.sum()) if len(y_structure_tr) else 0
+                            print(
+                                f"   [{cur_date}] 双阶段重训 ({pct:.0f}%), "
+                                f"stage1样本: {structure_rows:,} / 正类: {structure_pos:,}, "
+                                f"stage2样本: {len(y_tr):,}",
+                                flush=True,
+                            )
+                        else:
+                            print(
+                                f"   [{cur_date}] 重训 ({pct:.0f}%), 样本: {len(y_tr):,}",
+                                flush=True,
+                            )
 
                     mask_te = dates_all == np.datetime64(cur_date)
-                    if not mask_te.any() or model is None:
+                    mask_score = dates_score_all == np.datetime64(cur_date)
+                    if not mask_score.any() or model is None:
                         continue
 
-                    preds = model.predict(x_all[mask_te])
-                    score_dates.extend([cur_date] * int(mask_te.sum()))
-                    score_codes.extend(codes_all[mask_te].tolist())
-                    score_values.extend(preds.tolist())
+                    payoff_preds = model.predict(x_score_all[mask_score])
+                    if TARGET_MODE == "two_stage_textbook":
+                        if structure_model is None:
+                            continue
+                        structure_preds = structure_model.predict_proba(x_score_all[mask_score])[:, 1]
+                        final_preds = structure_preds * payoff_preds
+                    else:
+                        structure_preds = np.ones_like(payoff_preds)
+                        final_preds = payoff_preds
+                    score_dates.extend([cur_date] * int(mask_score.sum()))
+                    score_codes.extend(codes_score_all[mask_score].tolist())
+                    score_values.extend(final_preds.tolist())
+                    structure_values.extend(structure_preds.tolist())
+                    payoff_values.extend(payoff_preds.tolist())
 
                 extra_dates = sorted(set(score_universe_dates) - set(all_dates))
                 if model is not None and extra_dates:
@@ -376,19 +485,42 @@ def _(
                         mask_te = dates_score_all == np.datetime64(cur_date)
                         if not mask_te.any():
                             continue
-                        preds = model.predict(x_score_all[mask_te])
+                        payoff_preds = model.predict(x_score_all[mask_te])
+                        if TARGET_MODE == "two_stage_textbook":
+                            if structure_model is None:
+                                continue
+                            structure_preds = structure_model.predict_proba(x_score_all[mask_te])[:, 1]
+                            final_preds = structure_preds * payoff_preds
+                        else:
+                            structure_preds = np.ones_like(payoff_preds)
+                            final_preds = payoff_preds
                         score_dates.extend([cur_date] * int(mask_te.sum()))
                         score_codes.extend(codes_score_all[mask_te].tolist())
-                        score_values.extend(preds.tolist())
+                        score_values.extend(final_preds.tolist())
+                        structure_values.extend(structure_preds.tolist())
+                        payoff_values.extend(payoff_preds.tolist())
 
                 if score_values:
-                    df_scores_raw = pl.DataFrame({"date": score_dates, "code": score_codes, "score": score_values})
+                    df_scores_raw = pl.DataFrame(
+                        {
+                            "date": score_dates,
+                            "code": score_codes,
+                            "score": score_values,
+                            "structure_score": structure_values,
+                            "payoff_score": payoff_values,
+                        }
+                    )
                     train_timestamp_token = datetime.now().strftime("%Y%m%d_%H%M%S")
                     trained_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     feature_hash = build_feature_hash(valid_feature_cols)
+                    run_label = (
+                        LABEL_COL
+                        if TARGET_MODE == "single_stage_mfe"
+                        else f"textbook_{STAGE2_LABEL_COL}"
+                    )
                     b1_train_meta = {
                         "strategy": "b1",
-                        "label": LABEL_COL,
+                        "label": run_label,
                         "model_name": "lightgbm",
                         "feature_set_name": FEATURE_SET_NAME,
                         "feature_mode": FEATURE_SET_NAME,
@@ -397,7 +529,7 @@ def _(
                         "feature_count": len(valid_feature_cols),
                         "train_timestamp_token": train_timestamp_token,
                         "train_run_id": build_b1_train_run_id(
-                            LABEL_COL,
+                            run_label,
                             SEED_COL,
                             "lightgbm",
                             train_timestamp_token,
@@ -407,6 +539,9 @@ def _(
                         "git_commit": get_git_commit(),
                         "notebook": "notebooks/b1_seed_ml_baseline.py",
                         "model_params": lgb_params,
+                        "target_mode": TARGET_MODE,
+                        "structure_label_col": STRUCTURE_LABEL_COL if TARGET_MODE == "two_stage_textbook" else None,
+                        "stage2_label_col": STAGE2_LABEL_COL if TARGET_MODE == "two_stage_textbook" else LABEL_COL,
                         "train_window": TRAIN_WINDOW,
                         "retrain_freq": RETRAIN_FREQ,
                         "seed_col": SEED_COL,
@@ -437,6 +572,8 @@ def _(
     LABEL_COL,
     POSITIVE_LABEL_THRESHOLD,
     SCORE_THRESHOLD_QUANTILES,
+    STRUCTURE_LABEL_COL,
+    TARGET_MODE,
     TOPK_LIST,
     df_scores_raw,
     df_seed,
@@ -650,6 +787,86 @@ def _(
         print(threshold_table)
         print("\n  top-k 表现:")
         print(topk_table)
+        if TARGET_MODE == "two_stage_textbook":
+            df_structure_eval = (
+                df_seed.join(df_scores_raw, on=["date", "code"], how="inner")
+                .filter(pl.col("structure_score").is_not_null())
+                .sort(["date", "code"])
+            )
+            if df_structure_eval.height:
+                structure_cut = float(np.quantile(df_structure_eval["structure_score"].to_numpy(), 0.90))
+                top_structure = df_structure_eval.filter(pl.col("structure_score") >= structure_cut)
+                textbook_case_rows = (
+                    df_structure_eval.filter(pl.col("is_textbook_case")).height
+                    if "is_textbook_case" in df_structure_eval.columns
+                    else 0
+                )
+                textbook_case_top_hit = (
+                    float(
+                        df_structure_eval
+                        .filter(pl.col("is_textbook_case"))
+                        .select((pl.col("structure_score") >= structure_cut).cast(pl.Float64).mean())
+                        .item()
+                    )
+                    if textbook_case_rows
+                    else 0.0
+                )
+                structure_summary = pl.DataFrame(
+                    [
+                        {
+                            "metric": "structure_positive_rate",
+                            "value": f"{float(df_structure_eval[STRUCTURE_LABEL_COL].mean()):.2%}",
+                        },
+                        {
+                            "metric": "structure_top_decile_hit",
+                            "value": f"{float(top_structure[STRUCTURE_LABEL_COL].mean()):.2%}" if top_structure.height else "0.00%",
+                        },
+                        {
+                            "metric": "textbook_case_rows",
+                            "value": str(textbook_case_rows),
+                        },
+                        {
+                            "metric": "textbook_case_top_decile_hit",
+                            "value": f"{textbook_case_top_hit:.2%}",
+                        },
+                    ]
+                )
+                print("\n  结构识别摘要:")
+                print(structure_summary)
+                component_cols = [
+                    "textbook_trend_score",
+                    "textbook_kbar_score",
+                    "textbook_volume_score",
+                    "textbook_trigger_score",
+                ]
+                available_component_cols = [
+                    component_col
+                    for component_col in component_cols
+                    if component_col in df_structure_eval.columns
+                ]
+                if available_component_cols:
+                    component_rows = []
+                    for component_col in available_component_cols:
+                        component_rows.extend(
+                            [
+                                {
+                                    "slice": "all",
+                                    "component": component_col,
+                                    "mean_value": float(df_structure_eval[component_col].mean()),
+                                },
+                                {
+                                    "slice": "top_structure_decile",
+                                    "component": component_col,
+                                    "mean_value": float(top_structure[component_col].mean()) if top_structure.height else 0.0,
+                                },
+                            ]
+                        )
+                    print("\n  结构子分画像:")
+                    print(
+                        pl.DataFrame(component_rows).with_columns(
+                            pl.col("mean_value").round(4)
+                        )
+                    )
     return
 
 
@@ -688,6 +905,8 @@ def _(
                 [
                     pl.col(SEED_COL).fill_null(False).alias("b1_signal"),
                     pl.col("score").fill_null(-999.0),
+                    pl.col("structure_score").fill_null(0.0),
+                    pl.col("payoff_score").fill_null(0.0),
                 ]
             )
         )
@@ -710,7 +929,7 @@ def _(
             output_path=output_path,
             loose_periods=LOOSE_PERIODS,
             start_date=EXPORT_START_DATE,
-            extra_sort_cols=["score"],
+            extra_sort_cols=["score", "structure_score", "payoff_score"],
             raw_scores=df_scores_raw,
             artifact_metadata=export_meta,
             write_latest_alias=True,
@@ -725,7 +944,7 @@ def _(
 @app.cell
 def _(datetime, df_export, pl):
     df_feb = df_export.filter(
-        pl.col("date") >= datetime(2026, 4, 10)
+        pl.col("date") == datetime(2026, 4, 9)
     ).sort('score', descending=True).collect()
     return (df_feb,)
 
