@@ -495,6 +495,11 @@ def build_b1_research_frame(
             volume_windows=(),
             rolling_windows=(),
         )
+    optional_rotation_kbar_cols = (
+        list(B1_ROTATION_CORE12_KBAR_FEATURE_COLS)
+        if include_rotation_kbar_features
+        else []
+    )
 
     # ── Phase B: 过滤宇宙 + 计算特征 ─────────────────────────────────
     df_result = (
@@ -657,7 +662,7 @@ def build_b1_research_frame(
                         "seed_strict_v2",
                         "is_manual_bull",
                         *B1_MINING_FEATURE_COLS,
-                        *B1_ROTATION_CORE12_KBAR_FEATURE_COLS,
+                        *optional_rotation_kbar_cols,
                         "fwd_ret_1d",
                         "fwd_ret_2d",
                         "fwd_ret_3d",

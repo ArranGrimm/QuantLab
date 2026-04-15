@@ -530,6 +530,10 @@ Python (信号层)                    Rust (回测/执行层)
   - 先在 `notebooks/b1_condition_mining.py` 用 `LABEL_COL = "textbook_b1_score"` 看结构画像
   - 再切 `LABEL_COL = "fwd_mfe_risk_adj_10d"` 看结构合格后的收益排序画像
   - 最后在 `notebooks/b1_seed_ml_baseline.py` 设置 `TARGET_MODE = "two_stage_textbook"` 做训练、评估、导出
+- 新增研究入口:
+  - `notebooks/b1_case_expansion_mining.py`
+  - 用 `seed_mid` 历史样本池做“结果强 + 结构相似 + 曲线相似”的案例扩容挖掘
+  - 当前先不依赖 `fastdtw`, 用简化版曲线距离验证历史扩容思路
 - 当前风险:
   - 教科书案例样本量仍然很少, `textbook_b1_threshold` 只是工程化起点, 不是最终标准
   - `Step 4` 当前呈现“全截面负 IC, 但 top-tail / 近端样本有苗头”的分裂信号, 暂不能直接当成成熟主线

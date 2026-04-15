@@ -1272,3 +1272,25 @@
 - 当前限制:
   - 当前 Windows 终端若未显式使用 `uv run python -X utf8`，旧日志里的 emoji 可能触发 `UnicodeEncodeError`
   - `textbook_b1_threshold` 目前按案例分数 `q20` 动态推导, 后续仍需结合正类占比和回测结果再校准
+
+### B1 历史案例扩容挖掘 notebook
+
+- 新增 `notebooks/b1_case_expansion_mining.py`
+- 当前默认输入池改用 `seed_mid`
+- 当前 notebook 目标:
+  - 从 `2021-01-01 ~ 2025-12-31` 的 `seed_mid` 样本里
+  - 先按 `fwd_mfe_10d / fwd_mae_10d / fwd_mfe_risk_adj_10d` 过滤出“结果强”样本
+  - 再与现有 textbook 案例做两层相似度比较:
+    - 结构向量相似度
+    - 归一化价格曲线相似度
+- 当前实现不依赖 `fastdtw`, 先用固定窗口归一化曲线 + 简化距离做第一版验证
+- 输出字段包括:
+  - `best_match_case`
+  - `feature_similarity`
+  - `curve_similarity`
+  - `total_similarity`
+  - `expanded_textbook_candidate`
+- 当前验证状态:
+  - `python -m py_compile notebooks/b1_case_expansion_mining.py`
+  - `uv run python -c "import importlib.util; ... b1_case_expansion_mining.py"` 通过
+  - `uv run marimo check notebooks/b1_case_expansion_mining.py` 通过
