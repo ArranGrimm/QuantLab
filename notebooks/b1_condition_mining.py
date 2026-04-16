@@ -10,6 +10,11 @@ def _():
     import numpy as np
     import polars as pl
 
+    from manifests import (
+        B1_BASE_TEXTBOOK_CASES,
+        B1_TEXTBOOK_CASES,
+        EXPANDED_TEXTBOOK_CASES,
+    )
     from utils import (
         B1_FEATURE_GROUP_LABELS,
         B1_FEATURE_GROUPS,
@@ -104,13 +109,16 @@ def _():
     return (
         ACTIVE_SEED_COL,
         ANALYSIS_FEATURE_SET_NAME,
+        B1_BASE_TEXTBOOK_CASES,
         B1_FEATURE_GROUPS,
         B1_FEATURE_GROUP_LABELS,
+        B1_TEXTBOOK_CASES,
         CORR_SAMPLE_N,
         CORR_THRESHOLD,
         DB_PATH,
         DECAY_HORIZONS,
         END_DATE,
+        EXPANDED_TEXTBOOK_CASES,
         LABEL_COL,
         LOOSE_PERIODS,
         MIN_DAILY_SAMPLES,
@@ -149,11 +157,14 @@ def _():
 def _(
     ACTIVE_SEED_COL,
     ANALYSIS_FEATURE_SET_NAME,
+    B1_BASE_TEXTBOOK_CASES,
     LABEL_COL,
     N_BINS,
     TRAIN_FEATURE_SET_NAME,
     USE_BULL_ONLY,
     analysis_feature_desc,
+    B1_TEXTBOOK_CASES,
+    EXPANDED_TEXTBOOK_CASES,
     train_feature_desc,
 ):
     print("=" * 72)
@@ -173,6 +184,9 @@ def _(
     print(f"  n_bins:              {N_BINS}")
     print(f"  analysis_feature_set:{ANALYSIS_FEATURE_SET_NAME}")
     print(f"  train_feature_set:   {TRAIN_FEATURE_SET_NAME}")
+    print(f"  textbook_base_cases: {len(B1_BASE_TEXTBOOK_CASES)}")
+    print(f"  textbook_expanded:   {len(EXPANDED_TEXTBOOK_CASES)}")
+    print(f"  textbook_total:      {len(B1_TEXTBOOK_CASES)}")
     print("")
     print(f"  analysis_desc: {analysis_feature_desc}")
     print(f"  train_desc:    {train_feature_desc}")
@@ -527,6 +541,9 @@ def _(
     ACTIVE_SEED_COL,
     LABEL_COL,
     POSITIVE_LABEL_THRESHOLD,
+    B1_BASE_TEXTBOOK_CASES,
+    B1_TEXTBOOK_CASES,
+    EXPANDED_TEXTBOOK_CASES,
     USE_BULL_ONLY,
     available_analysis_feature_cols,
     available_train_feature_cols,
@@ -552,6 +569,9 @@ def _(
         },
         {"item": "analysis_feature_count", "value": str(len(available_analysis_feature_cols))},
         {"item": "train_feature_count", "value": str(len(available_train_feature_cols))},
+        {"item": "textbook_base_cases", "value": str(len(B1_BASE_TEXTBOOK_CASES))},
+        {"item": "textbook_expanded_cases", "value": str(len(EXPANDED_TEXTBOOK_CASES))},
+        {"item": "textbook_total_cases", "value": str(len(B1_TEXTBOOK_CASES))},
     ]
     if "textbook_b1_score" in df_lab.columns:
         summary_rows.append(

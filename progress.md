@@ -1,5 +1,108 @@
 # Progress
 
+## 2026-04-16
+
+### [B1] 双阶段 tail15 当前已收敛到 `payoff_score` 排序
+- 已更新:
+  - `progress.md`
+  - `project-status.md`
+- 当前结论:
+  - `Step 4` 三路诊断已确认:
+    - `payoff_score` 是强正排序信号
+    - `structure_score` 对 `fwd_mfe_risk_adj_10d` 是负排序信号
+    - `final_score = structure_score * payoff_score` 会把原本有效的 `payoff_score` 排序拉坏
+  - `tail15 classifier` + `sort_field = "payoff_score"` 的最新六窗回测已全部转正
+  - 但长窗最大回撤仍在 `30%~43%`, 暂不升格为稳定主线
+- 当前收口口径:
+  - 训练层保留双阶段:
+    - `Stage 1`: 继续学 `is_textbook_b1`
+    - `Stage 2`: 继续学 `P(fwd_mfe_risk_adj_10d >= 0.15)`
+  - 组合层当前不再把 `structure_score * payoff_score` 视为默认排序主线
+  - 当前研究默认排序字段改为 `payoff_score`
+  - `structure_score` 暂时只保留为结构诊断与后续软过滤候选，不再作为收益排序乘子
+- 当前建议:
+  - 如果后续恢复探索，优先验证“`payoff_score` 直排 + 结构软过滤/弱加权”而不是继续调 `final_score` 绝对阈值
+
+### [B1] Step 4 已支持 final / payoff / structure 三路分数并排诊断
+- 已更新:
+  - `notebooks/b1_seed_ml_baseline.py`
+- 当前实现:
+  - `Step 4` 不再只评估 `score`
+  - 当前会同时输出:
+    - `final_score` (`score`)
+    - `payoff_score`
+    - `structure_score`
+  - `分层结果 / score 分位数 / threshold 表 / top-k 表` 都会附带 `score_source`
+  - 当前目的:
+    - 直接判断问题出在 `payoff_score`
+    - 还是出在 `final_score = structure_score * payoff_score` 这个组合方式
+- 当前验证:
+  - `uv run marimo check notebooks/b1_seed_ml_baseline.py` 通过
+  - `uv run python -m py_compile notebooks/b1_seed_ml_baseline.py` 通过
+
+### [B1] Stage2 已从连续回归切到 strong-tail classifier
+- 已更新:
+  - `notebooks/b1_seed_ml_baseline.py`
+- 当前实现:
+  - `Stage 2` 当前默认不再回归连续 `fwd_mfe_risk_adj_10d`
+  - 改为二分类尾部目标:
+    - `STAGE2_MODEL_MODE = "tail_classifier"`
+    - `STAGE2_TAIL_THRESHOLD = 0.15`
+  - 当前最终分数口径变为:
+    - `final_score = P(is_textbook_b1) * P(fwd_mfe_risk_adj_10d >= 0.15)`
+  - 保留现有 `score / structure_score / payoff_score` 导出字段，避免影响 Rust 导出与回测链路
+  - 训练 metadata 当前已新增:
+    - `stage2_model_mode`
+    - `stage2_tail_threshold`
+  - `run_label` 当前会显式带上 `tail15`
+- 当前目的:
+  - 不再让 Stage 2 追求“平均收益回归”
+  - 直接把训练目标收口到 `15%+` 强尾部样本识别
+- 当前验证:
+  - `uv run marimo check notebooks/b1_seed_ml_baseline.py` 通过
+  - `uv run python -m py_compile notebooks/b1_seed_ml_baseline.py` 通过
+
+### [B1] Stage2 训练门槛与 Step 4 尾部命中诊断已收紧
+- 已更新:
+  - `notebooks/b1_seed_ml_baseline.py`
+- 当前实现:
+  - `Stage 2` 当前新增训练门槛: `fwd_mfe_risk_adj_10d >= 0.10`
+  - `Step 4` 不再只看单一 `hit_7%`, 当前同时输出:
+    - `hit_7pct`
+    - `hit_10pct`
+    - `hit_15pct`
+    - `hit_18pct`
+  - `score threshold` 与 `top-k` 表都会同步展示上述 4 档命中率
+  - 训练 metadata 当前已新增:
+    - `stage2_min_label_for_train`
+    - `eval_hit_thresholds`
+- 当前目的:
+  - 减少 `Stage 2` 被中等强度样本稀释
+  - 直接观察模型是否真的把 `10%~18%` 的强尾部样本压到更前排
+- 当前验证:
+  - `uv run marimo check notebooks/b1_seed_ml_baseline.py` 通过
+  - `uv run python -m py_compile notebooks/b1_seed_ml_baseline.py` 通过
+
+### [B1] 双阶段训练已接入 textbook / recent / tail sample_weight
+- 已更新:
+  - `notebooks/b1_seed_ml_baseline.py`
+- 当前实现:
+  - 训练入口新增可配置样本加权口径:
+    - `base textbook case = 3.0x`
+    - `expanded textbook case = 2.0x`
+    - `recent sample = 1.5x @ 2022-01-01+`
+    - `stage2 tail label = 2.0x @ >=15%` (`tail_classifier` 默认口径)
+  - `Stage 1 (is_textbook_b1)` 当前使用 `base / expanded / recent` 权重
+  - `Stage 2 (fwd_mfe_risk_adj_10d)` 当前在 `base / expanded / recent` 之外，再额外加 `tail` 权重
+  - 每次 walk-forward 重训日志会输出 `stage1_w_mean / stage2_w_mean / stage2_tail_cut`
+  - artifact `train metadata` 已落盘 `sample_weighting` 配置，后续回看训练产物时可直接追溯
+- 当前目的:
+  - 不再让模型平均学习全部 seed 样本
+  - 明确把训练重心压向“更像 textbook 且 recent 更有效”的 tail filter
+- 当前验证:
+  - `uv run marimo check notebooks/b1_seed_ml_baseline.py` 通过
+  - `uv run python -m py_compile notebooks/b1_seed_ml_baseline.py` 通过
+
 ## 2026-04-14
 
 ### [B1] Rotation Core12 + KBAR 已接入 B1 Lab 实验特征集
@@ -199,6 +302,7 @@
 - `scripts/b1_backtest.py` 当前已支持:
   - 不传 `--config` 时，按 signal metadata 自动选择 `config.toml / config_ml.toml`
   - 使用 `--start-date YYYY-MM-DD` 覆盖回测起始时间
+  - 使用 `--min-score 0.0641` 覆盖 `backtest.min_score`
 
 ### [B1] `bt-b1` 已修复同日买入又同日卖出的 T+1 bug
 - 问题现象:
@@ -1229,7 +1333,13 @@
 
 ### B1 教科书双阶段目标首版落地
 
-- 在 `utils/b1_feature_pool.py` 新增 `B1_TEXTBOOK_CASES`、`B1_TEXTBOOK_SCORE_FEATURE_COLS`、`B1_TEXTBOOK_RULE_COLS`
+- 教科书案例清单已从 `utils/` 拆到 manifest 层:
+  - `manifests/b1_textbook_cases.py`
+  - `manifests/b1_expanded_textbook_cases.py`
+- `utils/b1_feature_pool.py` 现在只消费 `B1_TEXTBOOK_CASES` manifest，不再自己维护案例常量
+- `notebooks/b1_condition_mining.py` 已同步显示 `base / expanded / total` 案例规模，避免分析层与训练层脱节
+- `notebooks/b1_seed_ml_baseline.py` 已同步显示并记录 `textbook base / expanded / total` 规模与 `textbook_cases_version`，训练元数据会随 artifact 一并落下
+- `B1_TEXTBOOK_SCORE_FEATURE_COLS`、`B1_TEXTBOOK_RULE_COLS` 仍由 `utils/b1_feature_pool.py` 维护
 - 基于教科书案例在研究底表中动态生成:
   - `textbook_similarity_score`
   - `textbook_rule_score`
@@ -1277,19 +1387,30 @@
 
 - 新增 `notebooks/b1_case_expansion_mining.py`
 - 当前默认输入池改用 `seed_mid`
+- 当前结构职责已收口为:
+  - 分析层: `notebooks/b1_case_expansion_mining.py`
+  - 清单层: `manifests/b1_textbook_cases.py` / `manifests/b1_expanded_textbook_cases.py`
+  - 训练层: `utils/b1_feature_pool.py` / `notebooks/b1_seed_ml_baseline.py`
 - 当前 notebook 目标:
   - 从 `2021-01-01 ~ 2025-12-31` 的 `seed_mid` 样本里
   - 先按 `fwd_mfe_10d / fwd_mae_10d / fwd_mfe_risk_adj_10d` 过滤出“结果强”样本
-  - 再与现有 textbook 案例做两层相似度比较:
+  - 再与 `B1_BASE_TEXTBOOK_CASES` 做两层相似度比较:
     - 结构向量相似度
     - 归一化价格曲线相似度
 - 当前实现不依赖 `fastdtw`, 先用固定窗口归一化曲线 + 简化距离做第一版验证
-- 输出字段包括:
+- 当前保留的核心输出:
   - `best_match_case`
-  - `feature_similarity`
-  - `curve_similarity`
-  - `total_similarity`
-  - `expanded_textbook_candidate`
+  - `Top-k Archetype 覆盖摘要`
+  - `Archetype 两两相似度矩阵`
+  - `扩容候选分组摘要 / 明细`
+  - 最终 `EXPANDED_TEXTBOOK_CASES` manifest 产物
+- 最终产物口径:
+  - 只收 `top1`
+  - 按 `total_similarity / fwd_mfe_risk_adj_10d / textbook_b1_score` 做保守筛选
+  - 当前收紧为 `0.84 / 0.18 / 0.75`
+  - 每个 archetype 当前上限 `8`
+  - 最终 manifest 按 `(source_archetype, code)` 去重，只保留该股票最优日期
+  - 默认生成 Python manifest 文本，必要时再显式写入 `manifests/b1_expanded_textbook_cases.py`
 - 当前验证状态:
   - `python -m py_compile notebooks/b1_case_expansion_mining.py`
   - `uv run python -c "import importlib.util; ... b1_case_expansion_mining.py"` 通过

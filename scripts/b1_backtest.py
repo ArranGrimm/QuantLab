@@ -66,6 +66,8 @@ def build_b1_config_overrides(args: argparse.Namespace) -> dict[str, object]:
         overrides["backtest.max_hold_days"] = args.max_hold_days
     if args.max_daily_buys is not None:
         overrides["backtest.max_daily_buys"] = args.max_daily_buys
+    if args.min_score is not None:
+        overrides["backtest.min_score"] = args.min_score
     if args.sort_field is not None:
         overrides["backtest.sort_field"] = args.sort_field
     if args.sort_ascending is not None:
@@ -281,6 +283,7 @@ def main() -> int:
     parser.add_argument("--end-date", help="覆盖 backtest.end_date")
     parser.add_argument("--max-hold-days", type=int, help="覆盖 backtest.max_hold_days")
     parser.add_argument("--max-daily-buys", type=int, help="覆盖 backtest.max_daily_buys")
+    parser.add_argument("--min-score", type=float, help="覆盖 backtest.min_score")
     parser.add_argument("--sort-field", help="覆盖 backtest.sort_field")
     parser.add_argument(
         "--sort-ascending",

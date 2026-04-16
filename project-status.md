@@ -413,7 +413,7 @@
   - 当前通过 `train_run_id / signal_source=rule_wmacd / model_name=wmacd_rule / feature_mode=rule` 与 ML 版显式区分
   - B1 配置当前已收口为 `config.toml`(rule) / `config_ml.toml`(ml)
   - `scripts/b1_backtest.py` 的选择列表当前会直接显示 `source / model / label / feature_set`
-  - `scripts/b1_backtest.py` 当前在不传 `--config` 时会按 signal metadata 自动选择 rule/ml 默认配置，并支持 `--start-date` 覆盖起始时间
+- `scripts/b1_backtest.py` 当前在不传 `--config` 时会按 signal metadata 自动选择 rule/ml 默认配置，并支持 `--start-date / --min-score` 等关键回测参数覆盖
   - `bt-b1` 当前已修复 A 股 `T+1` 约束缺失导致的“同日买入、同日 TP/SELL”错误，规则版与 ML 版共用该修复
 - `bt-b1` 当前最终平仓日志已拆分 `ExitPnL`(本次清仓收益) 与 `TradePnL`(整笔累计收益)，并显式输出 `Stage: None/TP1/TP2`
   - 当前回测报告已支持输出最大回撤对应的 `peak date / trough date / recovery date`，便于直接判断 drawdown 是否集中在近端 regime
@@ -510,13 +510,39 @@ Python (信号层)                    Rust (回测/执行层)
 
 ### B1 双阶段目标状态
 
-- 状态: 已完成首版接线, 等待 notebook 实跑与回测验证
+- 状态: 已完成首版接线与第一轮收敛, 当前研究默认排序已切向 `payoff_score`
 - 目标:
   - Stage 1 学 “教科书结构一致性”
-  - Stage 2 在结构合格样本里学 “风险调整收益排序”
+  - Stage 2 在结构合格样本里学 “强尾部收益概率”
 - 已完成:
   - `utils/b1_feature_pool.py` 已把教科书案例转成研究底表标签与分数
+  - `manifests/b1_textbook_cases.py` / `manifests/b1_expanded_textbook_cases.py` 已接管教科书案例清单
   - `notebooks/b1_seed_ml_baseline.py` 已支持 `TARGET_MODE = "two_stage_textbook"`
+  - `notebooks/b1_seed_ml_baseline.py` 已把 textbook manifest 版本与案例规模纳入训练入口显示和导出元数据
+  - `notebooks/b1_seed_ml_baseline.py` 已接入训练侧 `sample_weight`
+  - `notebooks/b1_seed_ml_baseline.py` 已新增 `Stage 2` 训练门槛: `fwd_mfe_risk_adj_10d >= 0.10`
+  - `notebooks/b1_seed_ml_baseline.py` 的 `Step 4` 已新增多档尾部命中诊断:
+    - `hit_7pct / hit_10pct / hit_15pct / hit_18pct`
+  - `notebooks/b1_seed_ml_baseline.py` 的 `Step 4` 当前已支持三路分数并排诊断:
+    - `final_score`
+    - `payoff_score`
+    - `structure_score`
+  - `notebooks/b1_seed_ml_baseline.py` 当前已把 `Stage 2` 默认目标改为 strong-tail classifier:
+    - `P(fwd_mfe_risk_adj_10d >= 0.15)`
+    - 导出仍保留 `final_score = structure_prob * tail_prob`
+  - 第一轮诊断结论已经收敛:
+    - `payoff_score` 是强正排序信号
+    - `structure_score` 对收益排序是负信号
+    - `final_score = structure_score * payoff_score` 会破坏排序
+  - 当前六窗最新回测结论:
+    - `sort_field = "payoff_score"` 已实现六窗全部为正
+    - 但长窗最大回撤仍约 `30%~43%`, 仍属于研究态而非可执行主线
+  - 当前加权口径:
+    - `base textbook case = 3.0x`
+    - `expanded textbook case = 2.0x`
+    - `recent sample = 1.5x @ 2022-01-01+`
+    - `stage2 tail label = 2.0x @ >=15%` (`tail_classifier` 默认口径)
+  - 当前 artifact metadata 已保留 `sample_weighting / stage2_model_mode / stage2_tail_threshold / stage2_min_label_for_train / eval_hit_thresholds` 配置, 便于后续重训结果追溯
   - `notebooks/b1_condition_mining.py` 已支持 `textbook_b1_score / is_textbook_b1` 诊断
   - Rust 导出侧已保留 `score / structure_score / payoff_score`
   - 已通过 `uv run` 导入与底表冒烟验证, 当前链路可实际运行
@@ -524,19 +550,29 @@ Python (信号层)                    Rust (回测/执行层)
   - Stage 1 标签: `is_textbook_b1`
   - Stage 1 连续分数: `textbook_b1_score`
   - Stage 1 子分: `textbook_trend_score / textbook_kbar_score / textbook_volume_score / textbook_trigger_score`
-  - Stage 2 标签: `fwd_mfe_risk_adj_10d`
-  - 组合分数: `final_score = structure_score * payoff_score`
+  - Stage 2 标签: `is_tail15 = (fwd_mfe_risk_adj_10d >= 0.15)`
+  - 当前研究默认排序字段: `payoff_score`
+  - `final_score = structure_score * payoff_score` 当前保留导出, 但已降级为诊断字段
 - 当前使用路径:
   - 先在 `notebooks/b1_condition_mining.py` 用 `LABEL_COL = "textbook_b1_score"` 看结构画像
   - 再切 `LABEL_COL = "fwd_mfe_risk_adj_10d"` 看结构合格后的收益排序画像
   - 最后在 `notebooks/b1_seed_ml_baseline.py` 设置 `TARGET_MODE = "two_stage_textbook"` 做训练、评估、导出
+  - 当前回测默认优先用 `sort_field = "payoff_score"` 做收益验证
 - 新增研究入口:
   - `notebooks/b1_case_expansion_mining.py`
   - 用 `seed_mid` 历史样本池做“结果强 + 结构相似 + 曲线相似”的案例扩容挖掘
   - 当前先不依赖 `fastdtw`, 用简化版曲线距离验证历史扩容思路
+  - 当前只保留 `top1 / topk / archetype 两两对比 / 扩容候选摘要` 等核心视图
+  - notebook 末尾可稳定产出 `EXPANDED_TEXTBOOK_CASES` manifest 文本，并可按需写回仓库
+  - 当前训练用 artifact 已收紧为保守版: 更高相似度/收益/Textbook 阈值, 每 archetype 更少配额, 且最终按 `(archetype, code)` 去重
+- 当前三层结构:
+  - 分析层: `notebooks/b1_condition_mining.py` / `notebooks/b1_case_expansion_mining.py`
+  - 清单层: `manifests/b1_textbook_cases.py` / `manifests/b1_expanded_textbook_cases.py`
+  - 训练层: `utils/b1_feature_pool.py` / `notebooks/b1_seed_ml_baseline.py`
 - 当前风险:
   - 教科书案例样本量仍然很少, `textbook_b1_threshold` 只是工程化起点, 不是最终标准
-  - `Step 4` 当前呈现“全截面负 IC, 但 top-tail / 近端样本有苗头”的分裂信号, 暂不能直接当成成熟主线
+  - 虽然 `payoff_score` 已显著转正并带来六窗正收益, 但回撤仍偏大, 暂不能直接当成成熟主线
+  - `structure_score` 当前更像结构画像特征, 不宜直接参与收益排序乘法
   - 教科书案例全部来自 `2025`, 当前结构标签可能存在时间风格锚定, 需要继续观察 `2026` 的独立表现
 
 ### 实验记录

@@ -10,6 +10,13 @@ def _():
     import numpy as np
     import polars as pl
 
+    from manifests import (
+        B1_BASE_TEXTBOOK_CASES,
+        B1_TEXTBOOK_CASES,
+        B1_TEXTBOOK_CASES_VERSION,
+        EXPANDED_TEXTBOOK_CASES,
+        EXPANDED_TEXTBOOK_CASES_VERSION,
+    )
     from utils import (
         b1_feature_set_requires_rotation_kbar,
         build_b1_research_frame,
@@ -33,13 +40,15 @@ def _():
     MV_MAX = 1500
     MIN_LIST_DAYS = 60
     SEED_J_MAX = 20.0
-    SEED_COL = "seed_strict"
+    SEED_COL = "seed_mid"
     USE_BULL_ONLY = False
 
     TARGET_MODE = "two_stage_textbook"
     STRUCTURE_LABEL_COL = "is_textbook_b1"
     STRUCTURE_SCORE_COL = "textbook_b1_score"
     STAGE2_LABEL_COL = "fwd_mfe_risk_adj_10d"
+    STAGE2_MODEL_MODE = "tail_classifier"
+    STAGE2_TAIL_THRESHOLD = 0.15
     LABEL_BY_TARGET_MODE: dict[str, str] = {
         "single_stage_mfe": "fwd_mfe_10d",
         "two_stage_textbook": STAGE2_LABEL_COL,
@@ -59,12 +68,31 @@ def _():
         "is_textbook_b1": 0.5,
     }
     POSITIVE_LABEL_THRESHOLD = POSITIVE_LABEL_THRESHOLDS.get(LABEL_COL, 0.05)
+    EVAL_HIT_THRESHOLDS_BY_LABEL: dict[str, tuple[float, ...]] = {
+        "fwd_mfe_risk_adj_10d": (0.07, 0.10, 0.15, 0.18),
+    }
+    EVAL_HIT_THRESHOLDS = EVAL_HIT_THRESHOLDS_BY_LABEL.get(
+        LABEL_COL,
+        (POSITIVE_LABEL_THRESHOLD,),
+    )
     FEATURE_SET_NAME = "selected_rotation_hybrid_v1"
     TRAIN_WINDOW = 480
     RETRAIN_FREQ = 20
     EMA_ALPHA = 1.0
     SCORE_THRESHOLD_QUANTILES = (0.50, 0.70, 0.80, 0.90, 0.95)
     TOPK_LIST = (1, 3, 5)
+    STAGE2_MIN_LABEL_FOR_TRAIN = (
+        0.10
+        if TARGET_MODE == "two_stage_textbook" and STAGE2_MODEL_MODE == "regression"
+        else None
+    )
+    ENABLE_SAMPLE_WEIGHT = True
+    BASE_TEXTBOOK_SAMPLE_WEIGHT = 3.0
+    EXPANDED_TEXTBOOK_SAMPLE_WEIGHT = 2.0
+    RECENT_SAMPLE_WEIGHT_START_DATE = "2022-01-01"
+    RECENT_SAMPLE_WEIGHT = 1.5
+    TAIL_SAMPLE_WEIGHT_QUANTILE = 0.90
+    TAIL_SAMPLE_WEIGHT = 2.0
 
     LOOSE_PERIODS = [
         ("2019-02-11", "2019-04-10"),
@@ -99,9 +127,18 @@ def _():
     FEATURE_SET_DESC = describe_b1_feature_set(FEATURE_SET_NAME)
     INCLUDE_ROTATION_KBAR_FEATURES = b1_feature_set_requires_rotation_kbar(FEATURE_SET_NAME)
     return (
+        B1_BASE_TEXTBOOK_CASES,
+        B1_TEXTBOOK_CASES,
+        B1_TEXTBOOK_CASES_VERSION,
+        BASE_TEXTBOOK_SAMPLE_WEIGHT,
         DB_PATH,
         EMA_ALPHA,
+        ENABLE_SAMPLE_WEIGHT,
+        EVAL_HIT_THRESHOLDS,
         END_DATE,
+        EXPANDED_TEXTBOOK_CASES,
+        EXPANDED_TEXTBOOK_SAMPLE_WEIGHT,
+        EXPANDED_TEXTBOOK_CASES_VERSION,
         EXPORT_START_DATE,
         FEATURE_COLS,
         FEATURE_SET_DESC,
@@ -113,15 +150,22 @@ def _():
         MV_MAX,
         MV_MIN,
         POSITIVE_LABEL_THRESHOLD,
+        RECENT_SAMPLE_WEIGHT,
+        RECENT_SAMPLE_WEIGHT_START_DATE,
         RETRAIN_FREQ,
         SCORE_THRESHOLD_QUANTILES,
         SEED_COL,
         SEED_J_MAX,
         STAGE2_LABEL_COL,
+        STAGE2_MODEL_MODE,
+        STAGE2_TAIL_THRESHOLD,
+        STAGE2_MIN_LABEL_FOR_TRAIN,
         START_DATE,
         STRUCTURE_LABEL_COL,
         STRUCTURE_SCORE_COL,
         ST_SNAPSHOT_DATE,
+        TAIL_SAMPLE_WEIGHT,
+        TAIL_SAMPLE_WEIGHT_QUANTILE,
         TARGET_MODE,
         TOPK_LIST,
         TRAIN_WINDOW,
@@ -139,19 +183,35 @@ def _():
 
 @app.cell
 def _(
+    BASE_TEXTBOOK_SAMPLE_WEIGHT,
+    B1_BASE_TEXTBOOK_CASES,
+    B1_TEXTBOOK_CASES,
+    B1_TEXTBOOK_CASES_VERSION,
     EMA_ALPHA,
+    ENABLE_SAMPLE_WEIGHT,
+    EVAL_HIT_THRESHOLDS,
+    EXPANDED_TEXTBOOK_CASES,
+    EXPANDED_TEXTBOOK_SAMPLE_WEIGHT,
+    EXPANDED_TEXTBOOK_CASES_VERSION,
     FEATURE_COLS,
     FEATURE_SET_DESC,
     FEATURE_SET_NAME,
     INCLUDE_ROTATION_KBAR_FEATURES,
     LABEL_COL,
     POSITIVE_LABEL_THRESHOLD,
+    RECENT_SAMPLE_WEIGHT,
+    RECENT_SAMPLE_WEIGHT_START_DATE,
     RETRAIN_FREQ,
     SCORE_THRESHOLD_QUANTILES,
     SEED_COL,
     STAGE2_LABEL_COL,
+    STAGE2_MODEL_MODE,
+    STAGE2_TAIL_THRESHOLD,
+    STAGE2_MIN_LABEL_FOR_TRAIN,
     STRUCTURE_LABEL_COL,
     STRUCTURE_SCORE_COL,
+    TAIL_SAMPLE_WEIGHT,
+    TAIL_SAMPLE_WEIGHT_QUANTILE,
     TARGET_MODE,
     TOPK_LIST,
     TRAIN_WINDOW,
@@ -178,12 +238,36 @@ def _(
     print(f"  ema_alpha:         {EMA_ALPHA}")
     print(f"  score_threshold_q: {SCORE_THRESHOLD_QUANTILES}")
     print(f"  topk_list:         {TOPK_LIST}")
+    print(f"  eval_hit_thresh:   {EVAL_HIT_THRESHOLDS}")
+    print(f"  stage2_model:      {STAGE2_MODEL_MODE}")
+    print(f"  stage2_tail_th:    {STAGE2_TAIL_THRESHOLD:.2%}")
+    print(f"  stage2_train_min:  {STAGE2_MIN_LABEL_FOR_TRAIN}")
+    print(f"  sample_weight:     {ENABLE_SAMPLE_WEIGHT}")
+    if ENABLE_SAMPLE_WEIGHT:
+        _tail_weight_desc = (
+            f">={STAGE2_TAIL_THRESHOLD:.2%}"
+            if STAGE2_MODEL_MODE == "tail_classifier"
+            else f"q{int(TAIL_SAMPLE_WEIGHT_QUANTILE * 100)}"
+        )
+        print(
+            "  weighting_cfg:     "
+            f"base={BASE_TEXTBOOK_SAMPLE_WEIGHT:.2f}x, "
+            f"expanded={EXPANDED_TEXTBOOK_SAMPLE_WEIGHT:.2f}x, "
+            f"recent={RECENT_SAMPLE_WEIGHT:.2f}x@{RECENT_SAMPLE_WEIGHT_START_DATE}, "
+            f"tail={TAIL_SAMPLE_WEIGHT:.2f}x@{_tail_weight_desc}"
+        )
+    print(f"  textbook_base:     {len(B1_BASE_TEXTBOOK_CASES)}")
+    print(f"  textbook_expanded: {len(EXPANDED_TEXTBOOK_CASES)}")
+    print(f"  textbook_total:    {len(B1_TEXTBOOK_CASES)}")
+    print(f"  textbook_version:  {B1_TEXTBOOK_CASES_VERSION}")
+    print(f"  expanded_version:  {EXPANDED_TEXTBOOK_CASES_VERSION}")
     print("")
     print("  quick_start:")
     print('    1. 结构 Lab: `notebooks/b1_condition_mining.py` -> LABEL_COL = "textbook_b1_score"')
     print('    2. 收益 Lab: `notebooks/b1_condition_mining.py` -> LABEL_COL = "fwd_mfe_risk_adj_10d"')
-    print('    3. 双阶段训练: 当前 notebook -> TARGET_MODE = "two_stage_textbook"')
-    print("    4. 看 Step 4 的 structure 摘要和 top-k，再导出给 Rust")
+    print('    3. 案例扩容: `notebooks/b1_case_expansion_mining.py` -> 按需写入 `manifests/b1_expanded_textbook_cases.py`')
+    print('    4. 双阶段训练: 当前 notebook -> TARGET_MODE = "two_stage_textbook"')
+    print("    5. 看 Step 4 的 structure 摘要和 top-k，再导出给 Rust")
     return
 
 
@@ -229,6 +313,10 @@ def _(
 
 @app.cell
 def _(
+    B1_BASE_TEXTBOOK_CASES,
+    B1_TEXTBOOK_CASES,
+    B1_TEXTBOOK_CASES_VERSION,
+    EXPANDED_TEXTBOOK_CASES,
     FEATURE_COLS,
     FEATURE_SET_NAME,
     INCLUDE_ROTATION_KBAR_FEATURES,
@@ -271,6 +359,10 @@ def _(
                 {"item": "code_count_seed", "value": str(df_seed["code"].n_unique()) if df_seed.height else "0"},
                 {"item": "feature_set", "value": FEATURE_SET_NAME},
                 {"item": "feature_count", "value": str(len(valid_feature_cols))},
+                {"item": "textbook_base_cases", "value": str(len(B1_BASE_TEXTBOOK_CASES))},
+                {"item": "textbook_expanded_cases", "value": str(len(EXPANDED_TEXTBOOK_CASES))},
+                {"item": "textbook_total_cases", "value": str(len(B1_TEXTBOOK_CASES))},
+                {"item": "textbook_cases_version", "value": B1_TEXTBOOK_CASES_VERSION},
             ]
         )
     )
@@ -279,15 +371,31 @@ def _(
 
 @app.cell
 def _(
+    BASE_TEXTBOOK_SAMPLE_WEIGHT,
+    B1_BASE_TEXTBOOK_CASES,
+    B1_TEXTBOOK_CASES,
+    B1_TEXTBOOK_CASES_VERSION,
+    ENABLE_SAMPLE_WEIGHT,
+    EVAL_HIT_THRESHOLDS,
+    EXPANDED_TEXTBOOK_CASES,
+    EXPANDED_TEXTBOOK_SAMPLE_WEIGHT,
+    EXPANDED_TEXTBOOK_CASES_VERSION,
     FEATURE_SET_NAME,
     LABEL_COL,
     MIN_LIST_DAYS,
     MV_MAX,
     MV_MIN,
+    RECENT_SAMPLE_WEIGHT,
+    RECENT_SAMPLE_WEIGHT_START_DATE,
     RETRAIN_FREQ,
     SEED_COL,
     STAGE2_LABEL_COL,
+    STAGE2_MODEL_MODE,
+    STAGE2_TAIL_THRESHOLD,
+    STAGE2_MIN_LABEL_FOR_TRAIN,
     STRUCTURE_LABEL_COL,
+    TAIL_SAMPLE_WEIGHT,
+    TAIL_SAMPLE_WEIGHT_QUANTILE,
     TARGET_MODE,
     TRAIN_WINDOW,
     USE_BULL_ONLY,
@@ -327,20 +435,82 @@ def _(
         if df_seed.is_empty():
             print("⚠️ 当前 seed 样本为空，跳过训练。")
         else:
+            def _build_case_flag_df(case_rows, flag_col):
+                if not case_rows:
+                    return pl.DataFrame(
+                        schema={
+                            "code": pl.Utf8,
+                            "date": pl.Date,
+                            flag_col: pl.Boolean,
+                        }
+                    )
+                return (
+                    pl.DataFrame(case_rows)
+                    .with_columns(pl.col("date").str.strptime(pl.Date, "%Y-%m-%d"))
+                    .select(["code", "date"])
+                    .unique()
+                    .with_columns(pl.lit(True).alias(flag_col))
+                )
+
+            def _build_sample_weights(
+                dates,
+                base_flags,
+                expanded_flags,
+                *,
+                label_values=None,
+                enable_tail=False,
+                tail_label_threshold=None,
+            ):
+                weights = np.ones(len(dates), dtype=np.float32)
+                tail_cut = None
+                if not ENABLE_SAMPLE_WEIGHT:
+                    return weights, tail_cut
+                weights *= np.where(base_flags, BASE_TEXTBOOK_SAMPLE_WEIGHT, 1.0).astype(np.float32)
+                weights *= np.where(expanded_flags, EXPANDED_TEXTBOOK_SAMPLE_WEIGHT, 1.0).astype(np.float32)
+                recent_start = np.datetime64(RECENT_SAMPLE_WEIGHT_START_DATE)
+                weights *= np.where(dates >= recent_start, RECENT_SAMPLE_WEIGHT, 1.0).astype(np.float32)
+                if enable_tail and label_values is not None and len(label_values):
+                    if tail_label_threshold is None:
+                        tail_cut = float(np.quantile(label_values, TAIL_SAMPLE_WEIGHT_QUANTILE))
+                    else:
+                        tail_cut = float(tail_label_threshold)
+                    weights *= np.where(label_values >= tail_cut, TAIL_SAMPLE_WEIGHT, 1.0).astype(np.float32)
+                return weights, tail_cut
+
+            base_case_df = _build_case_flag_df(B1_BASE_TEXTBOOK_CASES, "is_base_textbook_case")
+            expanded_case_df = _build_case_flag_df(
+                EXPANDED_TEXTBOOK_CASES, "is_expanded_textbook_case"
+            )
+            df_seed_weighted = (
+                df_seed.join(base_case_df, on=["code", "date"], how="left")
+                .join(expanded_case_df, on=["code", "date"], how="left")
+                .with_columns(
+                    [
+                        pl.col("is_base_textbook_case")
+                        .fill_null(False)
+                        .alias("is_base_textbook_case"),
+                        pl.col("is_expanded_textbook_case")
+                        .fill_null(False)
+                        .alias("is_expanded_textbook_case"),
+                    ]
+                )
+            )
             df_structure_train = (
-                df_seed.filter(pl.col(STRUCTURE_LABEL_COL).is_not_null())
+                df_seed_weighted.filter(pl.col(STRUCTURE_LABEL_COL).is_not_null())
                 .filter(pl.all_horizontal(*[pl.col(col).is_not_null() for col in valid_feature_cols]))
                 .sort(["date", "code"])
             )
             df_train = (
-                df_seed.filter(pl.col(LABEL_COL).is_not_null())
+                df_seed_weighted.filter(pl.col(LABEL_COL).is_not_null())
                 .filter(pl.all_horizontal(*[pl.col(col).is_not_null() for col in valid_feature_cols]))
                 .sort(["date", "code"])
             )
             if TARGET_MODE == "two_stage_textbook":
                 df_train = df_train.filter(pl.col(STRUCTURE_LABEL_COL))
+            if STAGE2_MIN_LABEL_FOR_TRAIN is not None:
+                df_train = df_train.filter(pl.col(LABEL_COL) >= STAGE2_MIN_LABEL_FOR_TRAIN)
             df_score = (
-                df_seed
+                df_seed_weighted
                 .filter(pl.all_horizontal(*[pl.col(col).is_not_null() for col in valid_feature_cols]))
                 .sort(["date", "code"])
             )
@@ -356,9 +526,21 @@ def _(
                 x_structure_all = df_structure_train.select(valid_feature_cols).to_numpy().astype(np.float32)
                 y_structure_all = df_structure_train[STRUCTURE_LABEL_COL].cast(pl.Int8).to_numpy().astype(np.int32)
                 dates_structure_all = df_structure_train["date"].to_numpy()
+                is_base_structure_all = (
+                    df_structure_train["is_base_textbook_case"].to_numpy().astype(bool)
+                )
+                is_expanded_structure_all = (
+                    df_structure_train["is_expanded_textbook_case"].to_numpy().astype(bool)
+                )
                 x_all = df_train.select(valid_feature_cols).to_numpy().astype(np.float32)
-                y_all = df_train[LABEL_COL].to_numpy().astype(np.float64)
+                y_all_cont = df_train[LABEL_COL].to_numpy().astype(np.float64)
+                if STAGE2_MODEL_MODE == "tail_classifier":
+                    y_all = (y_all_cont >= STAGE2_TAIL_THRESHOLD).astype(np.int32)
+                else:
+                    y_all = y_all_cont
                 dates_all = df_train["date"].to_numpy()
+                is_base_all = df_train["is_base_textbook_case"].to_numpy().astype(bool)
+                is_expanded_all = df_train["is_expanded_textbook_case"].to_numpy().astype(bool)
                 x_score_all = df_score.select(valid_feature_cols).to_numpy().astype(np.float32)
                 dates_score_all = df_score["date"].to_numpy()
                 codes_score_all = df_score["code"].to_numpy()
@@ -410,6 +592,22 @@ def _(
                     flush=True,
                 )
                 print(
+                    f"   textbook案例: base={len(B1_BASE_TEXTBOOK_CASES)}, "
+                    f"expanded={len(EXPANDED_TEXTBOOK_CASES)}, "
+                    f"total={len(B1_TEXTBOOK_CASES)}",
+                    flush=True,
+                )
+                print(
+                    f"   textbook版本: {B1_TEXTBOOK_CASES_VERSION} "
+                    f"(expanded={EXPANDED_TEXTBOOK_CASES_VERSION})",
+                    flush=True,
+                )
+                if STAGE2_MIN_LABEL_FOR_TRAIN is not None:
+                    print(
+                        f"   stage2训练门槛: {LABEL_COL} >= {STAGE2_MIN_LABEL_FOR_TRAIN:.2%}",
+                        flush=True,
+                    )
+                print(
                     f"   有效样本: {df_train.height:,} 行, {len(all_dates)} 个交易日",
                     flush=True,
                 )
@@ -423,6 +621,7 @@ def _(
                         mask_tr = (dates_all >= np.datetime64(train_start)) & (dates_all < np.datetime64(cur_date))
                         x_tr = x_all[mask_tr]
                         y_tr = y_all[mask_tr]
+                        y_tr_cont = y_all_cont[mask_tr]
                         if TARGET_MODE == "two_stage_textbook":
                             mask_structure = (
                                 (dates_structure_all >= np.datetime64(train_start))
@@ -430,31 +629,81 @@ def _(
                             )
                             x_structure_tr = x_structure_all[mask_structure]
                             y_structure_tr = y_structure_all[mask_structure]
+                            structure_sample_weight, _ = _build_sample_weights(
+                                dates_structure_all[mask_structure],
+                                is_base_structure_all[mask_structure],
+                                is_expanded_structure_all[mask_structure],
+                            )
                             if len(y_structure_tr) >= 500 and len(np.unique(y_structure_tr)) >= 2:
                                 structure_model = LGBMClassifier(**lgb_cls_params)
-                                structure_model.fit(x_structure_tr, y_structure_tr)
+                                structure_model.fit(
+                                    x_structure_tr,
+                                    y_structure_tr,
+                                    sample_weight=structure_sample_weight,
+                                )
                             else:
                                 structure_model = None
 
                         if len(y_tr) < 500:
                             continue
-                        model = LGBMRegressor(**lgb_params)
-                        model.fit(x_tr, y_tr)
+                        stage2_sample_weight, stage2_tail_cut = _build_sample_weights(
+                            dates_all[mask_tr],
+                            is_base_all[mask_tr],
+                            is_expanded_all[mask_tr],
+                            label_values=y_tr_cont,
+                            enable_tail=True,
+                            tail_label_threshold=(
+                                STAGE2_TAIL_THRESHOLD
+                                if STAGE2_MODEL_MODE == "tail_classifier"
+                                else None
+                            ),
+                        )
+                        if STAGE2_MODEL_MODE == "tail_classifier":
+                            if len(np.unique(y_tr)) < 2:
+                                continue
+                            model = LGBMClassifier(**lgb_cls_params)
+                            model.fit(x_tr, y_tr, sample_weight=stage2_sample_weight)
+                        else:
+                            model = LGBMRegressor(**lgb_params)
+                            model.fit(x_tr, y_tr, sample_weight=stage2_sample_weight)
                         last_train_idx = i
 
                         pct = (i - TRAIN_WINDOW) / (len(all_dates) - TRAIN_WINDOW) * 100
                         if TARGET_MODE == "two_stage_textbook":
                             structure_rows = int(mask_structure.sum())
                             structure_pos = int(y_structure_tr.sum()) if len(y_structure_tr) else 0
+                            stage2_pos = int(y_tr.sum()) if STAGE2_MODEL_MODE == "tail_classifier" else 0
+                            structure_weight_mean = (
+                                float(structure_sample_weight.mean())
+                                if len(y_structure_tr)
+                                else 0.0
+                            )
+                            stage2_weight_mean = float(stage2_sample_weight.mean())
+                            tail_cut_text = (
+                                f", stage2_tail_cut: {stage2_tail_cut:.4f}"
+                                if stage2_tail_cut is not None
+                                else ""
+                            )
                             print(
                                 f"   [{cur_date}] 双阶段重训 ({pct:.0f}%), "
                                 f"stage1样本: {structure_rows:,} / 正类: {structure_pos:,}, "
-                                f"stage2样本: {len(y_tr):,}",
+                                f"stage1_w_mean: {structure_weight_mean:.2f}, "
+                                f"stage2样本: {len(y_tr):,}"
+                                f"{f' / 正类: {stage2_pos:,}' if STAGE2_MODEL_MODE == 'tail_classifier' else ''}, "
+                                f"stage2_w_mean: {stage2_weight_mean:.2f}"
+                                f"{tail_cut_text}",
                                 flush=True,
                             )
                         else:
+                            stage2_weight_mean = float(stage2_sample_weight.mean())
+                            tail_cut_text = (
+                                f", tail_cut: {stage2_tail_cut:.4f}"
+                                if stage2_tail_cut is not None
+                                else ""
+                            )
                             print(
-                                f"   [{cur_date}] 重训 ({pct:.0f}%), 样本: {len(y_tr):,}",
+                                f"   [{cur_date}] 重训 ({pct:.0f}%), 样本: {len(y_tr):,}, "
+                                f"weight_mean: {stage2_weight_mean:.2f}{tail_cut_text}",
                                 flush=True,
                             )
 
@@ -463,7 +712,10 @@ def _(
                     if not mask_score.any() or model is None:
                         continue
 
-                    payoff_preds = model.predict(x_score_all[mask_score])
+                    if STAGE2_MODEL_MODE == "tail_classifier":
+                        payoff_preds = model.predict_proba(x_score_all[mask_score])[:, 1]
+                    else:
+                        payoff_preds = model.predict(x_score_all[mask_score])
                     if TARGET_MODE == "two_stage_textbook":
                         if structure_model is None:
                             continue
@@ -485,7 +737,10 @@ def _(
                         mask_te = dates_score_all == np.datetime64(cur_date)
                         if not mask_te.any():
                             continue
-                        payoff_preds = model.predict(x_score_all[mask_te])
+                        if STAGE2_MODEL_MODE == "tail_classifier":
+                            payoff_preds = model.predict_proba(x_score_all[mask_te])[:, 1]
+                        else:
+                            payoff_preds = model.predict(x_score_all[mask_te])
                         if TARGET_MODE == "two_stage_textbook":
                             if structure_model is None:
                                 continue
@@ -516,7 +771,11 @@ def _(
                     run_label = (
                         LABEL_COL
                         if TARGET_MODE == "single_stage_mfe"
-                        else f"textbook_{STAGE2_LABEL_COL}"
+                        else (
+                            f"textbook_tail{int(STAGE2_TAIL_THRESHOLD * 100)}_{STAGE2_LABEL_COL}"
+                            if STAGE2_MODEL_MODE == "tail_classifier"
+                            else f"textbook_{STAGE2_LABEL_COL}"
+                        )
                     )
                     b1_train_meta = {
                         "strategy": "b1",
@@ -538,17 +797,48 @@ def _(
                         "trained_at": trained_at,
                         "git_commit": get_git_commit(),
                         "notebook": "notebooks/b1_seed_ml_baseline.py",
-                        "model_params": lgb_params,
+                        "model_params": (
+                            lgb_cls_params
+                            if STAGE2_MODEL_MODE == "tail_classifier"
+                            else lgb_params
+                        ),
                         "target_mode": TARGET_MODE,
                         "structure_label_col": STRUCTURE_LABEL_COL if TARGET_MODE == "two_stage_textbook" else None,
                         "stage2_label_col": STAGE2_LABEL_COL if TARGET_MODE == "two_stage_textbook" else LABEL_COL,
+                        "stage2_model_mode": STAGE2_MODEL_MODE,
+                        "stage2_tail_threshold": STAGE2_TAIL_THRESHOLD,
+                        "eval_hit_thresholds": list(EVAL_HIT_THRESHOLDS),
                         "train_window": TRAIN_WINDOW,
                         "retrain_freq": RETRAIN_FREQ,
                         "seed_col": SEED_COL,
                         "use_bull_only": USE_BULL_ONLY,
+                        "stage2_min_label_for_train": STAGE2_MIN_LABEL_FOR_TRAIN,
                         "signal_source": SEED_COL,
                         "sort_field": "score",
                         "sort_ascending": False,
+                        "textbook_cases_version": B1_TEXTBOOK_CASES_VERSION,
+                        "textbook_base_case_count": len(B1_BASE_TEXTBOOK_CASES),
+                        "textbook_expanded_case_count": len(EXPANDED_TEXTBOOK_CASES),
+                        "textbook_total_case_count": len(B1_TEXTBOOK_CASES),
+                        "textbook_expanded_cases_version": EXPANDED_TEXTBOOK_CASES_VERSION,
+                        "sample_weighting": {
+                            "enabled": ENABLE_SAMPLE_WEIGHT,
+                            "base_textbook_case_weight": BASE_TEXTBOOK_SAMPLE_WEIGHT,
+                            "expanded_textbook_case_weight": EXPANDED_TEXTBOOK_SAMPLE_WEIGHT,
+                            "recent_start_date": RECENT_SAMPLE_WEIGHT_START_DATE,
+                            "recent_sample_weight": RECENT_SAMPLE_WEIGHT,
+                            "tail_quantile": (
+                                TAIL_SAMPLE_WEIGHT_QUANTILE
+                                if STAGE2_MODEL_MODE != "tail_classifier"
+                                else None
+                            ),
+                            "tail_label_threshold": (
+                                STAGE2_TAIL_THRESHOLD
+                                if STAGE2_MODEL_MODE == "tail_classifier"
+                                else None
+                            ),
+                            "tail_sample_weight": TAIL_SAMPLE_WEIGHT,
+                        },
                         "universe": {
                             "mv_min": MV_MIN,
                             "mv_max": MV_MAX,
@@ -568,7 +858,12 @@ def _(
 
 @app.cell
 def _(
+    B1_BASE_TEXTBOOK_CASES,
+    B1_TEXTBOOK_CASES,
+    B1_TEXTBOOK_CASES_VERSION,
     EMA_ALPHA,
+    EVAL_HIT_THRESHOLDS,
+    EXPANDED_TEXTBOOK_CASES,
     LABEL_COL,
     POSITIVE_LABEL_THRESHOLD,
     SCORE_THRESHOLD_QUANTILES,
@@ -581,16 +876,24 @@ def _(
     pl,
 ):
     _label_mean_col = f"{LABEL_COL}_mean"
-    _hit_label = f"hit_{POSITIVE_LABEL_THRESHOLD:.0%}"
+
+    def _format_hit_col(threshold):
+        return f"hit_{int(round(threshold * 100))}pct"
+
+    _hit_threshold_cols = {
+        threshold: _format_hit_col(threshold) for threshold in EVAL_HIT_THRESHOLDS
+    }
 
     eval_summary = pl.DataFrame(
         schema={
+            "score_source": pl.Utf8,
             "metric": pl.Utf8,
             "value": pl.Utf8,
         }
     )
     quintile_table = pl.DataFrame(
         schema={
+            "score_source": pl.Utf8,
             "bucket": pl.Int64,
             "samples": pl.Int64,
             _label_mean_col: pl.Float64,
@@ -598,29 +901,38 @@ def _(
     )
     score_quantile_table = pl.DataFrame(
         schema={
+            "score_source": pl.Utf8,
             "quantile": pl.Utf8,
             "score_cut": pl.Float64,
         }
     )
     threshold_table = pl.DataFrame(
         schema={
+            "score_source": pl.Utf8,
             "threshold_q": pl.Utf8,
             "score_cut": pl.Float64,
             "days_with_signal": pl.Int64,
             "signal_day_ratio": pl.Float64,
             "avg_candidates_signal_day": pl.Float64,
             _label_mean_col: pl.Float64,
-            _hit_label: pl.Float64,
+            **{
+                hit_col_name: pl.Float64
+                for hit_col_name in _hit_threshold_cols.values()
+            },
         }
     )
     topk_table = pl.DataFrame(
         schema={
+            "score_source": pl.Utf8,
             "top_k": pl.Int64,
             "rows": pl.Int64,
             "days": pl.Int64,
             "avg_candidates_per_day": pl.Float64,
             _label_mean_col: pl.Float64,
-            _hit_label: pl.Float64,
+            **{
+                hit_col_name: pl.Float64
+                for hit_col_name in _hit_threshold_cols.values()
+            },
         }
     )
 
@@ -631,161 +943,280 @@ def _(
     if df_scores_raw.is_empty():
         print("  结论: 当前没有模型输出，无法评估。")
     else:
-        df_eval = (
+        df_eval_base = (
             df_seed.join(df_scores_raw, on=["date", "code"], how="inner")
-            .filter(pl.col(LABEL_COL).is_not_null() & pl.col("score").is_not_null())
             .sort(["code", "date"])
         )
 
-        if EMA_ALPHA < 1.0:
-            df_eval = df_eval.with_columns(pl.col("score").ewm_mean(alpha=EMA_ALPHA).over("code").alias("score"))
+        def _evaluate_score_source(score_col, score_source):
+            _summary = pl.DataFrame(schema=eval_summary.schema)
+            _quintile = pl.DataFrame(schema=quintile_table.schema)
+            _quantile = pl.DataFrame(schema=score_quantile_table.schema)
+            _threshold = pl.DataFrame(schema=threshold_table.schema)
+            _topk = pl.DataFrame(schema=topk_table.schema)
 
-        daily_ic = (
-            df_eval.group_by("date")
-            .agg(
-                [
-                    pl.len().alias("samples"),
-                    pl.corr("score", LABEL_COL, method="spearman").alias("ic"),
-                ]
+            df_eval = (
+                df_eval_base
+                .filter(pl.col(LABEL_COL).is_not_null() & pl.col(score_col).is_not_null())
+                .with_columns(pl.col(score_col).alias("_eval_score"))
+                .sort(["code", "date"])
             )
-            .filter(pl.col("samples") >= 20)
-            .filter(pl.col("ic").is_not_null())
-            .sort("date")
-        )
+            if df_eval.is_empty():
+                return _summary, _quintile, _quantile, _threshold, _topk
 
-        ic_mean = float(daily_ic["ic"].mean()) if daily_ic.height else 0.0
-        ic_std = float(daily_ic["ic"].std()) if daily_ic.height > 1 else 0.0
-        icir = ic_mean / ic_std * np.sqrt(252.0) if ic_std > 0 else 0.0
-        t_stat = ic_mean / (ic_std / np.sqrt(max(daily_ic.height, 1))) if ic_std > 0 else 0.0
+            if EMA_ALPHA < 1.0:
+                df_eval = df_eval.with_columns(
+                    pl.col("_eval_score").ewm_mean(alpha=EMA_ALPHA).over("code").alias("_eval_score")
+                )
 
-        df_bucket = (
-            df_eval.with_columns(
-                [
-                    pl.len().over("date").alias("_n"),
-                    pl.col("score").rank("ordinal").over("date").alias("_rank"),
-                ]
+            daily_ic = (
+                df_eval.group_by("date")
+                .agg(
+                    [
+                        pl.len().alias("samples"),
+                        pl.corr("_eval_score", LABEL_COL, method="spearman").alias("ic"),
+                    ]
+                )
+                .filter(pl.col("samples") >= 20)
+                .filter(pl.col("ic").is_not_null())
+                .sort("date")
             )
-            .filter(pl.col("_n") >= 5)
-            .with_columns(
-                (
-                    (((pl.col("_rank") - 1) * 5) / pl.col("_n"))
-                    .floor()
-                    .clip(0, 4)
-                    .cast(pl.Int64)
-                    .alias("bucket")
+
+            ic_mean = float(daily_ic["ic"].mean()) if daily_ic.height else 0.0
+            ic_std = float(daily_ic["ic"].std()) if daily_ic.height > 1 else 0.0
+            icir = ic_mean / ic_std * np.sqrt(252.0) if ic_std > 0 else 0.0
+            t_stat = ic_mean / (ic_std / np.sqrt(max(daily_ic.height, 1))) if ic_std > 0 else 0.0
+
+            df_bucket = (
+                df_eval.with_columns(
+                    [
+                        pl.len().over("date").alias("_n"),
+                        pl.col("_eval_score").rank("ordinal").over("date").alias("_rank"),
+                    ]
+                )
+                .filter(pl.col("_n") >= 5)
+                .with_columns(
+                    (
+                        (((pl.col("_rank") - 1) * 5) / pl.col("_n"))
+                        .floor()
+                        .clip(0, 4)
+                        .cast(pl.Int64)
+                        .alias("bucket")
+                    )
                 )
             )
-        )
-        quintile_table = (
-            df_bucket.group_by("bucket")
-            .agg([pl.len().alias("samples"), pl.col(LABEL_COL).mean().round(4).alias(_label_mean_col)])
-            .sort("bucket")
-        )
+            _quintile = (
+                df_bucket.group_by("bucket")
+                .agg(
+                    [
+                        pl.len().alias("samples"),
+                        pl.col(LABEL_COL).mean().round(4).alias(_label_mean_col),
+                    ]
+                )
+                .sort("bucket")
+                .with_columns(pl.lit(score_source).alias("score_source"))
+                .select(["score_source", "bucket", "samples", _label_mean_col])
+            )
 
-        _top_mean = (
-            quintile_table.filter(pl.col("bucket") == 4).select(_label_mean_col).item()
-            if quintile_table.filter(pl.col("bucket") == 4).height
-            else None
-        )
-        _bottom_mean = (
-            quintile_table.filter(pl.col("bucket") == 0).select(_label_mean_col).item()
-            if quintile_table.filter(pl.col("bucket") == 0).height
-            else None
-        )
-        spread = (_top_mean - _bottom_mean) if _top_mean is not None and _bottom_mean is not None else None
-        score_array = df_eval["score"].to_numpy().astype(np.float64)
-        total_eval_days = max(df_eval["date"].n_unique(), 1)
+            _top_mean = (
+                _quintile.filter(pl.col("bucket") == 4).select(_label_mean_col).item()
+                if _quintile.filter(pl.col("bucket") == 4).height
+                else None
+            )
+            _bottom_mean = (
+                _quintile.filter(pl.col("bucket") == 0).select(_label_mean_col).item()
+                if _quintile.filter(pl.col("bucket") == 0).height
+                else None
+            )
+            spread = (_top_mean - _bottom_mean) if _top_mean is not None and _bottom_mean is not None else None
+            score_array = df_eval["_eval_score"].to_numpy().astype(np.float64)
+            total_eval_days = max(df_eval["date"].n_unique(), 1)
 
-        score_quantile_table = pl.DataFrame(
-            [
-                {
-                    "quantile": f"p{int(q * 100)}",
-                    "score_cut": round(float(np.quantile(score_array, q)), 4),
-                }
-                for q in SCORE_THRESHOLD_QUANTILES
-            ]
-        )
+            _quantile = pl.DataFrame(
+                [
+                    {
+                        "score_source": score_source,
+                        "quantile": f"p{int(q * 100)}",
+                        "score_cut": round(float(np.quantile(score_array, q)), 4),
+                    }
+                    for q in SCORE_THRESHOLD_QUANTILES
+                ]
+            )
 
-        threshold_rows = []
-        for q in SCORE_THRESHOLD_QUANTILES:
-            score_cut = float(np.quantile(score_array, q))
-            df_cut = df_eval.filter(pl.col("score") >= score_cut)
-            days_with_signal = df_cut["date"].n_unique() if df_cut.height else 0
-            active_days = max(days_with_signal, 1)
-            threshold_rows.append(
-                {
+            threshold_rows = []
+            for q in SCORE_THRESHOLD_QUANTILES:
+                score_cut = float(np.quantile(score_array, q))
+                df_cut = df_eval.filter(pl.col("_eval_score") >= score_cut)
+                days_with_signal = df_cut["date"].n_unique() if df_cut.height else 0
+                active_days = max(days_with_signal, 1)
+                threshold_payload = {
+                    "score_source": score_source,
                     "threshold_q": f"p{int(q * 100)}",
                     "score_cut": score_cut,
                     "days_with_signal": days_with_signal,
                     "signal_day_ratio": days_with_signal / total_eval_days,
                     "avg_candidates_signal_day": df_cut.height / active_days,
                     _label_mean_col: float(df_cut[LABEL_COL].mean()) if df_cut.height else 0.0,
-                    _hit_label: float((df_cut[LABEL_COL] >= POSITIVE_LABEL_THRESHOLD).mean()) if df_cut.height else 0.0,
                 }
+                for hit_threshold, hit_col_name in _hit_threshold_cols.items():
+                    threshold_payload[hit_col_name] = (
+                        float((df_cut[LABEL_COL] >= hit_threshold).mean())
+                        if df_cut.height
+                        else 0.0
+                    )
+                threshold_rows.append(threshold_payload)
+            _threshold = (
+                pl.DataFrame(threshold_rows)
+                .with_columns(
+                    [
+                        pl.col("score_cut").round(4),
+                        pl.col("signal_day_ratio").round(4),
+                        pl.col("avg_candidates_signal_day").round(2),
+                        pl.col(_label_mean_col).round(4),
+                        *[
+                            pl.col(hit_col_name).round(4)
+                            for hit_col_name in _hit_threshold_cols.values()
+                        ],
+                    ]
+                )
             )
-        threshold_table = (
-            pl.DataFrame(threshold_rows)
-            .with_columns(
-                [
-                    pl.col("score_cut").round(4),
-                    pl.col("signal_day_ratio").round(4),
-                    pl.col("avg_candidates_signal_day").round(2),
-                    pl.col(_label_mean_col).round(4),
-                    pl.col(_hit_label).round(4),
-                ]
-            )
-        )
 
-        df_topk = df_eval.with_columns(
-            pl.col("score").rank("ordinal", descending=True).over("date").alias("_rank_desc")
-        )
-        topk_rows = []
-        for top_k in TOPK_LIST:
-            df_k = df_topk.filter(pl.col("_rank_desc") <= top_k)
-            if df_k.is_empty():
-                continue
-            day_count = max(df_k["date"].n_unique(), 1)
-            topk_rows.append(
-                {
+            df_topk = df_eval.with_columns(
+                pl.col("_eval_score").rank("ordinal", descending=True).over("date").alias("_rank_desc")
+            )
+            topk_rows = []
+            for top_k in TOPK_LIST:
+                df_k = df_topk.filter(pl.col("_rank_desc") <= top_k)
+                if df_k.is_empty():
+                    continue
+                day_count = max(df_k["date"].n_unique(), 1)
+                topk_payload = {
+                    "score_source": score_source,
                     "top_k": top_k,
                     "rows": df_k.height,
                     "days": day_count,
                     "avg_candidates_per_day": df_k.height / day_count,
                     _label_mean_col: float(df_k[LABEL_COL].mean()),
-                    _hit_label: float((df_k[LABEL_COL] >= POSITIVE_LABEL_THRESHOLD).mean()),
                 }
-            )
-        if topk_rows:
-            topk_table = (
-                pl.DataFrame(topk_rows)
-                .with_columns(
-                    [
-                        pl.col("avg_candidates_per_day").round(2),
-                        pl.col(_label_mean_col).round(4),
-                        pl.col(_hit_label).round(4),
-                    ]
+                for hit_threshold, hit_col_name in _hit_threshold_cols.items():
+                    topk_payload[hit_col_name] = float(
+                        (df_k[LABEL_COL] >= hit_threshold).mean()
+                    )
+                topk_rows.append(topk_payload)
+            if topk_rows:
+                _topk = (
+                    pl.DataFrame(topk_rows)
+                    .with_columns(
+                        [
+                            pl.col("avg_candidates_per_day").round(2),
+                            pl.col(_label_mean_col).round(4),
+                            *[
+                                pl.col(hit_col_name).round(4)
+                                for hit_col_name in _hit_threshold_cols.values()
+                            ],
+                        ]
+                    )
+                    .sort("top_k")
                 )
-                .sort("top_k")
-            )
 
-        eval_summary = pl.DataFrame(
-            [
-                {"metric": "rows_eval", "value": f"{df_eval.height:,}"},
-                {"metric": "days_eval", "value": str(df_eval["date"].n_unique())},
-                {"metric": "daily_ic_mean", "value": f"{ic_mean:+.4f}"},
-                {"metric": "daily_icir", "value": f"{icir:+.4f}"},
-                {"metric": "daily_ic_tstat", "value": f"{t_stat:+.4f}"},
-                {"metric": f"q4_minus_q0_{LABEL_COL}", "value": "n/a" if spread is None else f"{spread:+.4f}"},
+            overall_hit_rows = [
+                {
+                    "score_source": score_source,
+                    "metric": hit_col_name,
+                    "value": f"{float((df_eval[LABEL_COL] >= hit_threshold).mean()):.2%}",
+                }
+                for hit_threshold, hit_col_name in _hit_threshold_cols.items()
             ]
-        )
+            _summary = pl.DataFrame(
+                [
+                    {
+                        "score_source": score_source,
+                        "metric": "rows_eval",
+                        "value": f"{df_eval.height:,}",
+                    },
+                    {
+                        "score_source": score_source,
+                        "metric": "days_eval",
+                        "value": str(df_eval["date"].n_unique()),
+                    },
+                    {
+                        "score_source": score_source,
+                        "metric": "daily_ic_mean",
+                        "value": f"{ic_mean:+.4f}",
+                    },
+                    {
+                        "score_source": score_source,
+                        "metric": "daily_icir",
+                        "value": f"{icir:+.4f}",
+                    },
+                    {
+                        "score_source": score_source,
+                        "metric": "daily_ic_tstat",
+                        "value": f"{t_stat:+.4f}",
+                    },
+                    {
+                        "score_source": score_source,
+                        "metric": f"q4_minus_q0_{LABEL_COL}",
+                        "value": "n/a" if spread is None else f"{spread:+.4f}",
+                    },
+                    *overall_hit_rows,
+                ]
+            )
+            return _summary, _quintile, _quantile, _threshold, _topk
+
+        score_sources = [("score", "final_score")]
+        if "payoff_score" in df_scores_raw.columns:
+            score_sources.append(("payoff_score", "payoff_score"))
+        if TARGET_MODE == "two_stage_textbook" and "structure_score" in df_scores_raw.columns:
+            score_sources.append(("structure_score", "structure_score"))
+
+        summary_frames = []
+        quintile_frames = []
+        quantile_frames = []
+        threshold_frames = []
+        topk_frames = []
+        for score_col, score_source in score_sources:
+            (
+                _summary_frame,
+                _quintile_frame,
+                _quantile_frame,
+                _threshold_frame,
+                _topk_frame,
+            ) = _evaluate_score_source(score_col, score_source)
+            if _summary_frame.height:
+                summary_frames.append(_summary_frame)
+            if _quintile_frame.height:
+                quintile_frames.append(_quintile_frame)
+            if _quantile_frame.height:
+                quantile_frames.append(_quantile_frame)
+            if _threshold_frame.height:
+                threshold_frames.append(_threshold_frame)
+            if _topk_frame.height:
+                topk_frames.append(_topk_frame)
+
+        if summary_frames:
+            eval_summary = pl.concat(summary_frames, how="vertical")
+        if quintile_frames:
+            quintile_table = pl.concat(quintile_frames, how="vertical")
+        if quantile_frames:
+            score_quantile_table = pl.concat(quantile_frames, how="vertical")
+        if threshold_frames:
+            threshold_table = pl.concat(threshold_frames, how="vertical")
+        if topk_frames:
+            topk_table = pl.concat(topk_frames, how="vertical")
+
+        print("\n  分数源汇总:")
         print(eval_summary)
-        print("\n  分层结果:")
+        print("\n  分层结果 (score_source):")
         print(quintile_table)
-        print("\n  score 分位数:")
+        print("\n  score 分位数 (score_source):")
         print(score_quantile_table)
-        print(f"\n  score threshold 表现 (hit 阈值: {LABEL_COL} >= {POSITIVE_LABEL_THRESHOLD:.2%}):")
+        print(
+            "\n  score threshold 表现 "
+            f"(score_source 对比, hit 阈值: {[f'{threshold:.0%}' for threshold in EVAL_HIT_THRESHOLDS]}):"
+        )
         print(threshold_table)
-        print("\n  top-k 表现:")
+        print("\n  top-k 表现 (score_source):")
         print(topk_table)
         if TARGET_MODE == "two_stage_textbook":
             df_structure_eval = (
@@ -824,6 +1255,22 @@ def _(
                         {
                             "metric": "textbook_case_rows",
                             "value": str(textbook_case_rows),
+                        },
+                        {
+                            "metric": "textbook_manifest_base_cases",
+                            "value": str(len(B1_BASE_TEXTBOOK_CASES)),
+                        },
+                        {
+                            "metric": "textbook_manifest_expanded_cases",
+                            "value": str(len(EXPANDED_TEXTBOOK_CASES)),
+                        },
+                        {
+                            "metric": "textbook_manifest_total_cases",
+                            "value": str(len(B1_TEXTBOOK_CASES)),
+                        },
+                        {
+                            "metric": "textbook_cases_version",
+                            "value": B1_TEXTBOOK_CASES_VERSION,
                         },
                         {
                             "metric": "textbook_case_top_decile_hit",
@@ -944,7 +1391,7 @@ def _(
 @app.cell
 def _(datetime, df_export, pl):
     df_feb = df_export.filter(
-        pl.col("date") == datetime(2026, 4, 9)
+        pl.col("date") == datetime(2026, 4, 15)
     ).sort('score', descending=True).collect()
     return (df_feb,)
 
@@ -952,11 +1399,6 @@ def _(datetime, df_export, pl):
 @app.cell
 def _(df_feb):
     df_feb["date", "code", "score"]
-    return
-
-
-@app.cell
-def _():
     return
 
 
