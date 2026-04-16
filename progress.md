@@ -2,6 +2,23 @@
 
 ## 2026-04-16
 
+### [B1] Case Expansion notebook 新增 B1 形态占比与平均表现概览
+- 已更新:
+  - `notebooks/b1_case_expansion_mining.py`
+- 当前新增 `Step 2b`:
+  - `[1]` seed_mid 全体 vs B1 形态 (is_textbook_b1) 的平均前瞻表现对比 (mfe_10d / mae_10d / risk_adj_10d / hit_10pct / hit_15pct)
+  - `[2]` textbook_b1_score 分段平均表现 (6 档分箱)
+  - `[3]` 强表现样本中 B1 形态占比 (enrichment 分析):
+    - seed_mid 全体 baseline
+    - 高于中位数 risk_adj
+    - df_candidates (结果强样本)
+    - Top 10% risk_adj
+  - 自动判断 B1 形态在强样本中是否显著富集
+- 当前目的:
+  - 回答"形态像 B1 的样本是否真的比普通 seed_mid 表现更好"
+  - 回答"在表现强的样本中，B1 形态是否显著富集"
+  - 为后续教科书案例扩容和 Stage 1 结构标签的价值判断提供定量基线
+
 ### [B1] 双阶段 tail15 当前已收敛到 `payoff_score` 排序
 - 已更新:
   - `progress.md`

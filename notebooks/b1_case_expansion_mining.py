@@ -393,6 +393,143 @@ def _(MAX_FWD_MAE_10D, MIN_FWD_MFE_10D, MIN_FWD_MFE_RISK_ADJ_10D, df_seed, pl):
 
 
 @app.cell
+def _(df_seed, df_candidates, np, pl):
+    _has_tb = "is_textbook_b1" in df_seed.columns and "textbook_b1_score" in df_seed.columns
+
+    print("\n" + "=" * 72)
+    print("  Step 2b. B1 形态占比与平均表现概览")
+    print("=" * 72)
+
+    if not _has_tb:
+        print("  [SKIP] df_seed 中缺少 textbook 相关列, 跳过。")
+    else:
+        def _safe_mean(df, col):
+            if df.height == 0 or col not in df.columns:
+                return float("nan")
+            s = df[col].drop_nulls().drop_nans()
+            return float(s.mean()) if s.len() > 0 else float("nan")
+
+        _df_b1 = df_seed.filter(pl.col("is_textbook_b1"))
+        _df_non_b1 = df_seed.filter(~pl.col("is_textbook_b1"))
+
+        _perf_groups = [
+            ("seed_mid 全体", df_seed),
+            ("形态像B1 (is_textbook_b1)", _df_b1),
+            ("非B1形态", _df_non_b1),
+        ]
+        _perf_rows = []
+        for _label, _df_g in _perf_groups:
+            _perf_rows.append({
+                "group": _label,
+                "rows": _df_g.height,
+                "mean_mfe_10d": round(_safe_mean(_df_g, "fwd_mfe_10d"), 4),
+                "mean_mae_10d": round(_safe_mean(_df_g, "fwd_mae_10d"), 4),
+                "mean_risk_adj_10d": round(_safe_mean(_df_g, "fwd_mfe_risk_adj_10d"), 4),
+                "hit_10pct": round(
+                    _df_g.filter(pl.col("fwd_mfe_risk_adj_10d") >= 0.10).height / max(_df_g.height, 1), 4
+                ),
+                "hit_15pct": round(
+                    _df_g.filter(pl.col("fwd_mfe_risk_adj_10d") >= 0.15).height / max(_df_g.height, 1), 4
+                ),
+            })
+
+        print("\n  [1] seed_mid 全体 vs B1 形态 — 平均前瞻表现:")
+        print(pl.DataFrame(_perf_rows))
+
+        _score_bins = [0.0, 0.3, 0.5, 0.65, 0.75, 0.85, 1.01]
+        _bin_rows = []
+        for _i in range(len(_score_bins) - 1):
+            _lo, _hi = _score_bins[_i], _score_bins[_i + 1]
+            _df_bin = df_seed.filter(
+                (pl.col("textbook_b1_score") >= _lo) & (pl.col("textbook_b1_score") < _hi)
+            )
+            if _df_bin.height == 0:
+                continue
+            _bin_rows.append({
+                "score_range": f"[{_lo:.2f}, {_hi:.2f})",
+                "rows": _df_bin.height,
+                "pct_of_seed": round(_df_bin.height / max(df_seed.height, 1), 4),
+                "mean_mfe_10d": round(_safe_mean(_df_bin, "fwd_mfe_10d"), 4),
+                "mean_risk_adj_10d": round(_safe_mean(_df_bin, "fwd_mfe_risk_adj_10d"), 4),
+                "hit_15pct": round(
+                    _df_bin.filter(pl.col("fwd_mfe_risk_adj_10d") >= 0.15).height / max(_df_bin.height, 1), 4
+                ),
+            })
+        if _bin_rows:
+            print("\n  [2] textbook_b1_score 分段平均表现:")
+            print(pl.DataFrame(_bin_rows))
+
+        _seed_b1_ratio = _df_b1.height / max(df_seed.height, 1)
+
+        _cand_total = df_candidates.height
+        _cand_b1 = df_candidates.filter(pl.col("is_textbook_b1")).height if _cand_total else 0
+        _cand_b1_ratio = _cand_b1 / max(_cand_total, 1)
+
+        _median_ra = float(
+            df_seed["fwd_mfe_risk_adj_10d"].drop_nulls().drop_nans().median()
+        ) if df_seed.height else 0.0
+        _df_above_med = df_seed.filter(pl.col("fwd_mfe_risk_adj_10d") > _median_ra)
+        _am_total = _df_above_med.height
+        _am_b1 = _df_above_med.filter(pl.col("is_textbook_b1")).height if _am_total else 0
+        _am_b1_ratio = _am_b1 / max(_am_total, 1)
+
+        _p90_ra = float(
+            df_seed["fwd_mfe_risk_adj_10d"].drop_nulls().drop_nans().quantile(0.90, interpolation="linear")
+        ) if df_seed.height else 0.0
+        _df_top_dec = df_seed.filter(pl.col("fwd_mfe_risk_adj_10d") >= _p90_ra)
+        _td_total = _df_top_dec.height
+        _td_b1 = _df_top_dec.filter(pl.col("is_textbook_b1")).height if _td_total else 0
+        _td_b1_ratio = _td_b1 / max(_td_total, 1)
+
+        _enrich_rows = [
+            {
+                "sample": "seed_mid 全体 (baseline)",
+                "total": df_seed.height,
+                "b1_like": _df_b1.height,
+                "b1_ratio": f"{_seed_b1_ratio:.2%}",
+                "enrichment": "1.00x",
+                "mean_risk_adj": round(_safe_mean(df_seed, "fwd_mfe_risk_adj_10d"), 4),
+            },
+            {
+                "sample": f"高于中位数 risk_adj (>{_median_ra:.4f})",
+                "total": _am_total,
+                "b1_like": _am_b1,
+                "b1_ratio": f"{_am_b1_ratio:.2%}",
+                "enrichment": f"{_am_b1_ratio / max(_seed_b1_ratio, 1e-8):.2f}x",
+                "mean_risk_adj": round(_safe_mean(_df_above_med, "fwd_mfe_risk_adj_10d"), 4),
+            },
+            {
+                "sample": "结果强样本 (df_candidates)",
+                "total": _cand_total,
+                "b1_like": _cand_b1,
+                "b1_ratio": f"{_cand_b1_ratio:.2%}",
+                "enrichment": f"{_cand_b1_ratio / max(_seed_b1_ratio, 1e-8):.2f}x",
+                "mean_risk_adj": round(_safe_mean(df_candidates, "fwd_mfe_risk_adj_10d"), 4),
+            },
+            {
+                "sample": f"Top 10% risk_adj (>={_p90_ra:.4f})",
+                "total": _td_total,
+                "b1_like": _td_b1,
+                "b1_ratio": f"{_td_b1_ratio:.2%}",
+                "enrichment": f"{_td_b1_ratio / max(_seed_b1_ratio, 1e-8):.2f}x",
+                "mean_risk_adj": round(_safe_mean(_df_top_dec, "fwd_mfe_risk_adj_10d"), 4),
+            },
+        ]
+
+        print("\n  [3] 强表现样本中 B1 形态占比 (enrichment):")
+        print(pl.DataFrame(_enrich_rows))
+        print(f"\n  enrichment = 该组 B1 占比 / seed_mid 全体 B1 占比 ({_seed_b1_ratio:.2%})")
+        if _seed_b1_ratio > 0 and not np.isnan(_cand_b1_ratio):
+            if _cand_b1_ratio > _seed_b1_ratio * 1.5:
+                print("  → B1 形态在强样本中显著富集, 结构信号有筛选价值。")
+            elif _cand_b1_ratio > _seed_b1_ratio:
+                print("  → B1 形态在强样本中有一定富集, 但幅度不大。")
+            else:
+                print("  → B1 形态在强样本中未见富集, 结构信号当前对收益筛选贡献有限。")
+    return
+
+
+@app.cell
 def _(
     CURVE_WEIGHT,
     FEATURE_WEIGHT,
