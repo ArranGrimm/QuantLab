@@ -517,6 +517,17 @@ Python (信号层)                    Rust (回测/执行层)
   - 强表现样本中 B1 形态占比仅 `11.16%~11.57%` (全体 `15.10%`), enrichment `0.74x~0.77x` (反向富集)
   - 根因: **不是模型学歪了, 是教科书结构定义本身就和强收益负相关**
   - 详见 `experiments/b1-next-phase.md` 教科书双阶段实验 > 底表统计证伪
+- **`2026-04-17` 根因下钻 (Step 2c/2d/2e)**:
+  - `Step 2c` Textbook centroid 自洽性诊断: 11 个基础案例 5/11 自身被判 `is_textbook_b1=False`, pairwise mean 0.69, 多 archetype 把 median centroid 拍扁 (H1 强成立)
+  - `Step 2d` v2 max-archetype 模拟: enrichment Top10% 从 v1 的 0.74x → v2 的 0.75x, 6 档仍严格单调递减, **H1 已被证伪** — 改聚合方式无效
+  - `Step 2e` 案例自身前瞻现实检验: case mean `fwd_mfe_10d = 0.4595` (45.95%), baseline 0.0787, Top10% 0.2884, **case / Top10% = 1.59x** — 案例真实强 + 标签正确
+  - 当前根因被锁死: **14 个 textbook 特征本身没抓到使案例爆发的因子, 是特征语义错 (H2)**
+  - 旁证: 11 个案例内部, `textbook_b1_score` 和 `fwd_mfe_10d` 基本不相关甚至负相关
+  - 数据卫生: `国轩高科(趋势)` `fwd_mfe_10d = 6.36%` < baseline, 不应作为完美案例, 后续 case set 清洗时移除或重新定位
+- **下一步建议 (未做)**:
+  - `Step 2f` 全特征池 |Cohen's d| 排序, 找出真正让 11 个案例与众不同的特征, 判定 14 个 textbook 特征是否在 Top 20 中
+  - 若 Top 20 里 14 个 textbook 特征一个都没进 → 特征选择从一开始就错
+  - 若连 Top 20 都没有强信号 → 案例的强属于不可建模偶然 (板块/消息), 收手
 - 当前判断:
   - `Stage 1 (is_textbook_b1)` 作为收益筛选工具已失效
   - `structure_score` 不应参与收益排序乘法或训练侧正样本权重放大

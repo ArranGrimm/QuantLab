@@ -1,5 +1,43 @@
 # Progress
 
+## 2026-04-17
+
+### [B1] Case Expansion notebook 新增 H1/H2 假设检验链路 (Step 2c/2d/2e)
+- 已更新:
+  - `notebooks/b1_case_expansion_mining.py`
+- 当前新增三步诊断 (顺序执行, 自动判决):
+  - `Step 2c` Textbook centroid 自洽性诊断 (H1 验证)
+    - 输出 11 个基础案例自身得分 / 14 维特征向量 / 每维 case 内分布 / 11x11 两两相似度矩阵
+    - 实测结果: 11 个案例 5/11 自身被判 `is_textbook_b1=False`, `pairwise mean = 0.6889`, std = 0.0961
+    - H1 (median centroid 把多 archetype 拍扁) 强成立, 但是否唯一根因待 Step 2d 确认
+  - `Step 2d` v2 max-archetype 模拟 (H1 修复实验)
+    - 公式 `textbook_b1_score_v2 = max_k mean_f clip(1 - |x[f] - case_k[f]| / scale[f], 0, 1)`
+    - 阈值 LOO q20, scale 与 v1 完全一致 (隔离唯一变量)
+    - 输出 4 张表 (mean perf / 6 档分箱 / enrichment / Top10 archetype 分布), 每张表自动判决
+    - 实测结果: v2 enrichment Top10% = 0.75x (v1 是 0.74x), 6 档仍严格单调递减
+    - **H1 已被证伪**: 改聚合方式 enrichment 一动没动, 反向富集与聚合方式无关
+  - `Step 2e` 完美案例自身前瞻收益现实检验 (基础假设验证)
+    - 输出 11 个案例的 fwd_ret_1d/2d/3d/5d/10d / fwd_mfe_10d / fwd_mae_10d / fwd_mfe_risk_adj_10d
+    - 三组均值对比: cases / seed_mid baseline / seed_mid Top10%
+    - 实测结果: case mean fwd_mfe_10d = **0.4595 (45.95%)**, baseline = 0.0787, Top10% = 0.2884
+    - 案例 / baseline = **5.84x**, 案例 / Top10% = **1.59x**
+    - 案例本身真实强 (10日窗口完整装下), 标签和案例对齐良好
+- 当前判定结论:
+  - 案例真实 ✓ + 标签正确 ✓ + 14 个 textbook 特征不能识别案例的强 ✗
+  - **根因被锁死: 14 个特征本身没抓到使案例爆发的因子, 是特征语义错 (H2)**
+  - 旁证: 11 个案例内部, `textbook_b1_score` 和 `fwd_mfe_10d` 基本不相关甚至负相关
+    - 方正科技(蓄势) textbook 0.9104 → mfe 0.20
+    - 昂利康(压轴) textbook 0.6306 → mfe 0.80
+    - 新瀚新材(激进) textbook 0.7957 → mfe 0.99
+- 当前数据卫生发现:
+  - **国轩高科(趋势) `fwd_mfe_10d = 6.36%`, 比 baseline 7.87% 还低**, 不应作为完美案例
+  - 后续 case set 清洗时建议移除或重新定位日期
+- 当前下一步建议 (未做):
+  - `Step 2f` 全特征池 |Cohen's d| 排序, 找出真正让 11 个案例与众不同的特征
+  - 判定: |d| ≥ 0.8 大效应, 0.5~0.8 中效应, < 0.5 没有判别力
+  - 如果 Top 20 里 14 个 textbook 特征一个都没进 → 特征选择从一开始就错
+  - 如果连 Top 20 都没有强信号 → 案例的强属于不可建模偶然 (板块/消息), 收手
+
 ## 2026-04-16
 
 ### [B1] Case Expansion notebook 新增 B1 形态占比与平均表现概览
