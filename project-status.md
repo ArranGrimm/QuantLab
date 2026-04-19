@@ -259,11 +259,30 @@
 
 ## 二、B1 超跌反转策略
 
-### `2026-04-19` 口径全面重写 (Stage-0 全跑通后)
+### `2026-04-19 (晚)` 三 stage-0 notebook 整合 + Q7-2 反直觉洞察 + simple_b1_lab 实证
 
-> **本节是 B1 当前最权威的状态描述, 以下旧 block (从 `2026-04-14 口径更新` 起) 仅作历史保留, 不再代表当前认知.**
+> **本节是 B1 当前最权威的状态描述, 以下旧 block 仅作历史保留, 不再代表当前认知.**
 
-#### 当前结论 (基于 `b1_stage0_textbook_v2.py` T1~T6 + `b1_stage0_alpha_proof.py` + `textbook_case_classifier.py`)
+#### 当前结论 (基于 `b1_alpha_proof.py` Q1~Q8 + `simple_b1_lab.py` 实证 + `textbook_case_classifier.py`)
+
+> 2026-04-19 上午跑通了三个 stage-0 notebook (alpha_proof / J_interaction / textbook_v2),
+> 当晚整合到一个用户友好的 `b1_alpha_proof.py` (Q1~Q8 大白话), 并新增 Q7 月度时序检验 + Q7-2 反直觉发现.
+> 用户当晚跑了 `simple_b1_lab.py` 6 年回测复核, 与统计结论完全互证.
+
+##### 关键新洞察 (Q7-2): alpha 真正来源是"非多头时段空仓"择时
+- **月度 t 检验** (Q7-1, 41 个月): 多头日开仓 fwd_ret_20d 月均 +1.67%, t = +2.10 ✓ 显著, 60.98% 月份正
+- **月内对比** (Q7-2): 多头日 vs 当月每天买, 月均差 -0.21pp, t = -0.636 不显著, 多头日胜出仅 7/41 = 17.07%
+- **结论**: +1.46pp 不是"多头时段票更好" (cross-section selection alpha), 而是"避开非多头时段不开仓" (timing alpha)
+- **战略含义**: 路线 C (优化择时本身) **升级为主线候选**; 路线 B (池内 top5 排序) **降级**, 因 cross-section alpha 可能稀薄
+
+##### simple_b1_lab.py 实证支撑 (用户 6 年回测)
+- 总体 持仓20天 +2.60% / 死拿20天 +2.35% — 与 b1_alpha_proof Q5 在 L0 池的 +2.54% 几乎完全一致 (差 0.06pp)
+- 年度衰减曲线证实 Q7-2:
+  - 2025 年死拿 30d (+8.66%) > 死拿 20d (+6.64%) > 持仓 20d (+5.97%) — 牛市止损是浪费
+  - 2019 年 持仓 5/10/15d = +5.16/+4.89/+6.21%, 持仓 20/25/30d = +3.33/+1.01/+0.91% — 末期撞 regime switch 大幅回吐
+- 两份证据互相印证, 没有矛盾
+
+##### 既有结论 (上午已成立, 仍有效)
 
 - **真正的 alpha 99% 来自一条**: 用户 RPA 抓的活跃市值多头区间 (`is_manual_bull` / `LOOSE_PERIODS`)
   - T+1 ex-ante 信号, 100% 可执行, 无 look-ahead
@@ -299,16 +318,23 @@
   - 二阶段 `is_textbook_b1` 标签 + `tail_classifier` 路线作废
   - 不应再继续在教科书结构定义上做微调
 
-#### 后续 3 条候选路线 (待用户拍板)
-- **A. 极简化**: 把项目 collapse 成"多头区间 + 流动性过滤 + 池子内随机选 5 只", 蒙特卡洛验证, 几乎零代码
-- **B. 池子内排序研究**: 在已经定的池子里, 测候选排序信号 IC (动量, 行业强度, 距黄线距离, 波动率), 凡显著就用, 不再绕模型
-- **C. 优化择时本身**: 既然择时是金矿, 研究多头区间内分早/中/末期 alpha 差异, 多头切换 T+N 衰减, 行业差异等
+#### 后续 3 条候选路线 (优先级 2026-04-19 晚已修正)
+- **A. 极简化** (推荐先做, 1 天落地): 多头区间 + 流动性过滤 + 池内随机选 5 只, 蒙特卡洛验证. 这是诚实下限, 任何更复杂方案都必须打败它.
+- **B. 池子内排序研究** (**降级**, A 之后再决定): 候选排序信号 IC (动量, 行业强度, 距黄线距离, 波动率). 风险: Q7-2 显示池内 cross-section alpha 可能稀薄, 不一定值得做.
+- **C. 优化择时本身** (**升级为主线候选**): 既然 alpha 是 timing 不是 selection, 这条路线价值最大.
+  - 多头区间内分早 (T+1~T+5) / 中 / 末期 alpha 衰减
+  - 多头切换日 T+N 胜率衰减曲线 (找最优持仓窗口)
+  - 多头区间在不同行业上 alpha 差异
+  - 活跃市值的 +4% / -2.3% 阈值是否最优
+  - 是否能识别"假启动" (2-3 天就转空头)
+  - simple_b1_lab.py 已有持仓窗口曲线初步轮廓 (大多年份 15~20 天最优, 25 天后回吐)
 
-#### B1 notebook 当前阵容 (10 个 notebook, 232 KB 已清理)
-- **回测 / 出货**: `b1_seed_ml_baseline.py` (注: 当前打分链路已知低效, 待 B 路线落地后可重构)
-- **探索**: `perfect_top10b1_analyze.py`, `b1_case_expansion_mining.py`, `simple_b1_lab.py`
-- **本轮 stage-0 主战场**: `b1_stage0_textbook_v2.py` (T1~T6)
-- **本轮 stage-0 配套**: `b1_stage0_alpha_proof.py` (4 大统计检验), `b1_stage0_J_interaction.py` (J×量价交互), `textbook_case_classifier.py` (LightGBM OOF 证伪)
+#### B1 notebook 当前阵容 (2026-04-19 晚清理后, 7 个核心 + 1 个待重构)
+- **回测 / 出货**: `b1_seed_ml_baseline.py` (打分链路已知低效, 待路线落地后重构)
+- **探索 / 实证**: `perfect_top10b1_analyze.py`, `b1_case_expansion_mining.py`, `simple_b1_lab.py`
+- **stage-0 整合版** (新): `b1_alpha_proof.py` (Q1~Q8, 一气呵成, 大白话; 取代 3 个旧 stage0 notebook)
+- **textbook 旁路**: `textbook_case_classifier.py` (LightGBM OOF 证伪记录)
+- **已删除** (整合进 `b1_alpha_proof.py`): ~~`b1_stage0_alpha_proof.py`~~, ~~`b1_stage0_J_interaction.py`~~, ~~`b1_stage0_textbook_v2.py`~~
 
 ---
 

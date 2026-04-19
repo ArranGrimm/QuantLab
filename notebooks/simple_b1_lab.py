@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.0"
+__generated_with = "0.23.1"
 app = marimo.App(width="medium")
 
 
@@ -75,7 +75,7 @@ def _():
     EXPORT_START_DATE = "2019-01-01"
 
     print("🚀 [Step 1] 加载原始行情数据...")
-    st_blacklist = get_st_blacklist_pl('2026-01-27') # 获取ST列表
+    st_blacklist = get_st_blacklist_pl('2026-03-31') # 获取ST列表
     print("🔗 [Step 2] 合并基础数据...")
     q_full = (
         load_daily_data_full(conn).filter(
@@ -92,7 +92,6 @@ def _():
     # 如果想放宽条件增加信号数量
     config_base = {"J_THRESHOLD": 13, "YANGYIN_RATIO": 1.5, "MV_THRESHOLD": 50}
     return (
-        EXPORT_START_DATE,
         RULE_FEATURE_COLS,
         RULE_FEATURE_SET_NAME,
         RULE_LABEL,
@@ -101,15 +100,14 @@ def _():
         RULE_SIGNAL_SOURCE,
         RULE_SORT_ASCENDING,
         RULE_SORT_FIELD,
-        analyze_yearly_intensity,
         build_b1_train_run_id,
         build_feature_hash,
         calc_b1_factors_wmacd,
         datetime,
-        export_for_rust,
         get_git_commit,
-        pl,
+        print_backtest_report,
         q_full,
+        run_backtest,
     )
 
 
@@ -130,11 +128,9 @@ def _(calc_b1_factors_wmacd, q_full):
 
 @app.cell
 def _(
-    EXPORT_START_DATE,
     RULE_FEATURE_COLS,
     RULE_FEATURE_SET_NAME,
     RULE_LABEL,
-    RULE_LOOSE_PERIODS,
     RULE_MODEL_NAME,
     RULE_SIGNAL_SOURCE,
     RULE_SORT_ASCENDING,
@@ -143,8 +139,6 @@ def _(
     build_feature_hash,
     config_opt,
     datetime,
-    df_signals,
-    export_for_rust,
     get_git_commit,
 ):
     train_timestamp_token = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -180,41 +174,39 @@ def _(
         "sort_ascending": RULE_SORT_ASCENDING,
     }
 
-    export_for_rust(
-        df_signals,
-        loose_periods=RULE_LOOSE_PERIODS,
-        start_date=EXPORT_START_DATE,
-        extra_sort_cols=[RULE_SORT_FIELD],
-        artifact_metadata=export_meta,
-    )
-    print("导出完成")
-    print(f"规则版 artifact train_run_id: {export_meta['train_run_id']}")
-    print(f"规则版 source: {RULE_SIGNAL_SOURCE}")
-    print(f"规则版排序字段: {RULE_SORT_FIELD} ({'升序' if RULE_SORT_ASCENDING else '降序'})")
+    # export_for_rust(
+    #     df_signals,
+    #     loose_periods=RULE_LOOSE_PERIODS,
+    #     start_date=EXPORT_START_DATE,
+    #     extra_sort_cols=[RULE_SORT_FIELD],
+    #     artifact_metadata=export_meta,
+    # )
+    # print("导出完成")
+    # print(f"规则版 artifact train_run_id: {export_meta['train_run_id']}")
+    # print(f"规则版 source: {RULE_SIGNAL_SOURCE}")
+    # print(f"规则版排序字段: {RULE_SORT_FIELD} ({'升序' if RULE_SORT_ASCENDING else '降序'})")
 
-    # df_result_dynamic = run_backtest(df_signals, return_days=return_days, loose_periods=LOOSE_PERIODS, rank_by="rw_dif_pct", rank_ascending=False, top_n=200, stop_loss_pct=0.03)
-    # print_backtest_report(df_result_dynamic, return_days)
+
     return
 
 
 @app.cell
-def _(analyze_yearly_intensity, df_result_dynamic):
+def _(RULE_LOOSE_PERIODS, df_signals, print_backtest_report, run_backtest):
+    return_days = [5,10,15,20,25,30]
+    df_result_dynamic = run_backtest(df_signals, return_days=return_days, loose_periods=RULE_LOOSE_PERIODS, rank_by="rw_dif_pct", rank_ascending=False, top_n=200, stop_loss_pct=0.03)
+    print_backtest_report(df_result_dynamic, return_days)
+    return
+
+
+@app.cell
+def _():
     # ==============================================================================
     # 6. 附录：年度交易频率压力测试 (Stress Test)
     # ==============================================================================
     # 统计 2024 或 2025 年的数据 (取决于你的数据源到哪一天)
-    analyze_yearly_intensity(df_result_dynamic, 2024) 
-    analyze_yearly_intensity(df_result_dynamic, 2025)
-    analyze_yearly_intensity(df_result_dynamic, 2026)
-    return
-
-
-@app.cell
-def _(datetime, df_result_dynamic, pl):
-    df_result_dynamic.filter(
-        (pl.col("date") == datetime(2026,1,8)) &
-        (pl.col("b1_signal") == 1) 
-    )
+    # analyze_yearly_intensity(df_result_dynamic, 2024) 
+    # analyze_yearly_intensity(df_result_dynamic, 2025)
+    # analyze_yearly_intensity(df_result_dynamic, 2026)
     return
 
 
