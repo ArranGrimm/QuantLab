@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from datetime import datetime
 
@@ -139,6 +140,29 @@ B1_TEXTBOOK_SCORE_FEATURE_COLS: list[str] = [
     "days_since_key_k_inv",
 ]
 
+# V3 textbook 特征清单 (基于 2026-04-18 Cohen's d + 共线诊断, 详见
+# experiments/b1-next-phase.md). 10 个 similarity 特征均经过 |d| 阈值 0.35 + 共线
+# Pearson 0.85 双重筛选, 每个共线簇只保留 |d| 最大的代表。
+B1_TEXTBOOK_SCORE_FEATURE_COLS_V3: list[str] = [
+    "turnover_rate",          # |d|=0.86  rotation_core12   NEW (单因子最强)
+    "lower_shadow_pct",       # |d|=0.65  price_structure   KEEP
+    "plry_cluster_recent_10", # |d|=0.62  trigger_context   NEW
+    "close_pos_in_bar",       # |d|=0.60  price_structure   NEW (簇 2 代表)
+    "KLOW",                   # |d|=0.47  alpha158_kbar     NEW
+    "K",                      # |d|=0.42  kdj               NEW (KDJ K, 超跌)
+    "Bias_C_YL",              # |d|=0.42  trend_strength    KEEP
+    "rw_dif_pct",             # |d|=0.40  weekly_momentum   NEW
+    "body_pct",               # |d|=0.39  price_structure   KEEP
+    "key_k_recent_20",        # |d|=0.36  trigger_context   KEEP
+]
+
+# V3 hard rules: 在 case 上方差为 0 的特征改成 AND 进 is_textbook_b1
+# (而不是当软相似度用)。每个元组是 (column_name, expected_int_value)。
+B1_TEXTBOOK_HARD_RULES_V3: list[tuple[str, int]] = [
+    ("bad_k_count", 0),         # case 全部 0, |d|=0.57
+    ("trigger_recent_10", 1),   # case 全部 1, |d|=0.45 (从 v1 软相似度升级)
+]
+
 B1_TEXTBOOK_COMPONENT_FEATURE_COLS: dict[str, tuple[str, ...]] = {
     "trend": (
         "Bias_C_WL",
@@ -220,6 +244,7 @@ B1_FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "rotation_core12": tuple(B1_ROTATION_CORE12_FEATURE_COLS),
     "alpha158_kbar": tuple(B1_ALPHA158_KBAR_FEATURE_COLS),
+    "kdj": ("K", "D", "J"),
 }
 
 B1_FEATURE_GROUP_LABELS: dict[str, str] = {
@@ -230,6 +255,7 @@ B1_FEATURE_GROUP_LABELS: dict[str, str] = {
     "volume_structure": "量价结构",
     "rotation_core12": "Rotation Core12",
     "alpha158_kbar": "Alpha158 KBAR",
+    "kdj": "KDJ",
 }
 
 B1_FEATURE_TO_GROUP: dict[str, str] = {
@@ -270,49 +296,35 @@ def b1_feature_set_requires_rotation_kbar(name: str = "selected") -> bool:
     )
 
 
-def _apply_textbook_structure_labels(df: pl.DataFrame) -> pl.DataFrame:
-    case_df = (
-        pl.DataFrame(B1_TEXTBOOK_CASES)
-        .with_columns(pl.col("date").str.strptime(pl.Date, "%Y-%m-%d"))
-        .rename({"name": "textbook_case_name"})
-        .with_columns(pl.lit(True).alias("is_textbook_case"))
-    )
-    df_with_case_flag = (
-        df.join(case_df, on=["code", "date"], how="left")
-        .with_columns(
-            [
-                pl.col("textbook_case_name").fill_null("").alias("textbook_case_name"),
-                pl.col("is_textbook_case").fill_null(False).alias("is_textbook_case"),
-            ]
-        )
-    )
+def _empty_textbook_columns() -> list[pl.Expr]:
+    """v1/v3 共用的占位列, 避免 case 为空时下游列缺失。"""
+    return [
+        pl.lit(0.0).alias("textbook_trend_score"),
+        pl.lit(0.0).alias("textbook_kbar_score"),
+        pl.lit(0.0).alias("textbook_volume_score"),
+        pl.lit(0.0).alias("textbook_trigger_score"),
+        pl.lit(0.0).alias("textbook_similarity_score"),
+        pl.lit(0.0).alias("textbook_rule_score"),
+        pl.lit(0.0).alias("textbook_b1_score"),
+        pl.lit(0.65).alias("textbook_b1_threshold"),
+        pl.lit(False).alias("is_textbook_b1"),
+    ]
 
-    case_rows = df_with_case_flag.filter(pl.col("is_textbook_case"))
-    if case_rows.is_empty():
-        return df_with_case_flag.with_columns(
-            [
-                pl.lit(0.0).alias("textbook_trend_score"),
-                pl.lit(0.0).alias("textbook_kbar_score"),
-                pl.lit(0.0).alias("textbook_volume_score"),
-                pl.lit(0.0).alias("textbook_trigger_score"),
-                pl.lit(0.0).alias("textbook_similarity_score"),
-                pl.lit(0.0).alias("textbook_rule_score"),
-                pl.lit(0.0).alias("textbook_b1_score"),
-                pl.lit(0.65).alias("textbook_b1_threshold"),
-                pl.lit(False).alias("is_textbook_b1"),
-            ]
-        )
 
+def _build_similarity_exprs(
+    case_rows: pl.DataFrame, feature_cols: Sequence[str]
+) -> tuple[list[pl.Expr], list[str], dict[str, str]]:
+    """对每个特征用 case median 中心 + IQR/极差/35%|median| 的最大值做 scale,
+    返回 (sim_exprs, sim_col_names, feature -> sim_col_name)。"""
     sim_exprs: list[pl.Expr] = []
     sim_col_names: list[str] = []
     feature_sim_col_names: dict[str, str] = {}
-    for feature_col in B1_TEXTBOOK_SCORE_FEATURE_COLS:
+    for feature_col in feature_cols:
         if feature_col not in case_rows.columns:
             continue
         case_series = case_rows[feature_col].drop_nulls().drop_nans()
         if case_series.is_empty():
             continue
-
         median = float(case_series.median())
         q1 = float(case_series.quantile(0.25, interpolation="linear"))
         q3 = float(case_series.quantile(0.75, interpolation="linear"))
@@ -335,7 +347,31 @@ def _apply_textbook_structure_labels(df: pl.DataFrame) -> pl.DataFrame:
             .clip(0.0, 1.0)
             .alias(sim_col_name)
         )
+    return sim_exprs, sim_col_names, feature_sim_col_names
 
+
+def _resolve_textbook_threshold(
+    case_rows: pl.DataFrame, df_scored: pl.DataFrame, default: float = 0.65
+) -> float:
+    case_score_series = case_rows.join(
+        df_scored.select(["code", "date", "textbook_b1_score"]),
+        on=["code", "date"],
+        how="left",
+    )["textbook_b1_score"].drop_nulls().drop_nans()
+    if case_score_series.is_empty():
+        return default
+    return max(
+        min(float(case_score_series.quantile(0.20, interpolation="linear")), 0.80),
+        0.55,
+    )
+
+
+def _score_textbook_v1(
+    df_with_case_flag: pl.DataFrame, case_rows: pl.DataFrame
+) -> pl.DataFrame:
+    sim_exprs, sim_col_names, feature_sim_col_names = _build_similarity_exprs(
+        case_rows, B1_TEXTBOOK_SCORE_FEATURE_COLS
+    )
     df_scored = df_with_case_flag
     if sim_exprs:
         df_scored = df_scored.with_columns(sim_exprs)
@@ -346,15 +382,10 @@ def _apply_textbook_structure_labels(df: pl.DataFrame) -> pl.DataFrame:
         if rule_col in df_scored.columns
     ]
     similarity_expr = (
-        pl.mean_horizontal(sim_col_names)
-        if sim_col_names
-        else pl.lit(0.0)
+        pl.mean_horizontal(sim_col_names) if sim_col_names else pl.lit(0.0)
     )
-    rule_expr = (
-        pl.mean_horizontal(rule_exprs)
-        if rule_exprs
-        else pl.lit(0.0)
-    )
+    rule_expr = pl.mean_horizontal(rule_exprs) if rule_exprs else pl.lit(0.0)
+
     component_exprs: list[pl.Expr] = []
     for component_name, feature_cols in B1_TEXTBOOK_COMPONENT_FEATURE_COLS.items():
         component_score_col = f"textbook_{component_name}_score"
@@ -373,11 +404,9 @@ def _apply_textbook_structure_labels(df: pl.DataFrame) -> pl.DataFrame:
         component_exprs.append(
             component_expr.fill_nan(0.0).alias(component_score_col)
         )
+
     df_scored = df_scored.with_columns(
-        [
-            rule_expr.fill_nan(0.0).alias("textbook_rule_score"),
-            *component_exprs,
-        ]
+        [rule_expr.fill_nan(0.0).alias("textbook_rule_score"), *component_exprs]
     ).with_columns(
         [
             similarity_expr.fill_nan(0.0).alias("textbook_similarity_score"),
@@ -390,16 +419,7 @@ def _apply_textbook_structure_labels(df: pl.DataFrame) -> pl.DataFrame:
         ]
     )
 
-    case_score_series = case_rows.join(
-        df_scored.select(["code", "date", "textbook_b1_score"]),
-        on=["code", "date"],
-        how="left",
-    )["textbook_b1_score"].drop_nulls().drop_nans()
-    threshold = 0.65
-    if not case_score_series.is_empty():
-        threshold = float(case_score_series.quantile(0.20, interpolation="linear"))
-        threshold = max(min(threshold, 0.80), 0.55)
-
+    threshold = _resolve_textbook_threshold(case_rows, df_scored)
     df_scored = df_scored.with_columns(
         [
             pl.lit(threshold).alias("textbook_b1_threshold"),
@@ -409,6 +429,95 @@ def _apply_textbook_structure_labels(df: pl.DataFrame) -> pl.DataFrame:
     if sim_col_names:
         df_scored = df_scored.drop(sim_col_names)
     return df_scored
+
+
+def _score_textbook_v3(
+    df_with_case_flag: pl.DataFrame, case_rows: pl.DataFrame
+) -> pl.DataFrame:
+    """V3: 等权 mean_horizontal 10 个 similarity, 不再分 component;
+    `bad_k_count == 0` 与 `trigger_recent_10 == 1` 升为 hard rule, AND 进 is_textbook_b1。
+    保留 v1 列名 (textbook_*_score) 以维持下游兼容。"""
+    sim_exprs, sim_col_names, _ = _build_similarity_exprs(
+        case_rows, B1_TEXTBOOK_SCORE_FEATURE_COLS_V3
+    )
+    df_scored = df_with_case_flag
+    if sim_exprs:
+        df_scored = df_scored.with_columns(sim_exprs)
+
+    similarity_expr = (
+        pl.mean_horizontal(sim_col_names) if sim_col_names else pl.lit(0.0)
+    )
+    df_scored = df_scored.with_columns(
+        similarity_expr.fill_nan(0.0).alias("textbook_b1_score")
+    )
+
+    threshold = _resolve_textbook_threshold(case_rows, df_scored)
+
+    hard_rule_expr: pl.Expr = pl.lit(True)
+    missing_rules: list[str] = []
+    for rule_col, expected_value in B1_TEXTBOOK_HARD_RULES_V3:
+        if rule_col not in df_scored.columns:
+            missing_rules.append(rule_col)
+            continue
+        hard_rule_expr = hard_rule_expr & (
+            pl.col(rule_col) == pl.lit(expected_value)
+        )
+    if missing_rules:
+        warnings.warn(
+            f"[textbook v3] hard-rule columns missing in df, AND-skipped: {missing_rules}",
+            stacklevel=2,
+        )
+
+    df_scored = df_scored.with_columns(
+        [
+            pl.lit(0.0).alias("textbook_trend_score"),
+            pl.lit(0.0).alias("textbook_kbar_score"),
+            pl.lit(0.0).alias("textbook_volume_score"),
+            pl.lit(0.0).alias("textbook_trigger_score"),
+            pl.col("textbook_b1_score").alias("textbook_similarity_score"),
+            pl.lit(0.0).alias("textbook_rule_score"),
+            pl.lit(threshold).alias("textbook_b1_threshold"),
+            (
+                (pl.col("textbook_b1_score") >= pl.lit(threshold)) & hard_rule_expr
+            ).alias("is_textbook_b1"),
+        ]
+    )
+    if sim_col_names:
+        df_scored = df_scored.drop(sim_col_names)
+    return df_scored
+
+
+def _apply_textbook_structure_labels(
+    df: pl.DataFrame, *, score_version: str = "v1"
+) -> pl.DataFrame:
+    if score_version not in {"v1", "v3"}:
+        raise ValueError(
+            f"Unsupported textbook_score_version: {score_version!r}, expected 'v1' or 'v3'"
+        )
+
+    case_df = (
+        pl.DataFrame(B1_TEXTBOOK_CASES)
+        .with_columns(pl.col("date").str.strptime(pl.Date, "%Y-%m-%d"))
+        .rename({"name": "textbook_case_name"})
+        .with_columns(pl.lit(True).alias("is_textbook_case"))
+    )
+    df_with_case_flag = (
+        df.join(case_df, on=["code", "date"], how="left")
+        .with_columns(
+            [
+                pl.col("textbook_case_name").fill_null("").alias("textbook_case_name"),
+                pl.col("is_textbook_case").fill_null(False).alias("is_textbook_case"),
+            ]
+        )
+    )
+
+    case_rows = df_with_case_flag.filter(pl.col("is_textbook_case"))
+    if case_rows.is_empty():
+        return df_with_case_flag.with_columns(_empty_textbook_columns())
+
+    if score_version == "v3":
+        return _score_textbook_v3(df_with_case_flag, case_rows)
+    return _score_textbook_v1(df_with_case_flag, case_rows)
 
 
 def _manual_regime_expr(loose_periods: Sequence[tuple[str, str]]) -> pl.Expr:
@@ -430,6 +539,7 @@ def build_b1_research_frame(
     loose_periods: Sequence[tuple[str, str]],
     label_horizon: int = 10,
     include_rotation_kbar_features: bool = False,
+    textbook_score_version: str = "v1",
 ) -> pl.DataFrame:
     future_high_cols = [
         pl.col("high_adj").shift(-step).over("code").alias(f"_fwd_high_{step}")
@@ -554,6 +664,25 @@ def build_b1_research_frame(
                 (pl.col("_vol_yang_20") / pl.max_horizontal(pl.col("_vol_yin_20"), pl.lit(1.0))).alias(
                     "red_green_ratio_20"
                 ),
+                # 教科书 B1 "前期放量启动" 序列识别 (z 哥 B1 完美图原版第 1 条规则的可计算化)
+                # 过去 60 天内是否至少出现 1 根 "放量阳线" (vol/vol_ma40 >= 2 且 close>open)
+                (
+                    (
+                        (pl.col("volume") / pl.max_horizontal(pl.col("_vol_ma40"), pl.lit(1.0)))
+                        * pl.when(pl.col("close_adj") > pl.col("open_adj")).then(1.0).otherwise(0.0)
+                    ).rolling_max(60).over("code") >= 2.0
+                ).alias("prior_volume_surge_60d"),
+                # 当日量 / 过去 60 天最大量 (排除当日, 用 shift(1)), 教科书 "对比前期高点放量极致缩量" 的代理
+                (
+                    pl.col("volume") / pl.max_horizontal(
+                        pl.col("volume").shift(1).rolling_max(60).over("code"), pl.lit(1.0)
+                    )
+                ).alias("peak_vol_shrink_60d"),
+                # 近 5 日均量 / 近 20 日均量, 越小越说明 "顶部/回调段持续缩量" (序列化)
+                (
+                    pl.col("volume").rolling_mean(5).over("code")
+                    / pl.max_horizontal(pl.col("volume").rolling_mean(20).over("code"), pl.lit(1.0))
+                ).alias("pullback_vol_shrink_5_20"),
                 ((pl.col("close_adj") - pl.col("open_adj")).abs() / pl.max_horizontal(pl.col("open_adj"), pl.lit(0.01))).alias(
                     "body_pct"
                 ),
@@ -649,6 +778,9 @@ def build_b1_research_frame(
                         "seed_strict",
                         "seed_strict_v2",
                         "is_manual_bull",
+                        "prior_volume_surge_60d",
+                        "peak_vol_shrink_60d",
+                        "pullback_vol_shrink_5_20",
                         *B1_MINING_FEATURE_COLS,
                         *optional_rotation_kbar_cols,
                         "fwd_ret_1d",
@@ -666,4 +798,6 @@ def build_b1_research_frame(
         )
         .collect()
     )
-    return _apply_textbook_structure_labels(df_result)
+    return _apply_textbook_structure_labels(
+        df_result, score_version=textbook_score_version
+    )

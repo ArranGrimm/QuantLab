@@ -259,6 +259,59 @@
 
 ## 二、B1 超跌反转策略
 
+### `2026-04-19` 口径全面重写 (Stage-0 全跑通后)
+
+> **本节是 B1 当前最权威的状态描述, 以下旧 block (从 `2026-04-14 口径更新` 起) 仅作历史保留, 不再代表当前认知.**
+
+#### 当前结论 (基于 `b1_stage0_textbook_v2.py` T1~T6 + `b1_stage0_alpha_proof.py` + `textbook_case_classifier.py`)
+
+- **真正的 alpha 99% 来自一条**: 用户 RPA 抓的活跃市值多头区间 (`is_manual_bull` / `LOOSE_PERIODS`)
+  - T+1 ex-ante 信号, 100% 可执行, 无 look-ahead
+  - 在 LF2 严档可买池里 (mv≥100亿+amt20≥5000万), 仅这一条 ret_lift_20d **+1.46pp** ✓ 显著
+- **教科书 B1 形态几乎无独立 alpha**:
+  - 仅 J<14: ret_lift +0.07pp (微弱正, 几乎瞎选)
+  - 仅 (白>黄 且 收>黄): ret_lift **-0.62pp** (⚠ 负 alpha)
+  - 仅 (前期放量 + 今日企稳 + 振幅≤7% + J<14 + 极致缩量): T3 在全市场 95% CI 为 [-1.45, -0.86]pp, **统计显著为负**
+- **"白>黄+收>黄" 是辛普森悖论案例**:
+  - 全市场看是负 alpha
+  - 在多头子集里加它是正 alpha
+  - 在多头子集里加它又比裸多头略弱 (-0.19pp)
+- **LightGBM + textbook 标签 + alpha158 特征链路全无效**:
+  - In-sample enrichment 5.48x (leakage)
+  - 5-fold OOF enrichment **0.94x**, 等于瞎猜
+- **过去回测能赚的真实功劳分配** (估计):
+  - 70% 来自池子里隐含的 regime 偏 + 形态偏
+  - 20% 来自宽松期 beta
+  - 10% 来自模型偶尔猜对 (运气, 非 alpha)
+
+#### 当前"价值池"定义 (基于证据)
+- 池子 = `is_manual_bull` AND `WL > YL` AND `close > YL` AND `J < 14` AND `mv ≥ 100亿` AND `amt_ma20 ≥ 5000万`
+- 一年大概 1~2 万次信号, 一天 50~100 只候选
+- LF2 严档下 ret_lift_20d **+1.60pp** ✓, hit_15pct 25.41% (vs baseline 20.60%)
+
+#### 关键风险 / 待解决
+- **池子内 top5 排序问题尚未解决**: 目前只有规则筛选, 没有任何被验证过的排序信号
+  - LightGBM 模型层 OOF 0.94x, 已确认无独立排序能力
+  - `textbook_b1_score`, `payoff_score`, `final_score` 全部失效
+  - 之前回测的 top5 选股完全靠模型, 现已知模型不在加分
+- **教科书路线整体证伪**:
+  - `textbook_v3` 特征集 (KMID, KSFT2, KMID2, turnover_rate, KLOW 等) 无独立 alpha
+  - 二阶段 `is_textbook_b1` 标签 + `tail_classifier` 路线作废
+  - 不应再继续在教科书结构定义上做微调
+
+#### 后续 3 条候选路线 (待用户拍板)
+- **A. 极简化**: 把项目 collapse 成"多头区间 + 流动性过滤 + 池子内随机选 5 只", 蒙特卡洛验证, 几乎零代码
+- **B. 池子内排序研究**: 在已经定的池子里, 测候选排序信号 IC (动量, 行业强度, 距黄线距离, 波动率), 凡显著就用, 不再绕模型
+- **C. 优化择时本身**: 既然择时是金矿, 研究多头区间内分早/中/末期 alpha 差异, 多头切换 T+N 衰减, 行业差异等
+
+#### B1 notebook 当前阵容 (10 个 notebook, 232 KB 已清理)
+- **回测 / 出货**: `b1_seed_ml_baseline.py` (注: 当前打分链路已知低效, 待 B 路线落地后可重构)
+- **探索**: `perfect_top10b1_analyze.py`, `b1_case_expansion_mining.py`, `simple_b1_lab.py`
+- **本轮 stage-0 主战场**: `b1_stage0_textbook_v2.py` (T1~T6)
+- **本轮 stage-0 配套**: `b1_stage0_alpha_proof.py` (4 大统计检验), `b1_stage0_J_interaction.py` (J×量价交互), `textbook_case_classifier.py` (LightGBM OOF 证伪)
+
+---
+
 ### `2026-04-14` 口径更新
 
 - 旧文档中的高收益 `ML B1` 结果，当前应按**人工 hindsight regime 上界**理解，而不再视为可直接执行的客观基线。
@@ -521,13 +574,31 @@ Python (信号层)                    Rust (回测/执行层)
   - `Step 2c` Textbook centroid 自洽性诊断: 11 个基础案例 5/11 自身被判 `is_textbook_b1=False`, pairwise mean 0.69, 多 archetype 把 median centroid 拍扁 (H1 强成立)
   - `Step 2d` v2 max-archetype 模拟: enrichment Top10% 从 v1 的 0.74x → v2 的 0.75x, 6 档仍严格单调递减, **H1 已被证伪** — 改聚合方式无效
   - `Step 2e` 案例自身前瞻现实检验: case mean `fwd_mfe_10d = 0.4595` (45.95%), baseline 0.0787, Top10% 0.2884, **case / Top10% = 1.59x** — 案例真实强 + 标签正确
-  - 当前根因被锁死: **14 个 textbook 特征本身没抓到使案例爆发的因子, 是特征语义错 (H2)**
-  - 旁证: 11 个案例内部, `textbook_b1_score` 和 `fwd_mfe_10d` 基本不相关甚至负相关
-  - 数据卫生: `国轩高科(趋势)` `fwd_mfe_10d = 6.36%` < baseline, 不应作为完美案例, 后续 case set 清洗时移除或重新定位
-- **下一步建议 (未做)**:
-  - `Step 2f` 全特征池 |Cohen's d| 排序, 找出真正让 11 个案例与众不同的特征, 判定 14 个 textbook 特征是否在 Top 20 中
-  - 若 Top 20 里 14 个 textbook 特征一个都没进 → 特征选择从一开始就错
-  - 若连 Top 20 都没有强信号 → 案例的强属于不可建模偶然 (板块/消息), 收手
+- **`2026-04-18` 多 horizon + Cohen's d 实测 (注: 探索全部迁入 `notebooks/perfect_top10b1_analyze.py`, mining notebook 已瘦身)**:
+  - **R1 (拉长标签 horizon) 也被证伪**:
+    - `ACTIVE_HORIZON = 20` 重跑 Step B: `is_textbook_b1=True` `mean_risk_adj_20d = 0.097` 仍 < baseline `0.1088`, 6 档仍严格单调递减, Top 10% enrichment 仍 = `0.77x`
+    - `ACTIVE_HORIZON = 20` 重跑 Step D: v2 enrichment 仍 = `0.79x`, 6 档仍单调递减
+    - 即: 案例端在 20d 翻盘 (Step A `case/seed mfe ratio` 5d=5.0 → 20d=6.6 → 40d=6.4) ≠ "像案例的群体" 在 20d 翻盘 (Step B 反向富集没动), 这是两个独立现象
+    - 之前 `2026-04-17` "20d 应该会救 R1" 的预期撤销
+  - **国轩高科冤案平反** (撤销 `2026-04-17` 的"建议移除"):
+    - `sz.002074` 在 5d/10d 几乎不动 (`fwd_mfe = 0.03 / 0.06`), 但 20d 突跳 `0.38`, 30d 稳到 `0.71`, 全程 `fwd_mae = -0.012`, 教科书趋势型
+    - 至少 4 个 case 同病 (10d 标签截断): 华纳药厂 (10d=0.22 → 15d=0.90), 方正科技 (10d=0.20 → 40d=1.37), 澄天伟业 (10d=0.23 → 15d=0.62)
+    - case 数据本身没问题, 不动 `manifests/b1_textbook_cases.py`
+  - **`Step E` Cohen's d 锁死 H2 真凶 (取代旧 Step 2f)**:
+    - case vs seed_mid baseline 的 |Cohen's d| Top 5: `turnover_rate (0.86)` / `lower_shadow_pct (0.65)` / `KLOW2 (0.65)` / `plry_cluster_recent_10 (0.62)` / `close_pos_in_bar (0.60)`
+    - **textbook14 自身最大 |d| 仅 0.65** (lower_shadow_pct), 没有任何特征 |d| ≥ 0.7
+    - **case 上方差为 0 的硬约束 (textbook14 当软相似度用了)**: `bad_k_count == 0`, `trigger_recent_10 == 1`
+    - 特征组聚合 `mean_abs_d` 排序: trigger_context (0.37) > alpha158_kbar (0.35) > price_structure (0.33) > trend_strength (0.29) > rotation_core12 (0.27) >> volume_structure (0.09)
+    - **volume_structure 是 textbook14 最大权重组之一 (占 2/7), 但 mean |d| 最低**, 而 rotation_core12 (textbook14 占 0/12) 反而比它强 3x
+  - 当前根因彻底锁死: **H2 强成立** — textbook14 选了一组判别力较弱的特征, 真正区分 case 的因子在 rotation_core12 / alpha158_kbar / trigger_context 里, 且部分 (`bad_k_count`/`trigger_recent_10`) 是 hard rule 不是 similarity
+  - 数据卫生小 bug: `vol_shrink_40` 在 seed 端 `mean=9443.99, std=78150` (case_mean=0.22 合理), 推测 `_vol_max_40` 在 IPO 早期/复牌边界股票退化, 需 winsorize 或在 `utils/b1_feature_pool.py` 出口加下限
+- **下一步建议**:
+  - 草拟 `B1_TEXTBOOK_SCORE_FEATURE_COLS_V3` (in `utils/b1_feature_pool.py`):
+    - 加入: `turnover_rate` (单因子最强), `plry_cluster_recent_10`, `close_pos_in_bar` 或 `KSFT2/intraday_pos`
+    - 砍掉: `vol_shrink_40`, `red_green_ratio_20` (volume_structure 整组 mean |d| 仅 0.09)
+    - 改造: `bad_k_count == 0`, `trigger_recent_10 == 1` 改成 hard rule (在 `_apply_textbook_structure_labels` 顶层 AND 进 `is_textbook_b1`), 不再当 similarity 项
+  - 跑 v3 重做 Step B/D, 看 enrichment 是否 ≥ 1.0 (≥ baseline) — 这是 H2 是否能修复的最终判定
+  - (卫生) winsorize `vol_shrink_40`, 不影响 Cohen's d 排序结论
 - 当前判断:
   - `Stage 1 (is_textbook_b1)` 作为收益筛选工具已失效
   - `structure_score` 不应参与收益排序乘法或训练侧正样本权重放大
@@ -588,9 +659,10 @@ Python (信号层)                    Rust (回测/执行层)
   - notebook 末尾可稳定产出 `EXPANDED_TEXTBOOK_CASES` manifest 文本，并可按需写回仓库
   - 当前训练用 artifact 已收紧为保守版: 更高相似度/收益/Textbook 阈值, 每 archetype 更少配额, 且最终按 `(archetype, code)` 去重
 - 当前三层结构:
-  - 分析层: `notebooks/b1_condition_mining.py` / `notebooks/b1_case_expansion_mining.py`
+  - 分析层: `notebooks/b1_condition_mining.py` / `notebooks/b1_case_expansion_mining.py` / `notebooks/perfect_top10b1_analyze.py`
   - 清单层: `manifests/b1_textbook_cases.py` / `manifests/b1_expanded_textbook_cases.py`
   - 训练层: `utils/b1_feature_pool.py` / `notebooks/b1_seed_ml_baseline.py`
+  - **`notebooks/b1_case_expansion_mining.py` 已收口为纯 mining 主流程 (`2026-04-17`, 1732 → 989 行)**, 所有探索/诊断 (Step 2b/2c/2d/2e/2f) 迁入 `notebooks/perfect_top10b1_analyze.py`
 - 当前风险:
   - **`textbook_b1_score` 已被统计证伪为收益负信号** (`2026-04-16`), 教科书结构定义本身就和强收益负相关
   - `payoff_score` 已显著转正并带来六窗正收益, 但回撤仍偏大 (`30%~43%`), 暂不能直接当成成熟主线

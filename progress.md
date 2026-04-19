@@ -1,6 +1,188 @@
 # Progress
 
-## 2026-04-17
+## 2026-04-19
+
+### [B1] Stage-0 价值检验全跑通: 教科书形态被证伪, 多头区间是唯一金矿
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `experiments/b1-next-phase.md`
+- 项目空间清理 (用户确认):
+  - 删除 10 个老旧 / 已被替代的 B1 notebook (共 ~232 KB):
+    - `b1_condition_mining.py` (被 `b1_case_expansion_mining.py` 取代)
+    - `b1_ml_dedicated.py`, `b1_ml_explore.py` (被 stage0 系列 + classifier 取代)
+    - `chronos_b1_base.py`, `sequence_b1_base.py`, `sequence_b1_opt.py`
+    - `smart_b1_base.py`, `smart_b1_opt.py`
+    - `simple_b1.py`, `simple_b1_opt.py`
+- B1 notebook 当前阵容:
+  - **主线**: `b1_seed_ml_baseline.py` (回测出货), `perfect_top10b1_analyze.py` (探索), `b1_case_expansion_mining.py` (案例挖掘), `simple_b1_lab.py` (轻量验证)
+  - **本轮 stage-0**: `b1_stage0_textbook_v2.py` (T1~T6, 主战场), `b1_stage0_alpha_proof.py` (4 大统计检验), `b1_stage0_J_interaction.py` (J × 量价交互), `textbook_case_classifier.py` (LightGBM OOF 证伪)
+
+#### [新增 notebook] `b1_stage0_textbook_v2.py` — 6 步累积验证 stage-0 alpha
+- T1: 教科书规则**累积过滤** (L0 全市场 → L2 白>黄+收>黄 → +前期放量 → +今日企稳 → +振幅≤7% → +J<14 → +极致缩量), 在 2021-2025 全样本上 ret_lift 从 +0pp 一路降到 **-1.16pp**
+- T2: J × peak_vol_shrink_60d 二维交互 pivot (在 L2_surge 子集), 显示 J<14 + 适度缩量 cell 是 mfe 局部高点
+- T3: 关键累积层 Bootstrap 95% CI, 教科书全 5 条置信区间为 [-1.45, -0.86]pp, **统计显著为负**
+- T4: 把 T1 的累积过滤限制到 `is_manual_bull == True` 子集, ret_lift 全部翻正:
+  - R0 manual_bull baseline: **+1.36pp** ✓
+  - R+L2+surge+企稳+振幅+J<14: +1.23pp ✓
+  - R+L2+教科书全 5 条 (含极致缩量): +0.97pp ✓
+  - 结论: regime 是核心, 教科书规则在 bull 内仍 < regime baseline, 边际贡献为负
+- T5: **流动性过滤** (隐患 2 排除), 在 3 档流动性 (L0 / LF1 mv≥50亿+amt≥3000万 / LF2 mv≥100亿+amt≥5000万) 内对比 R0 vs 形态规则:
+  - 本档全市场 baseline ret: L0 +1.10% → LF1 +0.48% → **LF2 +0.24%** (缩水 78%)
+  - 证明 T4 的 +2.46% manual_bull baseline 含微盘脉冲虚高
+  - 在 LF2 严档下, R+L2+J<14 ret_lift **+1.60pp** > R0 ret_lift +1.46pp (反超 +0.14pp)
+  - hit_15pct: R+L2 26.72% vs R0 23.40% (形态规则提升 +3.3pp 的大涨概率)
+- T6: **3 个候选信号独立拆解** (在 LF2 池子里, 单独抽出与池内 baseline 比):
+  - 仅 J<14: ret_lift **+0.07pp** (CI [+0.03, ?]), ✓ 但极弱, 几乎等于瞎选
+  - 仅 (白>黄 且 收>黄): ret_lift **-0.62pp** (CI [-0.66, ?]), **⚠ 负 alpha**
+  - 仅 多头区间: ret_lift **+1.46pp** (CI [+1.43, +1.49]), **✓ 唯一硬 alpha**
+  - 多头 + 白>黄 + 收>黄: +1.27pp (反而比"仅多头" -0.19pp, **被形态拖累**)
+  - 多头 + 白>黄 + 收>黄 + J<14: +1.60pp (比"仅多头" +0.14pp)
+  - **辛普森悖论实锤**: "白>黄+收>黄" 全市场看是负 alpha, 但在多头子集里加它是正 alpha; 反过来在多头子集里加它又比裸多头略弱
+
+#### [新增 notebook] `b1_stage0_alpha_proof.py` — 4 大统计检验
+- 步骤 H (stage-0 表): H1 全市场 / H2 J<=20 / H3 WL>YL & close>YL 各自的 fwd_mfe_risk_adj_20d / fwd_ret_20d / hit15
+- 步骤 I (4 个统计检验):
+  - I1 截面分位 alpha + t-test: WL>YL & close>YL 显著正, J<=20 显著负
+  - I2 hit_15pct Binomial Z 检验: 同向
+  - I3 月度时序 alpha t 检验: WL>YL & close>YL 月均 alpha 显著, J<=20 不显著
+  - I4 Bootstrap 95% CI: 与 I1 一致
+
+#### [新增 notebook] `b1_stage0_J_interaction.py` — J × 量价二维交互 (前置版)
+- 在 L2 (WL>YL & close>YL) 子集内, J×vol_shrink_40, J×red_green_ratio_20 二维 pivot
+- 反直觉发现: 低 vol_shrink_40 (传统认为"健康") 反而是负 alpha, 高 vol_shrink_40 是强正 alpha
+- 这一结果驱动了 v2 的"量价健康"序列化重定义 (`prior_volume_surge_60d` / `peak_vol_shrink_60d` / `pullback_vol_shrink_5_20`)
+
+#### [新增 notebook] `textbook_case_classifier.py` — LightGBM 排序模型证伪
+- Option C: 用 LightGBM 在 textbook 标签上做二分类
+- In-sample enrichment 5.48x (典型 leakage)
+- 5-fold StratifiedKFold OOF enrichment **0.94x**, 等同瞎猜 → 模型无独立排序能力
+- 直接证伪 "复杂特征 + 模型打分" 路线
+
+#### [核心结论摘要 — 2026-04-19]
+- **真正的 alpha 99% 来自一条**: 用户 RPA 抓的活跃市值多头区间 (LOOSE_PERIODS, T+1 ex-ante 无 look-ahead)
+- **教科书 B1 形态几乎无独立 alpha**: 白>黄+收>黄 / J<14 / 量价健康 / N 字结构, 单独拿出来跟全市场比都不显著, 甚至负
+- **它们只在 "多头区间" 子集里组合时贡献边际 +0.14pp**, 但代价是从 60w 样本缩到 2.8w
+- **LightGBM + textbook 标签 + alpha158 特征链路全无效**, OOF 0.94 倍验证
+- **过去回测能赚的真实功劳分配** (估计):
+  - 70% 来自池子里隐含的 regime 偏 + 形态偏
+  - 20% 来自宽松期 beta
+  - 10% 来自模型偶尔猜对 (运气, 非 alpha)
+
+#### [当前规则下的"价值池"定义 (基于 2026-04-19 证据)]
+- 池子 = `manual_bull` AND `WL > YL` AND `close > YL` AND `J < 14` AND `mv ≥ 100亿` AND `amt_ma20 ≥ 5000万`
+- 一年大概 1~2 万次信号, 一天 50~100 只候选
+- **池子内 top5 排序问题尚未解决** (目前只有规则筛选, 没有验证过的排序信号)
+
+## 2026-04-18
+
+### [B1] 10d/20d 双 horizon + Cohen's d 实测: R1 证伪, H2 强成立, 国轩高科冤案平反
+- 已更新:
+  - 本文件 (本条)
+  - 后续待更新: `project-status.md`, `experiments/b1-next-phase.md`
+- 已跑实验:
+  - `notebooks/perfect_top10b1_analyze.py` 在 `ACTIVE_HORIZON = 10` 与 `ACTIVE_HORIZON = 20` 各跑一遍
+  - 重点观测: Step A (case 自身 multi-horizon) / Step B (B1 占比 enrichment) / Step D (v2 max-archetype) / Step E (Cohen's d)
+
+#### [发现 1] case 端在长 horizon 下显著放大, 国轩高科应保留
+- Step A1 case/seed mfe ratio 演化: 5d=5.00x, 10d=5.84x, **20d=6.56x (峰值)**, 30d=6.17x, 40d=6.39x
+- Step A3 spotlight `sz.002074` 国轩高科(趋势):
+  - 5d/10d 几乎不动 (`fwd_mfe = 0.03 / 0.06`)
+  - 15d 抬到 `0.15`, 20d 突跳 `0.38`, 30d 稳定 `0.71`
+  - `fwd_mae = -0.012` 全程不变 → 完全无回撤, 教科书趋势型
+- 不止国轩高科被 10d 标签截断, 至少 4 个 case 同病:
+  - 华纳药厂 10d=0.22 → 15d=0.90 (4x)
+  - 方正科技 10d=0.20 → 40d=1.37 (7x)
+  - 澄天伟业 10d=0.23 → 15d=0.62 (3x)
+  - 国轩高科 10d=0.06 → 30d=0.71 (12x)
+- Step A4 各 horizon case_below_top10: `5/11 (10d) → 2/11 (15d) → 0/11 (30d)`
+- 结论: case 数据本身没问题, 之前 (2026-04-17) 提议从 textbook cases 移除国轩高科的判断 **撤销**
+
+#### [发现 2] R1 (拉长标签 horizon) 救不了反向富集 — R1 证伪
+- Step B (`ACTIVE_HORIZON = 20`):
+  - `is_textbook_b1=True` `mean_risk_adj_20d = 0.097`, **仍 < baseline 0.1088** (非B1 是 0.1109)
+  - 6 档分箱 (textbook_b1_score 高 → 低): `0.20 → 0.14 → 0.12 → 0.11 → 0.10 → 0.10`, **仍严格单调递减**
+  - Top 10% risk_adj_20d enrichment = **0.77x** (10d 时是 0.74x, 几乎没动)
+- Step D v2 max-archetype (`ACTIVE_HORIZON = 20`):
+  - v2 通过 86,120 / 179,963 (threshold_v2 = 0.7881)
+  - `is_textbook_b1_v2=True` `mean_risk_adj_20d = 0.097`, 与 v1 完全相同
+  - 6 档分箱: `0.18 → 0.15 → 0.12 → 0.10 → 0.09`, **仍单调递减**
+  - Top 10% v2 enrichment = **0.79x**, 反向富集没改善
+- 关键认识修正:
+  - 案例端在 20d 翻盘 (Step A) ≠ "像案例的群体" 在 20d 翻盘 (Step B)
+  - 这是两个独立现象, 之前 R1 期望被推翻
+- R1 (改训练标签到 20d) 不再作为首选解药, 但仍可作为 case 自身评估口径
+
+#### [发现 3] Cohen's d 锁死 H2 真凶: textbook14 选错了特征
+- Step E 在 59 个数值特征上算 case vs seed_mid baseline 的 Cohen's d:
+  - **|d| Top 5 全部不在 textbook14 内** (除 lower_shadow_pct):
+    - `turnover_rate`           |d|=0.86 大效应  (rotation_core12, **不在 textbook14**)
+    - `lower_shadow_pct`        |d|=0.65        (in textbook14)
+    - `KLOW2`                   |d|=0.65        (alpha158_kbar, 与 lower_shadow_pct 数学等价)
+    - `plry_cluster_recent_10`  |d|=0.62        (trigger_context, **不在 textbook14**)
+    - `close_pos_in_bar`        |d|=0.60        (price_structure, **不在 textbook14**)
+  - **case 上方差为 0 的硬约束 (textbook14 漏当 hard rule)**:
+    - `bad_k_count == 0`         case_std=0, |d|=0.57
+    - `trigger_recent_10 == 1`   case_std=0, |d|=0.45 (虽在 textbook14, 但当软相似度用了)
+- textbook14 自身 Cohen's d 排序 (Step E2): 最大 0.65 (lower_shadow_pct), **没有任何特征 |d| ≥ 0.7**
+- group 聚合 (Step E3) `mean_abs_d` 排序:
+  - `trigger_context`  0.37  (textbook14 占 3/7)
+  - `alpha158_kbar`    0.35  (textbook14 占 0/9)
+  - `price_structure`  0.33  (textbook14 占 4/8)
+  - `trend_strength`   0.29
+  - `rotation_core12`  0.27  (textbook14 占 0/12)
+  - `weekly_momentum`  0.16  (textbook14 占 2/5)
+  - `volume_structure` 0.09  (textbook14 占 2/7) ← 最弱却占了 textbook14 一半权重
+- 结论:
+  - **H2 强成立** — textbook14 选了一个判别力较弱的特征子集, 真正区分 case 的因子在 rotation_core12 / alpha158_kbar / trigger_context 里, 且部分是 hard rule 不是 similarity
+  - 之前 (2026-04-17) "如果连 Top 20 都没有强信号则收手" 的预案 **不触发** — Top 5 都有 ≥ 0.6 的有效信号
+
+#### [发现 4] 数据卫生小 bug (vol_shrink_40 outlier)
+- Step E2 `vol_shrink_40` 行 `seed_mean = 9443.99, seed_std = 78150` (case_mean = 0.22 合理)
+- 推测: `utils/b1_feature_pool.py` 中 `_vol_max_40` 在 IPO 早期/长停复牌等边界股票退化为接近 0, 导致 `volume / _vol_max_40` 爆炸
+- 影响: 不动 Cohen's d 的排序结论, 但训练前应 winsorize 或加下限
+- 待修: 在 `utils/b1_feature_pool.py` 给 `_vol_max_40` 加 `max_horizontal(_, 100.0)` 之类下限, 或在 research_frame 出口处 `clip(0, 5)`
+
+#### [当前下一步]
+- (待评估) 草拟 `B1_TEXTBOOK_SCORE_FEATURE_COLS_V3`:
+  - 加入 `turnover_rate` (单因子最强)
+  - 加入 `plry_cluster_recent_10`, `close_pos_in_bar` (或等价 KSFT2/intraday_pos)
+  - 砍掉 `vol_shrink_40`, `red_green_ratio_20` (volume_structure 整组 mean |d| 仅 0.09)
+  - 把 `bad_k_count == 0`, `trigger_recent_10 == 1` 改成 hard rule (在 `_apply_textbook_structure_labels` 顶层 AND 进 is_textbook_b1)
+- (待评估) 跑 v3 重做 Step B/D, 看反向富集是否翻正
+- 修 `vol_shrink_40` outlier (纯卫生)
+- `progress.md` 之前对国轩高科的"建议移除"判断作废, 不需要改 `manifests/b1_textbook_cases.py`
+
+## 2026-04-17 (晚)
+
+### [B1] 探索性诊断从 mining notebook 抽离到独立 perfect_top10b1_analyze
+- 已更新:
+  - `notebooks/perfect_top10b1_analyze.py` (整体重写, 1121 行, 承接所有探索)
+  - `notebooks/b1_case_expansion_mining.py` (1732 → 989 行, 仅保留 mining 主流程)
+- 当前动机:
+  - `b1_case_expansion_mining.py` 在 Step 2b/2c/2d/2e 加入后越来越臃肿, 拖慢主流程跑动
+  - `perfect_top10b1_analyze.py` 旧内容 (PERFECT_CASES_CONFIG + weekly MACD) 已过时, 推翻重做
+- 当前 `perfect_top10b1_analyze.py` 结构:
+  - `Step 0`  数据加载 + `build_b1_research_frame` 出 `df_seed / df_cases`
+  - `Step 0b` **multi-horizon 标签** (5/10/15/20/30/40d 的 `fwd_mfe / fwd_mae / fwd_ret / fwd_mfe_risk_adj`), notebook 内基于 `q_full` 直接构建, 不动 `utils`
+  - `Step A`  完美案例 vs seed_mid baseline 在各 horizon 的均值对比 (含 spotlight `sz.002074` 国轩高科的 horizon 演化, 回答"10d 是否太短")
+  - `Step A4` 案例均值 vs Top10% seed 的"是否同档"判读 (各 horizon, 列出在该 horizon 仍跑不过 Top10% 的案例明细)
+  - `Step B`  B1 形态占比与平均表现 (按 `ACTIVE_HORIZON` 切换, 默认 10d) — 迁移自旧 Step 2b
+  - `Step C`  Textbook centroid 自洽性诊断 (H1) — 迁移自旧 Step 2c
+  - `Step D`  v2 max-archetype 模拟 (H1 修复实验, 跟随 `ACTIVE_HORIZON`) — 迁移自旧 Step 2d
+  - `Step E`  **Cohen's d 特征效应量排序 (Step 2f)** — 新增, 在全特征池上比较 `case` 与 `seed_mid` 均值差, 输出:
+    - `[E1]` |Cohen's d| Top 30 (区分 textbook14 与非 textbook14)
+    - `[E2]` 14 个 textbook 特征自身的 Cohen's d (按 |d| 降序)
+    - `[E3]` 按 `B1_FEATURE_TO_GROUP` 分组聚合的 mean/max |d|
+    - `[E4]` 自动判读: textbook14 在 Top30 命中数 → H2 (强成立 / 部分成立 / 不成立)
+- 当前 `b1_case_expansion_mining.py` 现状:
+  - 保留: 配置 / 数据加载 / Step 1 样本池 / Step 2 结果强样本过滤 / Step 3 案例相似度扩容 / artifact 导出
+  - 删除: Step 2b/2c/2d/2e (全部迁到 perfect_top10b1_analyze)
+  - 跑一次主流程不再被 740 行诊断输出干扰
+- 当前下一步:
+  - 用 `ACTIVE_HORIZON = 20` 重跑 perfect_top10b1_analyze, 看反向富集是否在 20d 标签下消失
+  - 看 spotlight 表确认国轩高科 (`sz.002074`) 在 20d/30d 下 fwd_mfe 是否抬到合理强度, 决定是否仍移除
+  - 跑 Step E (Cohen's d) 锁死 H2: 哪些非 textbook 特征才是真正区分案例的因子
 
 ### [B1] Case Expansion notebook 新增 H1/H2 假设检验链路 (Step 2c/2d/2e)
 - 已更新:
