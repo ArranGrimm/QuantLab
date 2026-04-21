@@ -1,5 +1,42 @@
 # Progress
 
+## 2026-04-21
+
+### [基础设施] 活跃市值 RPA 数据管道启动: capture 阶段 PoC 通过
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md` (调整"活跃市值自动化"状态)
+  - 新增 `rpa_capture/` 模块 (Windows 端截图脚本)
+- **战略背景**: 活跃市值是指南针客户端的专利指标, 当前 B1 / Rotation 的 timing alpha 均依赖手工标记的 25 个 `LOOSE_PERIODS`, 单点依赖风险高且无法日更. 决定通过 RPA 自动化抓取整个指标数据源 (1993 起可回溯).
+- **架构拆分** (Mac 主力 + Windows VM 形态):
+  - **Capture 阶段** (Windows 端): 只做截图 + 文件落地, 不做 OCR / 解析 / 入库
+  - **Parse 阶段** (Mac 端): OCR + 校验 + 入 DuckDB (待实现)
+  - 两阶段通过 PNG + manifest.jsonl 解耦, OCR 方案升级不需要重抓
+- **依赖纪律**: capture 阶段只 `pywinauto + mss` 2 个包, 不挑环境
+- **新增文件** (`rpa_capture/`):
+  - `run_capture.py`: 主入口, 支持全屏 / 区域截图 / 续抓 / `--no-focus` 等参数
+  - `calibrate_region.py`: 交互式 readout 区域标定 (tkinter, stdlib 无新依赖, 内置 DPI 感知)
+  - `requirements.txt`: 极简依赖
+  - `README.md`: 完整使用说明 + cursor 漂移问题 troubleshooting
+- **关键技术决策**:
+  - 用纯 Win32 `SetForegroundWindow` 拉前台, 弃用 `pywinauto.Application` (后者会触发"合成点击"导致图表 cursor 漂移)
+  - 截图前把鼠标停到 `(2, 2)`, 避免在主图区域 hover 干扰 cursor
+  - 配置 region 后, 单图从 ~3 MB 降到 ~9 KB (省 99.7% 体积, 1700 张总量从 5GB 降到 50MB)
+  - 时间方向: `seq=0` 是最早起始日, `seq=N` 是最新, 入库后无需 reverse
+- **PoC 验收 (2026-04-21 全过)**:
+  - 起点准确: 手动选 2019-01-02, 截图显示 `20190102 周三`, 不漂
+  - 方向正确: 按 → 后日期严格 +1 交易日 (周末自动跳过, 指南针自己处理)
+  - 10 张图日期连续: `20190102 → 20190103 → 20190104 → 20190107(周一) → ... → 20190115`
+  - 性能优于预期: 10 张耗时 2.46 秒, 平均 **246 ms/张**, 推算 1700 天 ≈ 7 分钟
+  - readout 截图清晰: 11 个字段 (date / 开高低收 / 幅 / 量 / 额 / 盘 / 率 / 振) 全部可读, OCR 难度极低
+- **下一步** (用户在 PD VM 跑完整流程):
+  - 历史回填: 1700 天全量截图 (在 PD VM 内执行)
+  - 实现 `rpa_parse/` (Mac 端): PaddleOCR + polars + DuckDB
+  - 跟手工的 25 个 `LOOSE_PERIODS` 交叉对账验收
+  - Windows 计划任务实现日更
+- **闲鱼对照**: 闲鱼有人卖 "0AMV 全历史 (1993~2026) excel 200 元", 90% 概率也是 RPA 抓的, 但缺乏可追溯性 / 日更服务 / 数据质量报告. 自建管道的核心价值是可持续 + 可校准 + 可扩展 (能顺便抓 D股价活跃度等其他指南针指标)
+
 ## 2026-04-19 (晚)
 
 ### [B1] 三个 stage-0 notebook 整合到 `b1_alpha_proof.py`, simple_b1_lab 实证验证, alpha 来源精修

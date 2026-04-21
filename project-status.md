@@ -428,9 +428,11 @@
   - `notebooks/b1_condition_mining.py`
   - `notebooks/b1_seed_ml_baseline.py`
 - 当前不建议:
-  - 把 `活跃市值` 自动化
   - 把规则链和 ML 链重新揉成一个 notebook
   - 直接把 `B1` 主线切成“纯 B1 专属 ML”
+- 当前已启动 (`2026-04-21`):
+  - 把 `活跃市值` 自动化 (RPA 数据管道, 见 `四、共享基础设施 > 活跃市值 RPA 管道`)
+  - 已完成 capture 阶段 PoC 验收, 待历史回填 + OCR 解析 + 入库
 - 现阶段更推荐:
   - `规则链独立`
   - 将旧 `ML` 高收益结果降级为 hindsight 上界，不再当作默认实盘口径
@@ -575,6 +577,42 @@ Python (信号层)                    Rust (回测/执行层)
   - 将 `bt-renko`
   - 将 `bt-b1`
   - 逐步接入同一套 `bt-core` artifact/report bundle I/O, 但保留各策略独立配置与额外统计
+
+### 活跃市值 RPA 管道 (`rpa_capture/`)
+
+- **背景**: 活跃市值是指南针客户端的专利指标, 当前 B1 / Rotation 的 timing alpha 全部依赖手工标记的 25 个 `LOOSE_PERIODS`, 单点依赖且无法日更. RPA 管道目标是把整个指标数据源 (1993 起) 自动化并日更.
+- **架构**: 两阶段解耦, OCR 方案升级不需要重抓
+  - **Capture 阶段** (Windows 端, 已实现): 截图 + manifest.jsonl, 不做 OCR
+  - **Parse 阶段** (Mac 端, 待实现): OCR + 校验 + 入 DuckDB
+- **依赖纪律**: capture 阶段只 `pywinauto + mss` 2 个包
+- **当前文件**:
+  - `rpa_capture/run_capture.py`: 主入口
+  - `rpa_capture/calibrate_region.py`: 交互式 readout 区域标定
+  - `rpa_capture/requirements.txt`
+  - `rpa_capture/README.md`
+- **关键技术决策**:
+  - 用纯 Win32 `SetForegroundWindow` 拉前台, **避免 pywinauto 触发"合成点击"导致图表 cursor 漂移**
+  - 截图前把鼠标停到 `(2, 2)`, 避免主图区域 hover 干扰 cursor
+  - 区域裁剪: 单图 ~9 KB (vs 全屏 ~3 MB), 1700 张总量从 5GB 降到 50MB
+  - 时间方向: `seq=0` 是最早起始日 (按 → 方向键前进), 入库无需 reverse
+- **PoC 验收 (2026-04-21)**:
+  - 起点准确, 方向正确, 10 张图日期连续, 自动跳过周末
+  - 性能: **246 ms / 张**, 推算 1700 天历史回填 ≈ 7 分钟
+  - readout 字段: 11 个 (date / 开高低收 / 幅 / 量 / 额 / 盘 / 率 / 振), 字体清晰 OCR 难度极低
+- **部署形态**:
+  - 当前阶段: 直接 Windows 物理机跑通 PoC
+  - 最终形态: 主力 Mac + PD Windows VM, 通过共享文件夹同步图片
+- **数据 schema 草案** (待 parse 阶段落实):
+  - `active_market_value(trade_date PK, open, high, low, close, chg_pct, volume, amount, position, turnover, amplitude, captured_at, source)`
+  - `source` 字段保留版本标识 (`rpa_v1` / `manual` / 未来 `rpa_v2`)
+- **下一步**:
+  - PD VM 内执行历史回填 (1993 ~ 今天)
+  - 实现 `rpa_parse/` (PaddleOCR + polars + DuckDB)
+  - 跟手工的 25 个 `LOOSE_PERIODS` 交叉对账验收 OCR 准确率
+  - Windows 计划任务实现日更
+- **本地产物 (已在 `.gitignore`)**:
+  - `rpa_capture/shots/` (截图目录)
+  - `rpa_capture/region.json` (本地标定的区域坐标, 跟屏幕分辨率绑定, 不入库)
 
 ### Python 依赖配置约定
 - `uv` 默认 index 已固定在 `pyproject.toml`:
