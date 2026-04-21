@@ -613,6 +613,7 @@ Python (信号层)                    Rust (回测/执行层)
 - **本地产物 (已在 `.gitignore`)**:
   - `rpa_capture/shots/` (截图目录)
   - `rpa_capture/region.json` (本地标定的区域坐标, 跟屏幕分辨率绑定, 不入库)
+- **完整路线规划**: 见 `experiments/active-market-value-automation.md` (6 阶段路线图 + 风险清单 + TODO)
 
 ### Python 依赖配置约定
 - `uv` 默认 index 已固定在 `pyproject.toml`:

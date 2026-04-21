@@ -1,5 +1,31 @@
 # Progress
 
+## 2026-04-21 (晚)
+
+### [文档] 活跃市值自动化路线图正式立项
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md` (RPA 章节追加路线图索引)
+  - **新增 `experiments/active-market-value-automation.md`** (6 阶段路线图)
+- **背景**: 今天 RPA Capture PoC 通过 (见下条), 这是项目级长期主线 (单笔 ROI 最高的工程投入), 应该有专项规划文档, 跟 `b1-next-phase.md` / `rotation-next-phase.md` / `target-strategy-evolution.md` 平级
+- **新文档结构** (11 节):
+  - 一、为什么做 (4 个前期发现总结: alpha 来源 / timing 本质 / 单点依赖 / 必须自建)
+  - 二、架构设计 (Capture / Parse / 消费侧三层 + ASCII 拓扑图 + 解耦原则)
+  - 三、Phase 1 Capture (✅ 已完成验收清单 + 5 个关键技术决策表)
+  - 四、Phase 2 Parse (🟡 待实现, 11 字段 schema + DuckDB 表设计 + 校验规则 + 验收门槛)
+  - 五、Phase 3 规则引擎 + 历史复算 (🔵 R0~R4 候选规则 + 75 组阈值网格)
+  - 六、Phase 4 集成到 B1 / Rotation (🔵 验收标准 + 多策略框架雏形)
+  - 七、Phase 5 日更 + 运维 (🔵 计划任务 + 监控 + 灾备)
+  - 八、Phase 6 扩展到其他指南针指标 (🔵 D股价活跃度 / 资金主力 等)
+  - 九、风险与不确定性 (5 类风险 + 缓解方案, 含法律风险声明)
+  - 十、当前 TODO 清单 (10 项, 已勾 1)
+  - 十一、相关文档索引
+- **战略价值**: 这份文档是项目下半场的"主航线图". 完成后我们终于能回答的几个核心问题:
+  - 手工 LOOSE_PERIODS 能否被机械规则替代 (Phase 3)
+  - 如果能, 当前所有 B1 / Rotation 的 hindsight 上界还能不能保住 (Phase 4)
+  - 如果不能, alpha 是否本身就含主观成分而非数据成分
+
 ## 2026-04-21
 
 ### [基础设施] 活跃市值 RPA 数据管道启动: capture 阶段 PoC 通过
