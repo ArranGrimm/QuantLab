@@ -473,7 +473,9 @@ def export_rotation_scores(
         "date", "code", "score", "rank", "is_top_n",
         "open_adj", "high_adj", "low_adj", "close_adj", "pre_close_adj",
     ]
-    for opt_col in ["volume", "market_cap_100m"]:
+    # 可选 passthrough 列: 上游若提供则带入 parquet, 不提供则跳过 (向后兼容).
+    # is_bull_regime: 市场层 timing 信号, 供 Rust engine 的 require_bull_regime 开仓 gate 使用.
+    for opt_col in ["volume", "market_cap_100m", "is_bull_regime"]:
         if opt_col in df_scores.columns:
             out_cols.append(opt_col)
 

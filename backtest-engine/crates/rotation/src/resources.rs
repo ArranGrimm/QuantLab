@@ -47,6 +47,11 @@ pub struct EntrySection {
     pub entry_rank_limit: Option<usize>,
     #[serde(default)]
     pub min_score: f64,
+    /// 仅在市场处于多头区间 (PriceBar.is_bull_regime = true) 时允许新开仓.
+    /// 默认 false: 行为与未启用此开关时字节级一致.
+    /// 卖出逻辑 (排名退出/止损/移动止损/max_hold_days) 完全不受此开关影响.
+    #[serde(default)]
+    pub require_bull_regime: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -90,6 +95,7 @@ pub struct RotationConfig {
     pub hold_buffer: usize,
     pub entry_rank_limit: usize,
     pub min_score: f64,
+    pub require_bull_regime: bool,
 
     pub stop_loss_enabled: bool,
     pub stop_loss_pct: f64,
@@ -116,6 +122,7 @@ impl Default for RotationConfig {
             hold_buffer: 50,
             entry_rank_limit: 20,
             min_score: 0.0,
+            require_bull_regime: false,
             stop_loss_enabled: true,
             stop_loss_pct: 0.05,
             trailing_enabled: false,
@@ -147,6 +154,7 @@ impl From<ConfigFile> for RotationConfig {
             hold_buffer: cfg.entry.hold_buffer,
             entry_rank_limit,
             min_score: cfg.entry.min_score,
+            require_bull_regime: cfg.entry.require_bull_regime,
             stop_loss_enabled: cfg.stop_loss.enabled,
             stop_loss_pct: cfg.stop_loss.pct,
             trailing_enabled: cfg.trailing_stop.enabled,
@@ -171,6 +179,10 @@ pub struct PriceBar {
     pub score: f64,
     pub rank: u32,
     pub is_top_n: bool,
+    /// 市场层多头区间标记 (同一日期对所有股票相同).
+    /// 仅当 RotationConfig.require_bull_regime = true 时影响 entry filter.
+    /// 老 parquet 不带此列时, build_market_data 会默认设为 false.
+    pub is_bull_regime: bool,
 }
 
 /// code → date → PriceBar

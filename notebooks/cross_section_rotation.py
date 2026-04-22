@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.22.4"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -567,12 +567,22 @@ def _(df_scores_raw, pl, q_full, rotation_train_meta):
     # 关键: Parquet 必须包含所有"曾被评分"股票在整个回测期间的价格数据,
     # 即使某天该股票不在 universe 内 (市值越界等), 也要保留价格行,
     # 否则 Rust 引擎无法对该仓位执行止损/排名退出等检查 → "幽灵仓位"
+    #
+    # 多头区间 timing 列 (is_bull_regime):
+    #   - 市场层 daily flag, 同一天对所有股票相同
+    #   - 来自 utils.manual_bull_periods.ROTATION_BULL_REGIME (跟 B1 池子共用事实, 但语义独立)
+    #   - Rust engine 在 [entry] require_bull_regime = true 时会用此列做开仓 gate
+    #   - 卖出逻辑完全不受影响, 字段未启用时跟原行为字节级一致
     # ==============================================================================
     from utils.signal_export import export_rotation_scores
+    from utils.manual_bull_periods import (
+        ROTATION_BULL_REGIME,
+        is_in_bull_regime_expr,
+    )
 
     def run_export():
         EXPORT_TOP_N = 20
-        EXPORT_EMA_ALPHA = 1.0  # 导出 parquet 用的分数平滑; 改这里仅需重跑本 Cell
+        EXPORT_EMA_ALPHA = 0.3  # 导出 parquet 用的分数平滑; 改这里仅需重跑本 Cell
 
         df_scores_export = df_scores_raw
 
@@ -615,17 +625,31 @@ def _(df_scores_raw, pl, q_full, rotation_train_meta):
             df_scores_export, on=["date", "code"], how="left"
         ).with_columns(
             pl.col("score").fill_null(-999.0),
+        ).with_columns(
+            is_in_bull_regime_expr(
+                date_col="date",
+                periods=ROTATION_BULL_REGIME,
+            ).alias("is_bull_regime"),
         )
 
         n_scored = df_scores_export.height
         n_total = df_expanded.height
         n_padded = n_total - n_scored
+        bull_rows = int(df_expanded["is_bull_regime"].sum())
+        bull_pct = bull_rows / max(n_total, 1) * 100
         print(f"   评分行: {n_scored:,}, 补全行: {n_padded:,}, 总计: {n_total:,}", flush=True)
+        print(
+            f"   🐂 多头区间标记 is_bull_regime: {bull_rows:,} 行 ({bull_pct:.2f}%) / "
+            f"区间数 {len(ROTATION_BULL_REGIME)}",
+            flush=True,
+        )
 
         export_meta = {
             **rotation_train_meta,
             "export_ema_alpha": EXPORT_EMA_ALPHA,
             "export_token": f"e{str(EXPORT_EMA_ALPHA).replace('.', 'p')}_t{EXPORT_TOP_N}",
+            "bull_regime_periods_count": len(ROTATION_BULL_REGIME),
+            "bull_regime_rows_pct": round(bull_pct, 4),
         }
         scores_path = export_rotation_scores(
             df_expanded,

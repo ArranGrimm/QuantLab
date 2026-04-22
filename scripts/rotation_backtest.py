@@ -65,6 +65,11 @@ def build_rotation_config_overrides(args: argparse.Namespace) -> dict[str, objec
         overrides["entry.min_score"] = args.min_score
     if args.max_hold_days is not None:
         overrides["backtest.max_hold_days"] = args.max_hold_days
+    # require_bull_regime: 三态 (--require-bull-regime / --no-require-bull-regime / 默认不覆盖, 沿用 toml 值)
+    if args.require_bull_regime is True:
+        overrides["entry.require_bull_regime"] = True
+    elif args.require_bull_regime is False:
+        overrides["entry.require_bull_regime"] = False
     return overrides
 
 
@@ -245,6 +250,20 @@ def main() -> int:
     parser.add_argument("--hold-buffer", type=int, help="覆盖 entry.hold_buffer")
     parser.add_argument("--min-score", type=float, help="覆盖 entry.min_score")
     parser.add_argument("--max-hold-days", type=int, help="覆盖 backtest.max_hold_days")
+    parser.add_argument(
+        "--require-bull-regime",
+        dest="require_bull_regime",
+        action="store_true",
+        default=None,
+        help="覆盖 entry.require_bull_regime = true (仅在多头区间允许新开仓)",
+    )
+    parser.add_argument(
+        "--no-require-bull-regime",
+        dest="require_bull_regime",
+        action="store_false",
+        default=None,
+        help="覆盖 entry.require_bull_regime = false (默认行为)",
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config).expanduser()

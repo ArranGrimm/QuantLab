@@ -22,8 +22,11 @@ min_position_ratio = 0.5
 [entry]
 top_n = 20               # 每日候选池: score 前 N 名
 entry_rank_limit = 20     # 仅允许新开仓来自前 M 名
-hold_buffer = 20         # 持仓保留阈值: 排名跌出 Top-50 才卖出
+hold_buffer = 20         # 持仓保留阈值: 排名跌出 Top-(N+buffer) 才卖出 (经 4-20 实验锁定为 B1 最优)
 min_score = 0.002        # 最低 score 阈值 (低于此值不买入, 0.0 = 不过滤)
+require_bull_regime = false  # true 时仅在 PriceBar.is_bull_regime 为 true 的日子允许新开仓
+                             # 卖出逻辑 (排名/止损/移动止损/max_hold_days) 完全不受影响
+                             # 老 parquet 不带 is_bull_regime 列时自动当作 false (gate 永远屏蔽, 慎开)
 
 # ----------------------------------------------------------------------------
 # 止损设置

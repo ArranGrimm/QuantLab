@@ -7,6 +7,9 @@
 //!   cargo run -p bt-rotation --release -- --data ../../artifacts/rotation/.../signal.parquet
 //!   cargo run -p bt-rotation --release -- --config config.toml --data ../../artifacts/rotation/.../signal.parquet
 
+// json!{} 宏在 registry 字段较多时会触发默认 128 的递归展开上限.
+#![recursion_limit = "256"]
+
 mod components;
 mod resources;
 mod systems;
@@ -96,6 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let top_n = config.top_n;
     let entry_rank_limit = config.entry_rank_limit as u32;
     let min_score = config.min_score;
+    let require_bull_regime = config.require_bull_regime;
     app.insert_resource(config);
     app.insert_resource(Portfolio::new(initial_capital));
     app.insert_resource(BacktestStats::default());
@@ -116,6 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut limit_up_blocked: u32 = 0;
     let mut limit_up_days: u32 = 0;
+    let mut bull_regime_blocked_days: u32 = 0;
 
     for date in &trading_dates {
         let world = app.world_mut();
@@ -130,10 +135,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if bar.score < min_score {
                         return None;
                     }
+                    // 多头区间 gate: 仅在启用且当前 bar 处于多头区间时才允许进入候选.
+                    // 卖出逻辑不受此影响 (在 check_exit_conditions 系统里, 那边只看持仓本身).
+                    if require_bull_regime && !bar.is_bull_regime {
+                        return None;
+                    }
                     Some((code.clone(), bar.score, bar.close, bar.pre_close, bar.rank))
                 })
             })
             .collect();
+
+        // 当启用多头 gate 且整日无候选时, 计为一个被 gate 屏蔽的日子 (作诊断用).
+        if require_bull_regime && candidates.is_empty() {
+            bull_regime_blocked_days += 1;
+        }
 
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         candidates.truncate(top_n);
@@ -170,6 +185,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         top_n, limit_up_blocked, limit_up_days,
         if limit_up_days > 0 { limit_up_blocked as f64 / limit_up_days as f64 } else { 0.0 }
     );
+    if require_bull_regime {
+        let total_days = trading_dates.len();
+        let blocked_pct = if total_days > 0 {
+            bull_regime_blocked_days as f64 / total_days as f64 * 100.0
+        } else {
+            0.0
+        };
+        println!(
+            "多头区间 gate 屏蔽: {} / {} 天无候选 ({:.1}%, 仅影响开仓)",
+            bull_regime_blocked_days, total_days, blocked_pct
+        );
+    }
 
     let stats = app.world().resource::<BacktestStats>();
     let portfolio = app.world().resource::<Portfolio>();
@@ -179,15 +206,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !args.output_dir.is_empty() {
         let config = app.world().resource::<RotationConfig>();
         let config_text = format_config(config, trading_dates.len());
+        let bull_blocked_pct = if !trading_dates.is_empty() {
+            bull_regime_blocked_days as f64 / trading_dates.len() as f64 * 100.0
+        } else {
+            0.0
+        };
         let extra_text = format!(
-            "--- Strategy Stats ---\nLimit Up Blocked:  {} ({} days, avg {:.1}/day)\n",
+            "--- Strategy Stats ---\n\
+             Limit Up Blocked:  {} ({} days, avg {:.1}/day)\n\
+             Require Bull Regime: {}\n\
+             Bull Regime Blocked Days: {} / {} ({:.1}%)\n",
             limit_up_blocked,
             limit_up_days,
             if limit_up_days > 0 {
                 limit_up_blocked as f64 / limit_up_days as f64
             } else {
                 0.0
-            }
+            },
+            if require_bull_regime { "true" } else { "false" },
+            bull_regime_blocked_days,
+            trading_dates.len(),
+            bull_blocked_pct,
         );
         let report_paths = bt_core::write_report_bundle(
             &args.output_dir,
@@ -207,6 +246,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "entry_rank_limit": config.entry_rank_limit,
                 "hold_buffer": config.hold_buffer,
                 "min_score": config.min_score,
+                "require_bull_regime": config.require_bull_regime,
                 "stop_loss_enabled": config.stop_loss_enabled,
                 "stop_loss_pct": config.stop_loss_pct,
                 "trailing_enabled": config.trailing_enabled,
@@ -224,7 +264,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     limit_up_blocked as f64 / limit_up_days as f64
                 } else {
                     0.0
-                }
+                },
+                "require_bull_regime": require_bull_regime,
+                "bull_regime_blocked_days": bull_regime_blocked_days,
+                "bull_regime_blocked_pct": if !trading_dates.is_empty() {
+                    bull_regime_blocked_days as f64 / trading_dates.len() as f64 * 100.0
+                } else {
+                    0.0
+                },
             })),
             stats,
             portfolio,
@@ -263,6 +310,10 @@ fn print_config(config: &RotationConfig) {
     );
     println!("Min Score: {}", config.min_score);
     println!(
+        "Require Bull Regime: {}",
+        if config.require_bull_regime { "ON (entry-only)" } else { "OFF" }
+    );
+    println!(
         "Stop Loss: {:.1}% ({})",
         config.stop_loss_pct * 100.0,
         if config.stop_loss_enabled { "ON" } else { "OFF" }
@@ -300,6 +351,12 @@ fn build_market_data(
     let rank_casted = df.column("rank")?.cast(&DataType::UInt32)?;
     let rank = rank_casted.u32()?;
     let is_top_n = df.column("is_top_n")?.bool()?;
+    // 兼容老 parquet: is_bull_regime 列不存在时全部默认 false (保留原始行为).
+    let is_bull_regime_opt = df.column("is_bull_regime").ok();
+    let is_bull_regime_ca = match &is_bull_regime_opt {
+        Some(col) => Some(col.bool()?),
+        None => None,
+    };
 
     for i in 0..df.height() {
         let code = codes.get(i).ok_or("Missing code")?;
@@ -315,6 +372,10 @@ fn build_market_data(
             score: score.get(i).unwrap_or(0.0),
             rank: rank.get(i).unwrap_or(9999u32),
             is_top_n: is_top_n.get(i).unwrap_or(false),
+            is_bull_regime: is_bull_regime_ca
+                .as_ref()
+                .and_then(|ca| ca.get(i))
+                .unwrap_or(false),
         };
 
         market_data
@@ -349,6 +410,11 @@ fn format_config(config: &RotationConfig, trading_days: usize) -> String {
     writeln!(s, "Entry Rank Limit: {}", config.entry_rank_limit).unwrap();
     writeln!(s, "Hold Buffer:      {}", config.hold_buffer).unwrap();
     writeln!(s, "Min Score:        {}", config.min_score).unwrap();
+    writeln!(
+        s,
+        "Require Bull Regime: {}",
+        if config.require_bull_regime { "true (entry-only gate)" } else { "false" }
+    ).unwrap();
     writeln!(s, "Stop Loss:        {:.1}% ({})",
         config.stop_loss_pct * 100.0,
         if config.stop_loss_enabled { "ON" } else { "OFF" }
@@ -424,6 +490,7 @@ fn append_rotation_registry_entry(
         "max_daily_buys": config.max_daily_buys,
         "hold_buffer": config.hold_buffer,
         "min_score": config.min_score,
+        "require_bull_regime": config.require_bull_regime,
         "max_hold_days": config.max_hold_days,
         "stop_loss_enabled": config.stop_loss_enabled,
         "stop_loss_pct": config.stop_loss_pct,
