@@ -1,5 +1,36 @@
 # Progress
 
+## 2026-04-25
+
+### [基础设施] 活跃市值截图 Parse 阶段首版脚本落地
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md` (RPA 章节追加 `rpa_parse/` 状态)
+  - 新增 `rpa_parse/README.md`
+  - 新增 `rpa_parse/parse_active_market_value.py`
+- **背景**: 用户已拿到接近 1800 张 `0AMV 活跃市值` readout 截图, 样式固定、黑底高对比、11 个字段稳定, 适合用 OCR + 字段正则解析成结构化数据.
+- **技术路线**:
+  - 保持 `rpa_capture/` 只负责 Windows 端截图
+  - 新增 `rpa_parse/` 作为 Mac/Windows 解析端
+  - 用 PaddleOCR 读取 `seq_*.png`, 抽取文本行
+  - 用字段名 (`开/高/低/收/幅/量/额/盘/率/振`) + 数字正则解析
+  - 输出 `active_market_value.parquet / csv / review.csv`
+  - 可选写入 DuckDB `active_market_value`
+- **依赖决策**:
+  - 暂不把 PaddleOCR / PaddlePaddle 加进主 `pyproject.toml`
+  - 推荐用 `uv run --python 3.11 --with paddleocr --with paddlepaddle ...` 临时环境执行, 避免污染主项目 Python 3.13 环境与 `uv.lock`
+- **校验能力**:
+  - 缺字段进入 `active_market_value_review.csv`
+  - `low <= open/close <= high` 异常进入 review
+  - OCR 低置信度进入 review
+  - 保留 `ocr_text` 与可选 `raw_ocr/*.json`, 便于人工复核和规则迭代
+- **下一步**:
+  - 用用户当前截图目录跑首轮 1800 张 OCR
+  - 查看 `active_market_value_review.csv`, 统计需人工修正比例
+  - 若 OCR 错误集中在固定字段, 在 `parse_active_market_value.py` 增加字段级纠错规则
+  - 通过日期连续性与 OHLC 派生校验后, 写入 DuckDB 并开始对账旧 `LOOSE_PERIODS`
+
 ## 2026-04-21 (晚)
 
 ### [文档] 活跃市值自动化路线图正式立项

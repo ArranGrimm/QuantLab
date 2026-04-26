@@ -79,3 +79,5 @@ Thumbs.db
 # --- RPA local artifacts ---
 rpa_capture/shots/
 rpa_capture/region.json
+rpa_parse/shots/
+rpa_parse/data/

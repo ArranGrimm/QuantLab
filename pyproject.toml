@@ -25,7 +25,6 @@ dependencies = [
     "pandas>=2.2.3",
     "polars[all]>=1.32.3",
     "python-okx>=0.3.8",
-    "ta-lib>=0.6.3",
     "vectorbt>=0.27.3",
     "watchdog>=6.0.0",
     "yfinance>=0.2.61",
@@ -36,8 +35,10 @@ dependencies = [
     "duckdb>=1.4.3",
     "google-genai>=1.67.0",
     "kaleido>=1.2.0",
-    "pyyaml>=6.0.3",
+    "pyyaml>=6.0.2",
     "lightgbm>=4.6.0",
+    "paddleocr>=3.5.0",
+    "paddlepaddle>=3.3.1",
 ]
 
 # 1. 默认源：统一锁到阿里云镜像，避免不同设备因终端环境变量导致 `uv.lock` 漂移

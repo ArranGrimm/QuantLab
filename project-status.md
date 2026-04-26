@@ -583,13 +583,15 @@ Python (信号层)                    Rust (回测/执行层)
 - **背景**: 活跃市值是指南针客户端的专利指标, 当前 B1 / Rotation 的 timing alpha 全部依赖手工标记的 25 个 `LOOSE_PERIODS`, 单点依赖且无法日更. RPA 管道目标是把整个指标数据源 (1993 起) 自动化并日更.
 - **架构**: 两阶段解耦, OCR 方案升级不需要重抓
   - **Capture 阶段** (Windows 端, 已实现): 截图 + manifest.jsonl, 不做 OCR
-  - **Parse 阶段** (Mac 端, 待实现): OCR + 校验 + 入 DuckDB
+  - **Parse 阶段** (Mac/Windows 解析端, 首版脚本已实现): OCR + 字段解析 + 校验 + 可选入 DuckDB
 - **依赖纪律**: capture 阶段只 `pywinauto + mss` 2 个包
 - **当前文件**:
   - `rpa_capture/run_capture.py`: 主入口
   - `rpa_capture/calibrate_region.py`: 交互式 readout 区域标定
   - `rpa_capture/requirements.txt`
   - `rpa_capture/README.md`
+  - `rpa_parse/parse_active_market_value.py`: 批量 OCR + 结构化解析 + review 表 + 可选 DuckDB 写入
+  - `rpa_parse/README.md`: Parse 阶段运行说明
 - **关键技术决策**:
   - 用纯 Win32 `SetForegroundWindow` 拉前台, **避免 pywinauto 触发"合成点击"导致图表 cursor 漂移**
   - 截图前把鼠标停到 `(2, 2)`, 避免主图区域 hover 干扰 cursor
@@ -606,9 +608,9 @@ Python (信号层)                    Rust (回测/执行层)
   - `active_market_value(trade_date PK, open, high, low, close, chg_pct, volume, amount, position, turnover, amplitude, captured_at, source)`
   - `source` 字段保留版本标识 (`rpa_v1` / `manual` / 未来 `rpa_v2`)
 - **下一步**:
-  - PD VM 内执行历史回填 (1993 ~ 今天)
-  - 实现 `rpa_parse/` (PaddleOCR + polars + DuckDB)
-  - 跟手工的 25 个 `LOOSE_PERIODS` 交叉对账验收 OCR 准确率
+  - 用当前接近 1800 张截图跑首轮 `rpa_parse/`
+  - 检查 `active_market_value_review.csv`, 统计缺字段 / 低置信度 / OHLC 异常比例
+  - 跟手工的 25 个 `LOOSE_PERIODS` 交叉对账验收 OCR 准确率与 regime 可替代性
   - Windows 计划任务实现日更
 - **本地产物 (已在 `.gitignore`)**:
   - `rpa_capture/shots/` (截图目录)
