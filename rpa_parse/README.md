@@ -5,55 +5,66 @@
 设计上与 `rpa_capture/` 解耦:
 
 - `rpa_capture/`: Windows 端只截图, 不做 OCR
-- `rpa_parse/`: Mac/Windows 解析端做 OCR、字段解析、校验、落盘
+- `rpa_parse/`: macOS 端用原生 Vision Framework 做 OCR、字段解析、校验、落盘
 
 ## 推荐运行方式
 
-PaddleOCR / PaddlePaddle 对 Python 版本比较敏感, 不建议直接加入主项目 `pyproject.toml`。
-推荐用 `uv` 临时创建 Python 3.11 运行环境:
+当前默认使用 **macOS Vision Framework**。PyObjC 绑定已写入项目依赖, 第一次使用前同步环境:
 
 ```bash
-uv python install 3.11
+uv sync
+```
 
-uv run --python 3.11 \
-  --with paddleocr \
-  --with paddlepaddle \
-  --with polars \
-  --with duckdb \
-  python rpa_parse/parse_active_market_value.py \
-  --input rpa_capture/shots \
+先跑 1 张冒烟:
+
+```bash
+uv run python rpa_parse/parse_active_market_value.py \
+  --input rpa_parse/shots \
+  --output data/active_market_value_test \
+  --raw-json \
+  --limit 1 \
+  --progress-every 1
+```
+
+确认 `active_market_value_test/active_market_value.csv` 字段正常后, 跑全量:
+
+```bash
+uv run python rpa_parse/parse_active_market_value.py \
+  --input rpa_parse/shots \
   --output data/active_market_value \
   --raw-json
 ```
 
-如需直接写入 DuckDB:
+后续日更只解析新增截图:
 
 ```bash
-uv run --python 3.11 \
-  --with paddleocr \
-  --with paddlepaddle \
-  --with polars \
-  --with duckdb \
-  python rpa_parse/parse_active_market_value.py \
-  --input rpa_capture/shots \
+uv run python rpa_parse/parse_active_market_value.py \
+  --input rpa_parse/shots \
   --output data/active_market_value \
-  --duckdb ../QuantData/Ashare/qmt_data.duckdb
+  --raw-json \
+  --incremental \
+  --progress-every 1
 ```
 
-第一次全量导入时如果确认要覆盖旧表:
+增量模式会读取已有 `active_market_value.parquet`, 按 `seq` 跳过已入表图片, 只 OCR 新增 `seq_*.png`。输出仍会重写完整的 `active_market_value.csv / parquet / review.csv`。
+
+写入 DuckDB 由独立 ingest 脚本负责。默认写入 `../QuantData/Ashare/active_market_value.duckdb`, 按 `trade_date` upsert, 已存在日期会覆盖:
 
 ```bash
-uv run --python 3.11 \
-  --with paddleocr \
-  --with paddlepaddle \
-  --with polars \
-  --with duckdb \
-  python rpa_parse/parse_active_market_value.py \
-  --input rpa_capture/shots \
-  --output data/active_market_value \
-  --duckdb ../QuantData/Ashare/qmt_data.duckdb \
-  --replace-duckdb
+uv run python rpa_parse/ingest_active_market_value.py \
+  --input data/active_market_value/active_market_value.parquet \
+  --mode upsert
 ```
+
+如果确认要全表替换:
+
+```bash
+uv run python rpa_parse/ingest_active_market_value.py \
+  --input data/active_market_value/active_market_value.parquet \
+  --mode replace
+```
+
+活跃市值不是 QMT 数据源, 因此单独维护 `active_market_value.duckdb`。需要和 QMT 行情联表时, 在研究 SQL 里同时 `ATTACH` 两个库。
 
 ## 输出文件
 
@@ -84,6 +95,8 @@ data/active_market_value/
 - `review_reason`: 需要人工复核的原因
 - `ocr_text`: OCR 合并文本, 便于排查
 
+备注: Vision 对短字段的 `confidence` 经常是 `0.5 / 1.0` 这类粗粒度值, 默认复核阈值设为 `0.5`。如果你想更严格, 可手动传 `--confidence-threshold 0.85`。
+
 ## 人工复核流程
 
 优先打开:
@@ -99,6 +112,21 @@ data/active_market_value/active_market_value_review.csv
 - `low_confidence`: OCR 最低置信度低于阈值
 
 复核时打开对应 `filename`, 手工修正 CSV 后, 再重新写入 DuckDB。
+
+## DuckDB 表结构
+
+`ingest_active_market_value.py` 会创建:
+
+- `active_market_value`: 主表, `trade_date DATE PRIMARY KEY`
+- `active_market_value_qc`: 质量检查 view, 用前一日 `amv_close` 复算 `chg_abs_pct / amplitude_pct`
+
+主表字段使用 `amv_` 前缀:
+
+- `amv_open / amv_high / amv_low / amv_close`
+- `chg_abs_pct`: 截图里的「幅」, 是绝对涨跌幅
+- `volume_100m / amount_100m / position_100m`: 单位均为「亿」
+- `turnover_pct / amplitude_pct`
+- `source_seq / source_filename / raw_ocr_text / quality_flags`: OCR 追溯信息
 
 ## 解析策略
 
@@ -118,5 +146,5 @@ data/active_market_value/active_market_value_review.csv
 振:3.35%
 ```
 
-脚本先用 PaddleOCR 提取文本行, 再用字段名和数字正则解析。
-只要字段名稳定, 后续 OCR 模型升级不会影响表结构。
+脚本先用 macOS Vision 提取文本行, 再用字段名和数字正则解析。
+只要字段名稳定, 后续 OCR 后端细节不会影响表结构。

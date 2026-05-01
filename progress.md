@@ -1,5 +1,117 @@
 # Progress
 
+## 2026-05-01
+
+### [基础设施] 活跃市值 DuckDB 从 QMT 库拆出
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `rpa_parse/README.md`
+  - `rpa_parse/ingest_active_market_value.py`
+- **决策**:
+  - 活跃市值是指南针客户端衍生的市场级指标, 不是 QMT 数据源
+  - 默认 DuckDB 从 `../QuantData/Ashare/qmt_data.duckdb` 改为 `../QuantData/Ashare/active_market_value.duckdb`
+  - QMT 行情库继续只承载 QMT 同步链路, 后续研究联表时用 DuckDB `ATTACH`
+- **收益**:
+  - 避免污染 `qmt_data.duckdb`
+  - 避免 QMT 数据库文件锁影响活跃市值日更
+  - 活跃市值可作为独立数据产品备份、重建和验收
+- **验证**:
+  - 已用默认路径执行 `rpa_parse/ingest_active_market_value.py --mode upsert`
+  - 写入库: `../QuantData/Ashare/active_market_value.duckdb`
+  - 结果: `1776` 行, `2019-01-02 -> 2026-04-30`, `flagged_rows=66`, `qc_errors=0`
+
+### [基础设施] 活跃市值日更 5 张增量校验通过
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+- **本次增量**:
+  - `active_market_value.csv / parquet` 已从 `1771` 行更新到 `1776` 行
+  - 最新日期从 `2026-04-23` 延伸到 `2026-04-30`
+  - 新增区间: `seq_01772.png -> seq_01776.png`
+- **质量校验**:
+  - 新增 5 行 `review_reason` 均为空
+  - 全量 `active_market_value_review.csv` 仍为 `66` 行, 未新增 review 项
+  - 复算 `chg_pct` / `amplitude` 的一致性校验: `bad rows = 0`
+- **DuckDB 入库状态**:
+  - `rpa_parse/ingest_active_market_value.py --mode upsert` 已尝试执行
+  - 目标库 `../QuantData/Ashare/qmt_data.duckdb` 当前被另一个 Python 进程持锁 (`PID 10743`), 因此写入待锁释放后重跑
+  - 该失败属于 DuckDB 文件锁冲突, 不是 OCR / Parse 数据质量问题
+  - 后续已决定改用独立 `../QuantData/Ashare/active_market_value.duckdb`, 并已完成首次 upsert
+
+## 2026-04-30
+
+### [基础设施] 活跃市值 Parse 阶段放弃 PaddleOCR, 切到 macOS Vision
+
+- 已更新:
+  - 本文件 (本条)
+  - `rpa_parse/parse_active_market_value.py`
+  - `rpa_parse/README.md`
+  - `project-status.md`
+  - `experiments/active-market-value-automation.md`
+- **背景**: PaddleOCR / PaddlePaddle 在 macOS + Python 3.13 + Apple Silicon 下虽然官方声明可用, 但依赖重、初始化慢、API 版本差异明显, 对当前固定 readout 小图属于过度方案.
+- **决策**: `rpa_parse` 默认 OCR 后端改为 macOS 原生 **Vision Framework**.
+  - 不再 import / 调用 `paddleocr`
+  - 通过 PyObjC 调用 `VNRecognizeTextRequest`
+  - 默认语言 `zh-Hans + en-US`
+  - 关闭 language correction, 避免短字段和数字被错误纠正
+  - 增加 `customWords`: `开/高/低/收/幅/量/额/盘/率/振/亿/周一~周五`
+- **接口保持**:
+  - `parse_lines()` / 字段正则 / review CSV / DuckDB 写入逻辑不变
+  - CLI 仍是 `python rpa_parse/parse_active_market_value.py --input ... --output ...`
+  - 保留 `--limit` / `--progress-every` 便于小样本冒烟
+- **下一步**:
+  - 同步 PyObjC 依赖: `uv sync`
+  - 先跑 `--limit 1`, 验证 Vision 对 11 个字段识别是否完整
+  - 若字段名识别不稳, 优先在 `normalize_text()` 增加 OCR 纠错映射, 不再回退 PaddleOCR
+
+### [基础设施] 活跃市值 DuckDB ingest 脚本落地
+
+- 已更新:
+  - 新增 `rpa_parse/ingest_active_market_value.py`
+  - 更新 `rpa_parse/README.md`
+  - 移除 `parse_active_market_value.py` 内旧的简易 DuckDB 写入入口, 避免旧 schema 误用
+- **表结构**:
+  - 主表: `active_market_value`
+  - 主键: `trade_date DATE PRIMARY KEY`
+  - OHLC 字段统一用 `amv_open / amv_high / amv_low / amv_close`
+  - `chg_pct` 入库改名为 `chg_abs_pct`, 明确截图里的"幅"是绝对涨跌幅
+  - `volume / amount / position` 入库改名为 `volume_100m / amount_100m / position_100m`, 明确单位为"亿"
+  - 保留 `source_seq / source_filename / raw_ocr_text / quality_flags / ocr_min_confidence` 用于追溯
+- **写入语义**:
+  - `--mode upsert`: 使用 DuckDB `INSERT ... ON CONFLICT (trade_date) DO UPDATE`, 按日期覆盖
+  - `--mode replace`: 清空表后重写
+  - 自动创建 `active_market_value_qc` view, 用前一日 `amv_close` 复算 `chg_abs_pct / amplitude_pct`
+- **测试**:
+  - 已用临时库 `data/active_market_value/test_ingest.duckdb` 跑通 `replace` 与 `upsert`
+  - 结果: `1771` 行, `2019-01-02 -> 2026-04-23`, `flagged_rows=66`, `qc_errors=0`
+
+### [基础设施] 活跃市值日更增量链路补齐
+
+- 已更新:
+  - `rpa_capture/run_capture.py`
+  - `rpa_capture/README.md`
+  - `rpa_parse/parse_active_market_value.py`
+  - `rpa_parse/README.md`
+- **Capture 端**:
+  - 既有 `--start-seq` 已确认可用于自定义起始序号
+  - 新增 `--overwrite` 开关; 默认禁止覆盖已存在 `seq_*.png`
+  - 启动时打印计划截图范围, 例如 `seq_01772.png -> seq_01776.png`
+  - 结束提示改为使用实际 `start_seq`, 避免一直提示 `seq_00000`
+- **Parse 端**:
+  - 新增 `--incremental`
+  - 若 `active_market_value.parquet` 已存在, 按 `seq` 跳过已解析图片, 只 OCR 新增截图
+  - 合并后仍输出完整 `active_market_value.parquet / csv / review.csv`
+  - 保留已有人工修正值, 避免日更时重跑全量 OCR 覆盖历史修正
+- **测试**:
+  - 当前目录已有 `1771` 行, 无新增图片时运行 `--incremental`:
+    - `existing rows=1771`
+    - `new images=0`
+    - `new rows=0`
+    - `review rows=66`
+
 ## 2026-04-25
 
 ### [基础设施] 活跃市值截图 Parse 阶段首版脚本落地

@@ -81,9 +81,9 @@
 │           PNG + manifest.jsonl (跨设备共享文件夹)                │
 │                              │                                   │
 │                              ▼                                   │
-│  Phase 2: Parse (Mac 端, 待实现)                                 │
+│  Phase 2: Parse (Mac 端, 首版已实现)                             │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │  PaddleOCR (中文小字体 SOTA)                               │  │
+│  │  macOS Vision Framework (VNRecognizeTextRequest)           │  │
 │  │      ▼ 11 字段抽取 (date/OHLC/幅/量/额/盘/率/振)          │  │
 │  │  polars 校验 (字段类型 / 日期连续 / 重复检测)              │  │
 │  │      ▼                                                     │  │
@@ -109,7 +109,7 @@
 ### 依赖纪律
 
 - Capture 阶段 (Windows VM): 仅 `pywinauto + mss` 两个包, 不挑环境
-- Parse 阶段 (Mac 主力): 走项目现有 `uv` 环境 (polars / duckdb 已有, 仅新增 `paddleocr`)
+- Parse 阶段 (Mac 主力): 走项目现有 `uv` 环境, OCR 使用 macOS Vision Framework + PyObjC
 
 ### 部署形态演进
 
@@ -161,7 +161,7 @@
 
 ### 依赖建议
 
-- **PaddleOCR**: 中文小字体准确率最高的开源 OCR (相比 EasyOCR / Tesseract), 数字 / 日期识别接近 100%
+- **macOS Vision Framework**: 系统原生 OCR, 无模型下载, 适合当前固定 readout 小图; 通过 PyObjC 调用
 - **polars**: 类型校验 + 缺失字段处理
 - **duckdb**: 已是项目主存储
 
@@ -215,11 +215,8 @@ CREATE TABLE active_market_value (
 
 ```
 rpa_parse/
-├── ocr_extract.py        # PaddleOCR 封装, 单张 PNG → dict
-├── validate.py           # 11 字段类型 / 范围 / 连续性校验
-├── ingest.py             # 写 DuckDB, 处理 upsert / conflict
-├── reconcile.py          # 跟手工 LOOSE_PERIODS 交叉对账
-└── requirements.txt      # paddleocr (paddle paddlepaddle 已有 GPU 版本)
+├── parse_active_market_value.py  # Vision OCR + 11 字段解析 + 校验 + 可选入库
+└── README.md                     # Parse 阶段运行说明
 ```
 
 ### Parse 阶段验收门槛
@@ -353,9 +350,9 @@ rpa_parse/
 
 - [x] Phase 1 Capture PoC (`2026-04-21`)
 - [ ] Phase 1 历史回填: PD VM 内跑 `--days 1700`, 输出全量 PNG (用户在家执行)
-- [ ] Phase 2 Parse: `rpa_parse/ocr_extract.py` 用 PaddleOCR 实现 11 字段抽取
-- [ ] Phase 2 Parse: `rpa_parse/validate.py` 实现校验规则
-- [ ] Phase 2 Parse: `rpa_parse/ingest.py` 入 DuckDB
+- [x] Phase 2 Parse: `rpa_parse/parse_active_market_value.py` 首版实现 Vision OCR + 11 字段抽取
+- [x] Phase 2 Parse: review CSV / OHLC 范围 / 低置信度校验首版实现
+- [x] Phase 2 Parse: 支持可选写入 DuckDB
 - [ ] Phase 3 对账: 跟手工 25 段 `LOOSE_PERIODS` 交叉对账, 评估 R0/R1/R2 三个候选机械规则
 - [ ] Phase 3 网格搜索: 75 组阈值组合, 找出 alpha 最稳定的一组
 - [ ] Phase 4 集成: 把 `simple_b1_lab.py` 切到机械 regime, 验证 alpha 不缩水

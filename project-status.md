@@ -583,7 +583,13 @@ Python (信号层)                    Rust (回测/执行层)
 - **背景**: 活跃市值是指南针客户端的专利指标, 当前 B1 / Rotation 的 timing alpha 全部依赖手工标记的 25 个 `LOOSE_PERIODS`, 单点依赖且无法日更. RPA 管道目标是把整个指标数据源 (1993 起) 自动化并日更.
 - **架构**: 两阶段解耦, OCR 方案升级不需要重抓
   - **Capture 阶段** (Windows 端, 已实现): 截图 + manifest.jsonl, 不做 OCR
-  - **Parse 阶段** (Mac/Windows 解析端, 首版脚本已实现): OCR + 字段解析 + 校验 + 可选入 DuckDB
+  - **Parse 阶段** (macOS 解析端, 首版脚本已实现): Vision OCR + 字段解析 + 校验 + 可选入 DuckDB
+- **当前状态 (2026-05-01)**:
+  - 历史 + 日更增量已解析到 `1776` 行, 日期范围 `2019-01-02 -> 2026-04-30`
+  - 最新 5 张 (`seq_01772.png -> seq_01776.png`) 已完成增量解析, 未新增 review 项
+  - 全量二次校验 `chg_pct / amplitude` 一致性异常为 `0`
+  - DuckDB 存储已从 `qmt_data.duckdb` 拆出, 默认写入 `../QuantData/Ashare/active_market_value.duckdb`
+  - 独立库首次 upsert 已完成: `1776` 行, `flagged_rows=66`, `qc_errors=0`
 - **依赖纪律**: capture 阶段只 `pywinauto + mss` 2 个包
 - **当前文件**:
   - `rpa_capture/run_capture.py`: 主入口
@@ -591,12 +597,15 @@ Python (信号层)                    Rust (回测/执行层)
   - `rpa_capture/requirements.txt`
   - `rpa_capture/README.md`
   - `rpa_parse/parse_active_market_value.py`: 批量 OCR + 结构化解析 + review 表 + 可选 DuckDB 写入
+  - `rpa_parse/ingest_active_market_value.py`: 建表 + `trade_date` upsert + QC view
   - `rpa_parse/README.md`: Parse 阶段运行说明
 - **关键技术决策**:
   - 用纯 Win32 `SetForegroundWindow` 拉前台, **避免 pywinauto 触发"合成点击"导致图表 cursor 漂移**
   - 截图前把鼠标停到 `(2, 2)`, 避免主图区域 hover 干扰 cursor
   - 区域裁剪: 单图 ~9 KB (vs 全屏 ~3 MB), 1700 张总量从 5GB 降到 50MB
   - 时间方向: `seq=0` 是最早起始日 (按 → 方向键前进), 入库无需 reverse
+  - Parse OCR 后端已从 PaddleOCR 改为 macOS 原生 Vision Framework, 避免 PaddlePaddle 在 Apple Silicon / Python 3.13 下的重依赖与版本风险
+  - DuckDB 入库单独脚本化, `active_market_value.trade_date` 为主键, 默认写入独立的 `active_market_value.duckdb`
 - **PoC 验收 (2026-04-21)**:
   - 起点准确, 方向正确, 10 张图日期连续, 自动跳过周末
   - 性能: **246 ms / 张**, 推算 1700 天历史回填 ≈ 7 分钟
@@ -604,12 +613,13 @@ Python (信号层)                    Rust (回测/执行层)
 - **部署形态**:
   - 当前阶段: 直接 Windows 物理机跑通 PoC
   - 最终形态: 主力 Mac + PD Windows VM, 通过共享文件夹同步图片
-- **数据 schema 草案** (待 parse 阶段落实):
-  - `active_market_value(trade_date PK, open, high, low, close, chg_pct, volume, amount, position, turnover, amplitude, captured_at, source)`
-  - `source` 字段保留版本标识 (`rpa_v1` / `manual` / 未来 `rpa_v2`)
+- **DuckDB schema**:
+  - 主表: `active_market_value`
+  - 主键: `trade_date DATE PRIMARY KEY`
+  - OHLC: `amv_open / amv_high / amv_low / amv_close`
+  - 派生与规模字段: `chg_abs_pct / volume_100m / amount_100m / position_100m / turnover_pct / amplitude_pct`
+  - 溯源字段: `source / source_seq / source_filename / source_captured_at / raw_ocr_text / quality_flags`
 - **下一步**:
-  - 用当前接近 1800 张截图跑首轮 `rpa_parse/`
-  - 检查 `active_market_value_review.csv`, 统计缺字段 / 低置信度 / OHLC 异常比例
   - 跟手工的 25 个 `LOOSE_PERIODS` 交叉对账验收 OCR 准确率与 regime 可替代性
   - Windows 计划任务实现日更
 - **本地产物 (已在 `.gitignore`)**:

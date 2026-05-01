@@ -119,6 +119,7 @@ python run_capture.py --days 1700 --output ./shots --sleep-ms 200
 | `--output` | `./shots` | 输出目录 |
 | `--sleep-ms` | 200 | 每次按键后等待毫秒 (太短可能截到旧帧) |
 | `--start-seq` | 0 | 起始 seq, 续跑用 |
+| `--overwrite` | False | 允许覆盖已存在截图; 默认禁止覆盖 |
 | `--no-arrow` | False | 只截当前一帧, 用于第一次验证 |
 | `--no-focus` | False | 完全跳过窗口激活, 假设指南针已在前台 (最稳妥, 不会漂) |
 | `--precount` | 3 | 开始截图前的倒计时秒数 |
@@ -168,6 +169,21 @@ shots/
 ```
 
 注意: `manifest.jsonl` **不记录交易日期**, 因为本阶段不做 OCR. 真实日期由 Mac 端 OCR 阶段从图片里识别出来后再写入数据库.
+
+## 日更 / 增量截图
+
+如果 Mac 端当前最后一张是 `seq_01771.png`, 下一次在 Windows / PD 里从新日期开始抓时:
+
+```bash
+python run_capture.py --days 5 --start-seq 1772 --output ./shots
+```
+
+脚本默认会检查目标文件是否已存在; 如果 `seq_01772.png` 已存在会直接中止, 防止覆盖历史截图。
+只有确认要重抓覆盖时才加:
+
+```bash
+python run_capture.py --days 5 --start-seq 1772 --output ./shots --overwrite
+```
 
 ## 已知限制 / TODO
 

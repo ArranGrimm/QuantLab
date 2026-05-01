@@ -144,6 +144,11 @@ def main() -> int:
     parser.add_argument("--sleep-ms", type=int, default=200, help="按键后等待毫秒数")
     parser.add_argument("--start-seq", type=int, default=0, help="起始 seq (续跑时用)")
     parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="允许覆盖已存在的 seq_*.png. 默认禁止覆盖, 防止续跑误伤历史截图",
+    )
+    parser.add_argument(
         "--no-arrow", action="store_true",
         help="只截当前一帧, 不按方向键; 用于先验证截图能拿到什么内容",
     )
@@ -199,6 +204,21 @@ def main() -> int:
     # 续写模式: 续跑时不覆盖之前的 manifest
     manifest_mode = "a" if args.start_seq > 0 else "w"
     iterations = 1 if args.no_arrow else args.days
+    planned_paths = [
+        output_dir / f"seq_{args.start_seq + i:05d}.png"
+        for i in range(iterations)
+    ]
+    existing_paths = [path for path in planned_paths if path.exists()]
+    if existing_paths and not args.overwrite:
+        preview = ", ".join(path.name for path in existing_paths[:5])
+        raise RuntimeError(
+            f"目标截图已存在, 为避免覆盖已中止: {preview}. "
+            "请调整 --start-seq, 或确认后加 --overwrite"
+        )
+    print(
+        f"计划截图: seq_{args.start_seq:05d}.png -> "
+        f"seq_{args.start_seq + iterations - 1:05d}.png"
+    )
 
     with open(manifest_path, manifest_mode, encoding="utf-8") as f_manifest:
         for i in range(iterations):
@@ -231,9 +251,13 @@ def main() -> int:
 
     print(f"\n完成. 共截图 {iterations} 张, manifest: {manifest_path}")
     print("\n下一步:")
-    print("  1. 用图片查看器打开 seq_00000.png 检查质量")
+    print(f"  1. 用图片查看器打开 seq_{args.start_seq:05d}.png 检查质量")
     print("  2. 重点确认顶部左侧 readout 区域 (日期 + 开高低收) 文字是否清晰")
-    print("  3. 比较 seq_00000 和 seq_00001, 确认日期是否真的前进了 1 天")
+    if iterations > 1:
+        print(
+            f"  3. 比较 seq_{args.start_seq:05d} 和 "
+            f"seq_{args.start_seq + 1:05d}, 确认日期是否真的前进了 1 天"
+        )
     print("  4. 当前在 Windows 直跑时, 图片留本地即可; 切到 Mac 主力时改用 PD 共享文件夹")
     return 0
 
