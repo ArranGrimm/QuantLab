@@ -1,6 +1,331 @@
 # Progress
 
+## 2026-05-03
+
+### [AMV] TopN Rust 真实回测首轮完成
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - 新增 `scripts/amv_bull_pool_export_signals.py`
+  - 新增 `scripts/amv_topn_backtest.py`
+  - 新增 Rust crate: `backtest-engine/crates/amv-topn`
+  - 新增 Canvas: `amv-topn-rust-backtest.canvas.tsx`
+- **命名决定**:
+  - crate 名称使用 `bt-amv-topn`
+  - 目录为 `backtest-engine/crates/amv-topn`
+  - 含义明确为 `AMV gate + topN 排序策略`, 避免和 AMV 数据/OCR 管道混淆
+- **信号口径**:
+  - 固定研究阶段最优信号: `top3 高位+K线确认 P2/K0.5/R0`
+  - `T` 日收盘计算横截面排序信号, `T+1` 开盘买入
+  - `AMV bear / 非 bull` 只阻止新开仓, 不强制已有仓位清仓
+  - 使用执行日开盘涨停过滤, 收盘跌停禁止卖出
+- **artifact**:
+  - 信号: `artifacts/amv_topn/20260503_221922/signal.parquet`
+  - Meta: `artifacts/amv_topn/20260503_221922/signal.meta.json`
+  - 回测:
+    - `artifacts/amv_topn/20260503_221922/backtests/5d_20260503_221942_965/report.json`
+    - `artifacts/amv_topn/20260503_221922/backtests/10d_20260503_221948_247/report.json`
+    - `artifacts/amv_topn/20260503_221922/backtests/20d_20260503_221951_651/report.json`
+- **核心结果**:
+  - `5d`: 净收益 `+29.88%`, 最大回撤 `-35.99%`, 胜率 `49.48%`, 交易数 `388`
+  - `10d`: 净收益 `+65.54%`, 最大回撤 `-14.69%`, 胜率 `54.58%`, 交易数 `240`
+  - `20d`: 净收益 `+10.26%`, 最大回撤 `-28.01%`, 胜率 `44.24%`, 交易数 `165`
+- **结论**:
+  - `10d` 是当前真实回测口径下最优档位: 收益最高、回撤最低、胜率最高
+  - `5d` 毛收益高但换手过快, 成本和路径回撤显著侵蚀净收益
+  - `20d` 研究口径单笔均值更高, 但真实组合路径明显变差, 暂不适合作为主交易周期
+  - 下一步优先围绕 `10d` 细化退出: 止损开关、AMV 转空是否主动清仓、风险因子过滤/仓位控制
+
+### [AMV] Bull 宽池 Top3 持有期兑现曲线完成
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - 新增 `scripts/amv_bull_pool_horizon_curve.py`
+  - 新增 Canvas: `amv-bull-pool-horizon-curve.canvas.tsx`
+- **实验目的**:
+  - 固定当前候选信号 `top3 高位+K线确认 P2/K0.5/R0`
+  - 只改变观察窗口 `1/2/3/5/10/15/20/30d`, 判断 `20d` 是否偏长
+- **artifact**:
+  - `artifacts/amv_bull_pool_horizon_curve/20260503_215103/summary.json`
+- **核心结果**:
+  - `1d`: 单笔均值 `+0.413%`, 相对随机 `+0.340pp`, 日均收益 `+0.413%`, rolling NAV `+746.31%`, `MaxDD -21.45%`
+  - `5d`: 单笔均值 `+1.304%`, 相对随机 `+0.906pp`, 日均收益 `+0.261%`, rolling NAV `+287.31%`, `MaxDD -4.05%`
+  - `10d`: 单笔均值 `+1.789%`, 相对随机 `+0.943pp`, 日均收益 `+0.179%`, rolling NAV `+153.04%`, `MaxDD -4.27%`
+  - `20d`: 单笔均值 `+2.625%`, 相对随机 `+1.276pp`, 日均收益 `+0.131%`, rolling NAV `+102.97%`, `MaxDD -2.90%`
+  - `30d`: 单笔均值 `+3.173%`, 相对随机 `+1.581pp`, 日均收益 `+0.106%`, rolling NAV `+72.07%`, `MaxDD -2.46%`
+- **结论**:
+  - 绝对收益到 `30d` 仍在增加, 说明没有明显 `20d` 前回吐
+  - 但单位时间收益从 `1d` 起持续下降, `20d/30d` 资金效率明显低于 `5d/10d`
+  - 真实回测不应只押 `20d`; 优先做 `5d / 10d / 20d` 三档持有期对照, 并加入 AMV 转空/排名跌出/止损止盈等退出规则
+
+### [Research] Learning-to-Rank 论文对 AMV 宽池排序方向有参考价值
+
+- 已阅读:
+  - `~/Downloads/ssrn-6348379.pdf`
+  - 论文: `Empirical Asset Pricing via Learning-to-Rank`
+  - 新增 Canvas: `ltr-paper-amv-relevance.canvas.tsx`
+- **核心启发**:
+  - 论文主张不要只预测绝对收益再排序, 而是直接优化横截面相对排序
+  - `Listwise / NDCG / Precision@K` 与当前 `AMV bull 宽池 top3/top5/top10` 评估高度相关
+  - 当前 `高位+K线确认` 手工组合分数, 本质上是简化版 Learning-to-Rank 排序器
+- **对当前路线的影响**:
+  - 短期仍优先做 Rust 真实回测兑现, 不因论文直接跳到复杂模型
+  - 中期可尝试 LightGBM ranker / LambdaRank, 在 AMV bull 宽池内直接学习 topN 排序
+  - 评估指标应加入 `Precision@K / topN 年份拆分 / rolling NAV / MaxDD`, 不再只看单笔均值
+
+### [AMV] Bull 宽池组合权重网格完成
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - 新增 `scripts/amv_bull_pool_combo_grid.py`
+  - 新增 Canvas: `amv-bull-pool-combo-grid.canvas.tsx`
+- **实验目的**:
+  - 从“最佳 20d 单笔均值”切到更接近组合可交易性的口径
+  - 对 `高位+K线确认` 做权重网格与 `top3/top5/top10` 对比
+  - 目标指标改为 `tradeoff_score = rolling-sleeve NAV + MaxDD`, 即同时奖励净值、惩罚回撤
+- **网格口径**:
+  - 价格位置权重 `P`: `1 / 2 / 3`
+  - K线确认权重 `K`: `0.5 / 1 / 2`
+  - 风险/卖压权重 `R`: `0 / 0.5 / 1 / 1.5`
+  - 共 `36` 组权重 × `top3/top5/top10`
+- **artifact**:
+  - `artifacts/amv_bull_pool_combo_grid/20260503_172052/summary.json`
+- **核心结果 (20d, 按 tradeoff_score)**:
+  - 全局最优: `top3 高位+K线确认 P2/K0.5/R0`, 单笔均值 `+2.625%`, 相对随机 `+1.276pp`, `NAV +102.97%`, `MaxDD -2.90%`, `tradeoff +100.07%`
+  - 单笔均值最高: `top3 P3/K0.5/R0`, 单笔均值 `+2.679%`, 相对随机 `+1.331pp`, `NAV +102.10%`, `MaxDD -3.21%`
+  - top5 最优: `top5 P3/K0.5/R0`, 单笔均值 `+2.398%`, `NAV +85.53%`, `MaxDD -3.59%`
+  - top10 最优: `top10 P2/K0.5/R1.5`, 单笔均值 `+2.232%`, `NAV +77.42%`, `MaxDD -3.36%`
+- **结论**:
+  - 当前最佳持仓宽度是 `top3`, 不是更分散的 `top5/top10`
+  - 最优权重结构是 `价格位置重权重 + K线轻确认 + 风险不进主分数`
+  - `R=0` 排名前列, 说明 ATR/卖压暂时更适合做后置过滤或仓位控制, 不适合直接混入主排序分数
+
+### [AMV] Bull 宽池组合 Top5 排序首轮完成
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `scripts/amv_bull_pool_ranker_lab.py`
+  - 新增 Canvas: `amv-bull-pool-combo-ranker.canvas.tsx`
+- **实验目的**:
+  - 在单因子验证后, 尝试 `价格位置主信号 + Alpha158 K线确认 + 风险/卖压过滤`
+  - 组合分数使用每日截面分位加权, 避免不同因子量纲直接相加
+- **新增组合**:
+  - `高位+K线确认`: `price_pos_20d↑ + close_to_high_20d↓ + KLEN↓ + KMID2↑`
+  - `新高+缩振+低风险`: `close_to_high_20d↓ + KLEN↓ + atr_14_pct↓ + panic_vol_ratio_20d↓`
+  - `高位+实体强+低风险`: `price_pos_20d↑ + KMID2↑ + atr_14_pct↓ + panic_vol_ratio_20d↓`
+  - 另含 `新高+实体强+短上影 / 高位+收盘强+低波 / 新高+缩振+短下影 / 反转+收低+低风险`
+- **artifact**:
+  - `artifacts/amv_bull_pool_ranker_lab/20260503_165924/summary.json`
+- **核心结果**:
+  - 20d 新冠军: `高位+K线确认`, 单笔均值 `+2.296%`, 相对随机 `+0.948pp`, rolling-sleeve `NAV +81.64%`, `MaxDD -2.42%`
+  - 对比原单因子冠军 `20日高位强势`: 单笔均值 `+2.242%`, 相对随机 `+0.894pp`, `NAV +74.42%`, `MaxDD -5.76%`
+  - `新高+缩振+低风险`: 20d 单笔均值 `+2.223%`, 相对随机 `+0.875pp`, `MaxDD -2.80%`
+  - `高位+实体强+低风险`: 20d 单笔均值 `+2.217%`, 相对随机 `+0.869pp`, `MaxDD -3.81%`
+  - 10d 上组合也开始优于大多数单因子: `高位+K线确认` 单笔均值 `+1.551%`, 相对随机 `+0.705pp`, `MaxDD -4.57%`
+- **结论**:
+  - 组合路线有效, 不是只靠单因子偶然命中
+  - 当前最值得推进的候选是 `高位+K线确认`
+  - 风险过滤会降低 `hit15`, 但显著压低回撤并提高 rolling-sleeve 净值, 更接近可交易口径
+
+### [AMV] Bull 宽池补测 Alpha158 K线形态因子
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `scripts/amv_bull_pool_ranker_lab.py`
+- **实验目的**:
+  - 回答“前期 `core12 + alpha158(kbar_shape)` 里的 K 线形态因子, 是否已在 AMV bull 宽池排序里尝试”
+  - 将 Alpha158 `kbar_shape` 9 因子加入 `mechanical AMV bull + LF2 宽池` 的每日 top5 单因子排序评估
+- **新增因子**:
+  - `KMID / KLEN / KMID2 / KUP / KUP2 / KLOW / KLOW2 / KSFT / KSFT2`
+  - 每个因子测试正反两个方向, 共新增 `18` 个 ranker
+- **artifact**:
+  - `artifacts/amv_bull_pool_ranker_lab/20260503_165512/summary.json`
+- **核心结果**:
+  - 5d: `K线振幅收缩(KLEN_asc)` 单笔均值 `+1.200%`, 相对随机 `+0.802pp`, `MaxDD -9.57%`
+  - 10d: `实体占比偏强(KMID2_desc)` 单笔均值 `+1.379%`, 相对随机 `+0.532pp`
+  - 20d: `实体占比偏强(KMID2_desc)` 单笔均值 `+1.969%`, 相对随机 `+0.620pp`
+  - 20d: `下影线短(KLOW_asc / KLOW2_asc)` 单笔均值 `+1.787%`, 相对随机 `+0.438pp`, `MaxDD -10.43%`
+- **结论**:
+  - AMV bull 宽池里, Alpha158 K线形态因子不是空的, 其中 `KLEN_asc / KMID2_desc / KSFT2_desc / KLOW*_asc` 有明确正增益
+  - 但第一名仍是价格位置类信号: `接近20日新高` 在 5d/10d 继续最强, `20日高位强势` 在 20d 继续最强
+  - 下一步组合应优先考虑: `价格位置主信号 + K线形态确认 + 风险过滤`
+
+### [AMV] Bull 宽池单因子 Top5 排序首轮完成
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - 新增 `scripts/amv_bull_pool_ranker_lab.py`
+  - 新增 Canvas: `amv-bull-pool-ranker-lab.canvas.tsx`
+- **实验目的**:
+  - 在 `mechanical AMV bull + LF2 宽池` 内, 每天按单因子排序选 top5
+  - 对照基准为同一天宽池随机 5 只的日期等权期望
+- **第一批排序因子**:
+  - 动量/反转: `ret_5d / ret_20d` 正反向
+  - 价格位置: `ma_bias_20 / price_pos_20d / close_to_high_20d`
+  - 量能/量价: `turnover_ma_ratio / abnormal_vol / turnover_accel / vol_price_corr_20d`
+  - 风险/波动: `vol_20d / vol_compress / atr_14_pct / panic_vol_ratio_20d`
+  - 日内/行为: `intraday_pos / disp_bias_20`
+- **artifact**:
+  - `artifacts/amv_bull_pool_ranker_lab/20260503_130223/summary.json`
+- **核心结果**:
+  - 5d 最强: `接近20日新高`, 单笔均值 `+1.427%`, 相对随机 `+1.029pp`, 但回撤较深 `-38.06%`
+  - 10d 最强: `接近20日新高`, 单笔均值 `+1.665%`, 相对随机 `+0.819pp`
+  - 20d 最强: `20日高位强势`, 单笔均值 `+2.242%`, 相对随机 `+0.894pp`, rolling-sleeve `NAV +74.42%`, `MaxDD -5.76%`
+  - 20d 次强: `接近20日新高`, 单笔均值 `+2.091%`, 相对随机 `+0.742pp`
+  - 稳定进入前列: `收盘靠低`, `20日反转`, `成本线下回归`
+- **结论**:
+  - 单因子排序已能打败随机 5 只, `AMV Bull Pool Ranking` 路线成立
+  - 第一批最值得继续挖的是价格位置类信号, 尤其 `price_pos_20d` 与 `close_to_high_20d`
+  - 下一步应做二阶组合: 价格位置主信号 + 风险过滤, 目标是在保留 20d 收益的同时进一步压低回撤
+
+### [AMV] Bull 宽池随机 5 只基准成立
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - 新增 `scripts/amv_bull_pool_random_baseline.py`
+  - 新增 Canvas: `amv-bull-pool-random-baseline.canvas.tsx`
+- **实验目的**:
+  - 不训练模型, 不使用 B1 教科书形态规则
+  - 只验证 `mechanical AMV bull + LF2 流动性池 + 每日随机 5 只` 是否具备诚实下限
+- **实验口径**:
+  - Universe: `market_cap_100m >= 100`, `amount_ma20 >= 5000万`
+  - 机械 AMV regime: `bull=max(ret_1d, ret_2d) >= 4.0%`, `bear=ret_1d <= -2.3%`, `effective_lag_days=1`
+  - Monte Carlo: 每个 eligible day 随机 5 只, `1000` 次, `seed=42`
+  - Horizon: `5d / 10d / 20d`
+  - 对照池: `LF2 all days` / `LF2 AMV bull` / `LF2 non-bull`
+- **artifact**:
+  - `artifacts/amv_bull_pool_random_baseline/20260503_125323/summary.json`
+- **核心结果**:
+  - `LF2 AMV bull`: `542` 个 eligible days, 每日候选中位数 `1104`
+  - 随机 5 只每笔平均收益中位数:
+    - `5d +0.399%`
+    - `10d +0.842%`
+    - `20d +1.337%`
+  - `LF2 non-bull` 对照:
+    - `5d -0.088%`
+    - `10d -0.206%`
+    - `20d -0.121%`
+  - 20d rolling-sleeve 组合:
+    - AMV bull: `NAV +38.27%`, `MaxDD -19.08%`
+    - non-bull: `NAV -10.62%`, `MaxDD -24.15%`
+- **结论**:
+  - AMV bull 作为市场 gate 的价值进一步确认
+  - 宽池随机 5 只已经明显打败 all-days 与 non-bull, 说明后续方向不应再纠结 B1 教科书规则
+  - 下一步研究重点应转为 `AMV Bull Pool Ranking`: 在 AMV bull 宽池内寻找能稳定打败随机 5 只的排序信号
+
+### [Rotation] AMV bull-only 训练实验完成
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `notebooks/cross_section_rotation.py`
+  - `utils/baostock_utils.py`
+- **实验口径**:
+  - `TRAIN_REGIME_MODE = "amv_bull_only"`
+  - 训练样本只保留机械 AMV bull 生效日 (`effective_lag_days=1`)
+  - 机械 AMV regime: `bull=max(ret_1d, ret_2d) >= 4.0%`, `bear=ret_1d <= -2.3%`
+  - 导出端仍使用 `BULL_REGIME_SOURCE = "mechanical_amv"` + `EXPORT_EMA_ALPHA = 0.3`
+- **artifact**:
+  - Train: `artifacts/rotation/rot_fwd_ret_1d_lightgbm_20260503_123830_703384b9`
+  - Signal: `signals/20260503_123831_276`
+  - 本轮使用 ST 过期缓存兜底后, universe 与前一轮对齐: `2616` 只股票, `1,056,712` 条 score
+- **同口径对比** (`2022-09-01 -> 2026-04-08`, `hold_buffer=20`, `max_hold_days=10`, `min_score=0.002`, 成本不变):
+  - 旧 all-train + AMV hard gate: `Total Return +9.16%`, `Max Drawdown 7.66%`, `Trades 1307`
+  - AMV-weighted + AMV hard gate: `Total Return +0.55%`, `Max Drawdown 8.79%`, `Trades 1498`
+  - AMV bull-only + AMV hard gate: `Total Return -24.41%`, `Max Drawdown 29.05%`, `Trades 2917`
+  - AMV bull-only 不开 gate: `Total Return -35.97%`, `Max Drawdown 37.36%`, `Trades 5843`
+- **结论**:
+  - `amv_bull_only` 明显失败, 说明非 bull 样本并不是简单污染源; 直接删掉非 bull 样本会破坏模型排序能力
+  - 训练侧 AMV 加权 / 过滤都不应作为 Rotation 主线默认方案
+  - 当前更合理的方向是保留 all-train, 继续把 AMV 放在交易层做 hard gate 或 regime-aware 参数
+- **基础设施修正**:
+  - `get_st_blacklist_pl()` 在 AKShare / Baostock 都失败时, 现在允许使用过期本地缓存
+  - 目的: 网络不可用时避免 ST 黑名单变成空表, 导致回测 universe 漂移
+
+## 2026-05-02
+
+### [Rotation] AMV bull 样本加权训练实验完成
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `notebooks/cross_section_rotation.py`
+  - `utils/signal_export.py`
+- **实验口径**:
+  - `TRAIN_REGIME_MODE = "amv_weighted"`
+  - `AMV_BULL_SAMPLE_WEIGHT = 2.0`
+  - 机械 AMV regime: `bull=max(ret_1d, ret_2d) >= 4.0%`, `bear=ret_1d <= -2.3%`, `effective_lag_days=1`
+  - 导出端仍使用 `BULL_REGIME_SOURCE = "mechanical_amv"` + `EXPORT_EMA_ALPHA = 0.3`
+- **artifact**:
+  - Train: `artifacts/rotation/rot_fwd_ret_1d_lightgbm_20260502_230927_703384b9`
+  - Signal: `signals/20260502_230928_106`
+  - `train.meta.json` 已记录 `train_regime_mode / amv_bull_sample_weight / AMV trigger / lag`
+  - `signal.meta.json` 已记录 `bull_regime_source / bull_regime_rows_pct / AMV trigger / lag`
+- **同口径对比** (`2022-09-01 -> 2026-04-08`, `hold_buffer=20`, `max_hold_days=10`, `min_score=0.002`, 成本不变):
+  - 旧 all-train + AMV hard gate: `Total Return +9.16%`, `Max Drawdown 7.66%`, `Trades 1307`
+  - 新 AMV-weighted + AMV hard gate: `Total Return +0.55%`, `Max Drawdown 8.79%`, `Trades 1498`
+  - 新 AMV-weighted 不开 gate: `Total Return -9.39%`, `Max Drawdown 17.75%`, `Trades 3544`
+- **结论**:
+  - AMV hard gate 仍然显著降低交易频率和回撤, 但 `bull_weight=2.0` 的训练侧加权没有改善 Rotation
+  - 当前不应把 B 作为主线默认方案; 下一步更值得做的是 `bull_only` 作为分布污染验证, 或对 AMV bull/bear 分桶分别调 `min_score / max_positions`
+
 ## 2026-05-01
+
+### [Rotation] 接入机械 AMV Regime 作为开仓 gate 候选
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - 新增 `utils/active_market_value_regime.py`
+  - 更新 `notebooks/cross_section_rotation.py`
+- **方向修正**:
+  - AMV 机械 regime 不再以贴近 `LOOSE_PERIODS` 为目标
+  - `LOOSE_PERIODS` 只作为 hindsight 上界 / sanity check
+  - 下一步优先在 Rotation 上验证机械 AMV gate 是否改善未来收益与回撤
+- **实现**:
+  - 新增 `build_active_market_value_regime_frame()`
+  - 默认机械口径: `bull_trigger=max(ret_1d, ret_2d, ret_3d) >= 4.5%`, `bear_trigger=ret_1d <= -2.3%`
+  - `cross_section_rotation.py` 导出阶段新增 `BULL_REGIME_SOURCE = "mechanical_amv"` / `"manual"`
+  - 导出 `signal.parquet` 的 `is_bull_regime` 可直接供 Rust `entry.require_bull_regime` 使用
+- **验证方式**:
+  - 在 Rotation notebook 里导出 `mechanical_amv` signal
+  - 同一份 signal 分别跑:
+    - `scripts/rotation_backtest.py <signal> --no-require-bull-regime`
+    - `scripts/rotation_backtest.py <signal> --require-bull-regime`
+  - 再把 `BULL_REGIME_SOURCE` 改为 `manual` 导出一次, 跑 `--require-bull-regime`, 作为 hindsight 上界对照
+
+### [研究] 活跃市值 Regime Lab notebook 新增
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - 新增 `notebooks/active_market_value_regime_lab.py`
+- **目标**:
+  - 基于独立库 `../QuantData/Ashare/active_market_value.duckdb` 重新机械化定义 bull / bear regime
+  - 用 Plotly Candlestick 把活跃市值按 K 线形态画出来, 对齐指南针客户端里的视觉形态
+  - 将机械 regime 与旧手工 `LOOSE_PERIODS` 做交叉对账
+- **Notebook 首版内容**:
+  - 读取 `active_market_value` 主表并计算 `ret_1d / ret_2d / ret_3d / ret_5d`
+  - 可调参数: 1/2/3 日累计 bull trigger 阈值, 1/2/3 日累计 bear trigger 阈值
+  - 机械状态机: `neutral -> bull / bear`, bull trigger 优先切多, bear trigger 切空
+  - K 线图叠加手工 bull 区间、机械 bull 区间、bull/bear trigger marker
+  - 输出 overlap 摘要、每个手工区间的机械解释度、最近触发点
+- **验证**:
+  - `uv run python -m py_compile notebooks/active_market_value_regime_lab.py` 通过
+  - `uv run marimo check notebooks/active_market_value_regime_lab.py` 通过
+  - 核心数据逻辑冒烟: `manual_days=728`, 默认阈值下 `mechanical_bull_days=703`, `both_days=520`
+- **口径修正 (晚间)**:
+  - Bear trigger 改为只看单日跌幅 `ret_1d <= threshold`, 不再使用 2/3 日累计跌幅
+  - 修正后默认 `bull=4.0 / bear_1d=-2.3`: `mechanical_bull_days=925`, `both_days=650`, `recall=89.3%`, `precision=70.3%`, `F1=78.6%`
+  - 当前网格最优: `bull=4.5 / bear_1d=-2.3`, `mechanical_bull_days=860`, `both_days=646`, `recall=88.7%`, `precision=75.1%`, `F1=81.4%`
+  - 结论: 活跃市值机械 regime 初步成立, 下一步应优先验证 `bull=4.5 / bear_1d=-2.3` 在 B1 / Rotation 中的可执行效果
 
 ### [基础设施] 活跃市值 DuckDB 从 QMT 库拆出
 

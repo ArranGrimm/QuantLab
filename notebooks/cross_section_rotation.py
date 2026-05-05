@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.4"
 app = marimo.App(width="full")
 
 
@@ -77,7 +77,10 @@ def _():
 
     print("🚀 [Step 1] 加载全量日线数据...")
     st_blacklist = get_st_blacklist_pl("2026-03-31")
-    st_blacklist_df = pl.DataFrame({"code": st_blacklist}).lazy()
+    st_blacklist_df = pl.DataFrame(
+        {"code": st_blacklist},
+        schema={"code": pl.Utf8},
+    ).lazy()
 
     q_full = (
         load_daily_data_full(conn)
@@ -388,6 +391,12 @@ def _(
         TRAIN_WINDOW = 480
         RETRAIN_FREQ = 20
         TOP_N = 20
+        TRAIN_REGIME_MODE = "all"  # 可选: all / amv_weighted / amv_bull_only
+        AMV_BULL_SAMPLE_WEIGHT = 2.0
+        AMV_BULL_TRIGGER_PCT = 4.0
+        AMV_BULL_LOOKBACK_DAYS = 2
+        AMV_BEAR_TRIGGER_1D_PCT = -2.3
+        AMV_EFFECTIVE_LAG_DAYS = 1
         feature_cols = list(selected_feature_set.feature_cols or ())
         if not feature_cols:
             raise ValueError(
@@ -425,9 +434,37 @@ def _(
         if alpha158_group_config is not None:
             print(f"   Alpha158 分组: {alpha158_group_config['group_mode_label']}", flush=True)
         print(f"   截面归一化: {NORMALIZE_MODE}", flush=True)
+        print(
+            f"   AMV 训练口径: {TRAIN_REGIME_MODE}, "
+            f"bull_weight={AMV_BULL_SAMPLE_WEIGHT}, "
+            f"bull=max_1d{AMV_BULL_LOOKBACK_DAYS}d>={AMV_BULL_TRIGGER_PCT}, "
+            f"bear_1d<={AMV_BEAR_TRIGGER_1D_PCT}, lag={AMV_EFFECTIVE_LAG_DAYS}",
+            flush=True,
+        )
+
+        if TRAIN_REGIME_MODE not in {"all", "amv_weighted", "amv_bull_only"}:
+            raise ValueError(f"未知 TRAIN_REGIME_MODE: {TRAIN_REGIME_MODE}")
+
+        if TRAIN_REGIME_MODE == "all":
+            df_all_for_train = df_all.with_columns(pl.lit(False).alias("is_amv_bull_regime"))
+        else:
+            from utils.active_market_value_regime import build_active_market_value_regime_frame
+
+            df_amv_regime = build_active_market_value_regime_frame(
+                date_col="date",
+                bull_trigger_pct=AMV_BULL_TRIGGER_PCT,
+                bull_lookback_days=AMV_BULL_LOOKBACK_DAYS,
+                bear_trigger_1d_pct=AMV_BEAR_TRIGGER_1D_PCT,
+                effective_lag_days=AMV_EFFECTIVE_LAG_DAYS,
+            ).select(["date", pl.col("is_bull_regime").alias("is_amv_bull_regime")])
+            df_all_for_train = (
+                df_all
+                .join(df_amv_regime, on="date", how="left")
+                .with_columns(pl.col("is_amv_bull_regime").fill_null(False))
+            )
 
         df_valid_ml = (
-            df_all
+            df_all_for_train
             .filter(pl.col(LABEL).is_not_null() & pl.col(LABEL).is_not_nan())
             .sort("date")
         )
@@ -437,6 +474,7 @@ def _(
         dates_np = df_valid_ml["date"].to_numpy()
         codes_np = df_valid_ml["code"].to_numpy()
         is_limit_up_np = df_valid_ml["is_limit_up"].fill_null(False).to_numpy()
+        is_amv_bull_np = df_valid_ml["is_amv_bull_regime"].fill_null(False).to_numpy()
 
         unique_dates_ml = np.unique(dates_np)
         unique_dates_ml.sort()
@@ -461,15 +499,39 @@ def _(
                 y_tr = y_all_np[ts:te]
 
                 valid = np.isfinite(y_tr) & ~is_limit_up_np[ts:te]
+                if TRAIN_REGIME_MODE == "amv_bull_only":
+                    valid = valid & is_amv_bull_np[ts:te]
                 if valid.sum() < 1000:
                     continue
 
+                sample_weight = None
+                if TRAIN_REGIME_MODE == "amv_weighted":
+                    sample_weight_all = np.where(
+                        is_amv_bull_np[ts:te],
+                        AMV_BULL_SAMPLE_WEIGHT,
+                        1.0,
+                    ).astype(np.float32)
+                    sample_weight = sample_weight_all[valid]
+
                 model = lgb.LGBMRegressor(**lgb_params)
-                model.fit(X_tr[valid], y_tr[valid], feature_name=feature_cols)
+                model.fit(
+                    X_tr[valid],
+                    y_tr[valid],
+                    sample_weight=sample_weight,
+                    feature_name=feature_cols,
+                )
                 last_train_idx = i
 
                 pct = (i - TRAIN_WINDOW) / (n_dates - TRAIN_WINDOW) * 100
-                print(f"   [{cur_date}] 重训 ({pct:.0f}%), 样本: {valid.sum():,}", flush=True)
+                bull_train_rows = int((valid & is_amv_bull_np[ts:te]).sum())
+                if TRAIN_REGIME_MODE == "all":
+                    print(f"   [{cur_date}] 重训 ({pct:.0f}%), 样本: {valid.sum():,}", flush=True)
+                else:
+                    print(
+                        f"   [{cur_date}] 重训 ({pct:.0f}%), 样本: {valid.sum():,}, "
+                        f"AMV bull 样本: {bull_train_rows:,}",
+                        flush=True,
+                    )
 
             if model is None:
                 continue
@@ -543,6 +605,12 @@ def _(
             "model_params": lgb_params,
             "train_window": TRAIN_WINDOW,
             "retrain_freq": RETRAIN_FREQ,
+            "train_regime_mode": TRAIN_REGIME_MODE,
+            "amv_bull_sample_weight": AMV_BULL_SAMPLE_WEIGHT,
+            "amv_bull_trigger_pct": AMV_BULL_TRIGGER_PCT,
+            "amv_bull_lookback_days": AMV_BULL_LOOKBACK_DAYS,
+            "amv_bear_trigger_1d_pct": AMV_BEAR_TRIGGER_1D_PCT,
+            "amv_effective_lag_days": AMV_EFFECTIVE_LAG_DAYS,
             "universe": {
                 "mv_min": MV_MIN,
                 "mv_max": MV_MAX,
@@ -570,10 +638,11 @@ def _(df_scores_raw, pl, q_full, rotation_train_meta):
     #
     # 多头区间 timing 列 (is_bull_regime):
     #   - 市场层 daily flag, 同一天对所有股票相同
-    #   - 来自 utils.manual_bull_periods.ROTATION_BULL_REGIME (跟 B1 池子共用事实, 但语义独立)
+    #   - 可选择旧手工 LOOSE_PERIODS 或机械 AMV regime
     #   - Rust engine 在 [entry] require_bull_regime = true 时会用此列做开仓 gate
     #   - 卖出逻辑完全不受影响, 字段未启用时跟原行为字节级一致
     # ==============================================================================
+    from utils.active_market_value_regime import build_active_market_value_regime_frame
     from utils.signal_export import export_rotation_scores
     from utils.manual_bull_periods import (
         ROTATION_BULL_REGIME,
@@ -583,6 +652,11 @@ def _(df_scores_raw, pl, q_full, rotation_train_meta):
     def run_export():
         EXPORT_TOP_N = 20
         EXPORT_EMA_ALPHA = 0.3  # 导出 parquet 用的分数平滑; 改这里仅需重跑本 Cell
+        BULL_REGIME_SOURCE = "mechanical_amv"  # 可选: manual / mechanical_amv
+        AMV_BULL_TRIGGER_PCT = 4.0
+        AMV_BULL_LOOKBACK_DAYS = 2
+        AMV_BEAR_TRIGGER_1D_PCT = -2.3
+        AMV_EFFECTIVE_LAG_DAYS = 1
 
         df_scores_export = df_scores_raw
 
@@ -625,12 +699,45 @@ def _(df_scores_raw, pl, q_full, rotation_train_meta):
             df_scores_export, on=["date", "code"], how="left"
         ).with_columns(
             pl.col("score").fill_null(-999.0),
-        ).with_columns(
-            is_in_bull_regime_expr(
-                date_col="date",
-                periods=ROTATION_BULL_REGIME,
-            ).alias("is_bull_regime"),
         )
+
+        if BULL_REGIME_SOURCE == "manual":
+            df_expanded = df_expanded.with_columns(
+                is_in_bull_regime_expr(
+                    date_col="date",
+                    periods=ROTATION_BULL_REGIME,
+                ).alias("is_bull_regime"),
+            )
+            bull_regime_meta = {
+                "bull_regime_source": BULL_REGIME_SOURCE,
+                "bull_regime_periods_count": len(ROTATION_BULL_REGIME),
+            }
+        elif BULL_REGIME_SOURCE == "mechanical_amv":
+            df_amv_regime = build_active_market_value_regime_frame(
+                date_col="date",
+                bull_trigger_pct=AMV_BULL_TRIGGER_PCT,
+                bull_lookback_days=AMV_BULL_LOOKBACK_DAYS,
+                bear_trigger_1d_pct=AMV_BEAR_TRIGGER_1D_PCT,
+                effective_lag_days=AMV_EFFECTIVE_LAG_DAYS,
+            )
+            df_expanded = (
+                df_expanded
+                .join(
+                    df_amv_regime.select(["date", "is_bull_regime"]),
+                    on="date",
+                    how="left",
+                )
+                .with_columns(pl.col("is_bull_regime").fill_null(False))
+            )
+            bull_regime_meta = {
+                "bull_regime_source": BULL_REGIME_SOURCE,
+                "amv_bull_trigger_pct": AMV_BULL_TRIGGER_PCT,
+                "amv_bull_lookback_days": AMV_BULL_LOOKBACK_DAYS,
+                "amv_bear_trigger_1d_pct": AMV_BEAR_TRIGGER_1D_PCT,
+                "amv_effective_lag_days": AMV_EFFECTIVE_LAG_DAYS,
+            }
+        else:
+            raise ValueError(f"未知 BULL_REGIME_SOURCE: {BULL_REGIME_SOURCE}")
 
         n_scored = df_scores_export.height
         n_total = df_expanded.height
@@ -640,7 +747,7 @@ def _(df_scores_raw, pl, q_full, rotation_train_meta):
         print(f"   评分行: {n_scored:,}, 补全行: {n_padded:,}, 总计: {n_total:,}", flush=True)
         print(
             f"   🐂 多头区间标记 is_bull_regime: {bull_rows:,} 行 ({bull_pct:.2f}%) / "
-            f"区间数 {len(ROTATION_BULL_REGIME)}",
+            f"source={BULL_REGIME_SOURCE}",
             flush=True,
         )
 
@@ -648,8 +755,8 @@ def _(df_scores_raw, pl, q_full, rotation_train_meta):
             **rotation_train_meta,
             "export_ema_alpha": EXPORT_EMA_ALPHA,
             "export_token": f"e{str(EXPORT_EMA_ALPHA).replace('.', 'p')}_t{EXPORT_TOP_N}",
-            "bull_regime_periods_count": len(ROTATION_BULL_REGIME),
             "bull_regime_rows_pct": round(bull_pct, 4),
+            **bull_regime_meta,
         }
         scores_path = export_rotation_scores(
             df_expanded,

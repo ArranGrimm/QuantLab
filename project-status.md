@@ -19,6 +19,7 @@
   - 固定 `core_plus_alpha158(kbar_shape)`, 暂不继续扩因子
   - 先用训练侧 `Top-20` 专用诊断排查排序尾部与边界问题
   - 回测层当前先验证 `hold_buffer=20` 这条更直接的持仓优化主线
+  - AMV 训练侧 bull 加权 / bull-only 均已验证未优于 all-train baseline, 暂不升为主线
   - `max_daily_buys / entry_rank_limit` 暂作为附加实验工具保留
   - 再考虑 `score_adj` 前的二次整形
 
@@ -46,6 +47,7 @@
   - T 日数据版: 所有因子直接用当日 OHLCV, 与实盘 14:45 快照对齐
   - 已新增分组注册表: `FACTOR_GROUPS / FACTOR_GROUP_LABELS / FACTOR_TO_GROUP`
 - `utils/duckdb_utils.py`: `add_price_limit_cols()` 涨跌停标记 (与 Rust bt-core 逻辑一致)
+- `utils/baostock_utils.py`: ST 黑名单优先用 AKShare / Baostock 实时源, 实时源失败时允许使用过期本地缓存, 避免回测 universe 漂移
 - `utils/signal_export.py`: 信号导出 (B1 事件信号 + 截面轮动打分), Parquet 格式供 Rust 消费
   - `Rotation` 已新增 artifact 追踪: `train.meta.json` / `signal.meta.json` / `raw_scores.parquet`
   - `Rotation` 默认不再写 `data/signals/rotation_scores.parquet`, `artifacts/` 为唯一真源
@@ -63,7 +65,7 @@
   - Cell 2: 仍支持 `zscore / rank_pct / rank_gauss` 与 `fwd_ret_{1/2/3/5}d_rank_pct`
   - Cell 2b: 校验 `amount / volume` 单位口径, 防止 `vwap_raw` 误放大 100 倍
   - Cell 3: 明确提示因子分析已迁移到 `rotation_factor_lab.py`
-  - Cell 6: LightGBM Walk-Forward 打分, 输出 `df_scores_raw + rotation_train_meta`
+  - Cell 6: LightGBM Walk-Forward 打分, 输出 `df_scores_raw + rotation_train_meta`, 已支持 `all / amv_weighted / amv_bull_only` 训练 regime 模式
   - Cell 6b: 导出 parquet, 独立控制 `EXPORT_EMA_ALPHA`, 写入 artifact 元数据, 无需重训模型
   - Cell 7: 保留原始分数的 Signal Quality 诊断
   - Cell 8: 新增 `Top-20 Tail Diagnostics`, 专看 rank-by-rank、20/21 边界和尾部拖累
@@ -118,6 +120,34 @@
 | Top-20 日均换手 | 62.5% | 年化 151x |
 | LABEL | fwd_ret_1d | |
 | 涨停过滤 (Rust) | 日均 2.0 只 | 模型残余偏好 |
+
+### AMV Bull Pool Ranking 新方向
+- 背景: `Rotation` 训练侧 AMV 加权 / bull-only 均未优于 all-train; `B1` 教科书形态规则边际 alpha 弱
+- 新定位: 不再研究传统 B1 规则, 改为研究 `mechanical AMV bull + LF2 宽池` 内的随机下限与池内排序
+- 已完成随机下限:
+  - 脚本: `scripts/amv_bull_pool_random_baseline.py`
+  - Artifact: `artifacts/amv_bull_pool_random_baseline/20260503_125323/summary.json`
+  - Canvas: `amv-bull-pool-random-baseline.canvas.tsx`
+- 首轮结果:
+  - `LF2 AMV bull` 随机 5 只每笔平均收益中位数: `5d +0.399%`, `10d +0.842%`, `20d +1.337%`
+  - `LF2 non-bull` 对照: `5d -0.088%`, `10d -0.206%`, `20d -0.121%`
+  - 20d rolling-sleeve: AMV bull `NAV +38.27% / MaxDD -19.08%`; non-bull `NAV -10.62% / MaxDD -24.15%`
+- 当前判断:
+  - AMV bull 作为市场 gate 成立
+  - 下一步重点是寻找能打败随机 5 只的池内排序信号, 而不是继续扩展 Rotation 或收紧 B1 形态规则
+- 单因子 Top5 排序首轮:
+  - 脚本: `scripts/amv_bull_pool_ranker_lab.py`
+  - Artifact: `artifacts/amv_bull_pool_ranker_lab/20260503_130223/summary.json`
+  - Canvas: `amv-bull-pool-ranker-lab.canvas.tsx`
+  - `5d / 10d` 最强均为 `接近20日新高`: 分别 `+1.427% / +1.665%`, 相对随机 `+1.029pp / +0.819pp`
+  - `20d` 最强为 `20日高位强势`: 单笔均值 `+2.242%`, 相对随机 `+0.894pp`, rolling-sleeve `NAV +74.42% / MaxDD -5.76%`
+  - 已补测 Alpha158 `kbar_shape` 9 因子 (`20260503_165512`): `KLEN_asc`、`KMID2_desc`、`KSFT2_desc`、`KLOW/KLOW2_asc` 有正增益
+  - 组合首轮 (`20260503_165924`, Canvas: `amv-bull-pool-combo-ranker.canvas.tsx`) 已跑通: `高位+K线确认` 20d 单笔均值 `+2.296%`, 相对随机 `+0.948pp`, rolling-sleeve `NAV +81.64% / MaxDD -2.42%`
+  - 权重网格 (`20260503_172052`, Canvas: `amv-bull-pool-combo-grid.canvas.tsx`) 显示当前最优为 `top3 高位+K线确认 P2/K0.5/R0`: 20d 单笔均值 `+2.625%`, 相对随机 `+1.276pp`, rolling-sleeve `NAV +102.97% / MaxDD -2.90%`
+  - Learning-to-Rank 论文 (`Empirical Asset Pricing via Learning-to-Rank`) 支持当前“直接优化 topN 排序”方向; 后续可尝试 LightGBM ranker / LambdaRank, 但短期仍先做 Rust 真实回测兑现
+  - 持有期曲线 (`20260503_215103`, Canvas: `amv-bull-pool-horizon-curve.canvas.tsx`) 显示绝对收益到 `30d` 仍增加, 但单位时间收益从 `1d` 起持续下降; `5d/10d` 更像交易候选, `20d/30d` 更像研究观察窗
+  - Rust 真实回测首轮 (`bt-amv-topn`, `20260503_221922`, Canvas: `amv-topn-rust-backtest.canvas.tsx`) 已完成 `5d/10d/20d` 对照: `10d` 最优, 净收益 `+65.54%`, 最大回撤 `-14.69%`, 胜率 `54.58%`; `5d` 净收益 `+29.88% / MaxDD -35.99%`, `20d` 净收益 `+10.26% / MaxDD -28.01%`
+  - 当前判断: `top3 高位+K线确认` 在真实回测下仍成立, 但交易周期应从研究阶段的 `20d` 下修到 `10d`; 下一步围绕 `10d` 验证止损开关、AMV 转空主动清仓、风险因子过滤/仓位控制
 
 ### 当前最新主线候选 (2026-04-03 更新, `core_plus_alpha158 + kbar_shape`)
 | 指标 | 值 | 备注 |
@@ -590,6 +620,9 @@ Python (信号层)                    Rust (回测/执行层)
   - 全量二次校验 `chg_pct / amplitude` 一致性异常为 `0`
   - DuckDB 存储已从 `qmt_data.duckdb` 拆出, 默认写入 `../QuantData/Ashare/active_market_value.duckdb`
   - 独立库首次 upsert 已完成: `1776` 行, `flagged_rows=66`, `qc_errors=0`
+  - 新增 `notebooks/active_market_value_regime_lab.py`: 用 Plotly K 线查看活跃市值, 并探索机械 bull / bear regime 与旧 `LOOSE_PERIODS` 的交叉对账
+  - 当前机械口径候选: bull trigger 使用 1/2/3 日最大累计涨幅, bear trigger 只使用单日跌幅; 网格初步最优为 `bull=4.5 / bear_1d=-2.3`
+  - Rotation 导出阶段已支持 `BULL_REGIME_SOURCE = "mechanical_amv"`; `is_bull_regime` 可直接用于 Rust `entry.require_bull_regime`
 - **依赖纪律**: capture 阶段只 `pywinauto + mss` 2 个包
 - **当前文件**:
   - `rpa_capture/run_capture.py`: 主入口
@@ -599,6 +632,8 @@ Python (信号层)                    Rust (回测/执行层)
   - `rpa_parse/parse_active_market_value.py`: 批量 OCR + 结构化解析 + review 表 + 可选 DuckDB 写入
   - `rpa_parse/ingest_active_market_value.py`: 建表 + `trade_date` upsert + QC view
   - `rpa_parse/README.md`: Parse 阶段运行说明
+  - `notebooks/active_market_value_regime_lab.py`: 机械 regime 探索与手工区间对账
+  - `utils/active_market_value_regime.py`: 机械 AMV regime 生成工具, 供 Rotation / 后续策略复用
 - **关键技术决策**:
   - 用纯 Win32 `SetForegroundWindow` 拉前台, **避免 pywinauto 触发"合成点击"导致图表 cursor 漂移**
   - 截图前把鼠标停到 `(2, 2)`, 避免主图区域 hover 干扰 cursor
@@ -620,7 +655,7 @@ Python (信号层)                    Rust (回测/执行层)
   - 派生与规模字段: `chg_abs_pct / volume_100m / amount_100m / position_100m / turnover_pct / amplitude_pct`
   - 溯源字段: `source / source_seq / source_filename / source_captured_at / raw_ocr_text / quality_flags`
 - **下一步**:
-  - 跟手工的 25 个 `LOOSE_PERIODS` 交叉对账验收 OCR 准确率与 regime 可替代性
+  - 在 Rotation 上跑 `no gate / mechanical AMV gate / manual hindsight gate` 三组回测对照
   - Windows 计划任务实现日更
 - **本地产物 (已在 `.gitignore`)**:
   - `rpa_capture/shots/` (截图目录)
