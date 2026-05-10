@@ -19,7 +19,7 @@ use serde_json::json;
 use std::path::{Path, PathBuf};
 
 use bt_core::{BacktestStats, Portfolio, SignalArtifactMeta};
-use components::Position;
+use components::{ClosedTrade, Position};
 use resources::{AmvTopnConfig, ConfigFile, DailyData, MarketData, PriceBar};
 use systems::{check_exit_conditions, process_buy_signals, update_stats};
 
@@ -34,6 +34,14 @@ struct Args {
 
     #[arg(short, long, default_value = "")]
     output_dir: String,
+}
+
+#[derive(Debug, Clone)]
+struct DailyEquity {
+    date: NaiveDate,
+    cash: f64,
+    positions_value: f64,
+    total_value: f64,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -87,6 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let entry_rank_limit = config.entry_rank_limit as u32;
     let min_score = config.min_score;
     let require_bull_regime = config.require_bull_regime;
+    let max_open_gap_pct = config.max_open_gap_pct;
     app.insert_resource(config);
     app.insert_resource(Portfolio::new(initial_capital));
     app.insert_resource(BacktestStats::default());
@@ -102,11 +111,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         trading_dates.len()
     );
 
+    let mut daily_equity: Vec<DailyEquity> = Vec::with_capacity(trading_dates.len());
     let mut signal_rows: u32 = 0;
     let mut limit_up_blocked: u32 = 0;
     let mut limit_up_days: u32 = 0;
     let mut bull_regime_blocked_signals: u32 = 0;
     let mut bull_regime_blocked_days: u32 = 0;
+    let mut open_gap_blocked: u32 = 0;
+    let mut open_gap_blocked_days: u32 = 0;
 
     for date in &trading_dates {
         let world = app.world_mut();
@@ -161,16 +173,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             limit_up_days += 1;
         }
 
+        let before_open_gap = raw_candidates.len();
+        if let Some(max_open_gap_pct) = max_open_gap_pct {
+            raw_candidates.retain(|(_, _, open, pre_close, _, _)| {
+                *pre_close > 0.0 && (*open / *pre_close - 1.0) <= max_open_gap_pct
+            });
+        }
+        let open_gap_blocked_count = (before_open_gap - raw_candidates.len()) as u32;
+        if open_gap_blocked_count > 0 {
+            open_gap_blocked += open_gap_blocked_count;
+            open_gap_blocked_days += 1;
+        }
+
         let candidates: Vec<(String, f64, f64)> = raw_candidates
             .into_iter()
             .map(|(code, score, open, _, _, _)| (code, score, open))
             .collect();
         world.resource_mut::<DailyData>().buy_candidates = candidates;
         app.update();
+        daily_equity.push(snapshot_daily_equity(app.world_mut(), *date));
     }
 
     if let Some(end_date) = trading_dates.last() {
         force_close_all_positions(&mut app, *end_date);
+        if let Some(last_equity) = daily_equity.last_mut() {
+            if last_equity.date == *end_date {
+                *last_equity = snapshot_daily_equity(app.world_mut(), *end_date);
+            }
+        }
     }
 
     println!("\n--- AMV TopN 过滤统计 ---");
@@ -178,6 +208,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "执行日信号行: {}, 涨停过滤: {} 次 ({} 天)",
         signal_rows, limit_up_blocked, limit_up_days
     );
+    if let Some(max_open_gap_pct) = max_open_gap_pct {
+        println!(
+            "高开过滤: {} 次 ({} 天, 阈值 +{:.1}%)",
+            open_gap_blocked,
+            open_gap_blocked_days,
+            max_open_gap_pct * 100.0
+        );
+    }
     if require_bull_regime {
         println!(
             "AMV bear/非 bull 阻止开仓: {} 次 ({} 天)",
@@ -196,11 +234,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--- Strategy Stats ---\n\
              Signal Rows:       {}\n\
              Limit Up Blocked:  {} ({} days)\n\
+             Open Gap Blocked:  {} ({} days)\n\
              Require Bull Regime: {}\n\
              Bull Regime Blocked Signals: {} ({} days)\n",
             signal_rows,
             limit_up_blocked,
             limit_up_days,
+            open_gap_blocked,
+            open_gap_blocked_days,
             if require_bull_regime { "true" } else { "false" },
             bull_regime_blocked_signals,
             bull_regime_blocked_days,
@@ -216,13 +257,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "max_positions": config.max_positions,
                 "max_daily_buys": config.max_daily_buys,
                 "position_size_pct": config.position_size_pct,
-                "max_hold_days": config.max_hold_days,
+                "max_hold_trading_days": config.max_hold_trading_days,
                 "start_date": config.start_date.map(|d| d.to_string()),
                 "end_date": config.end_date.map(|d| d.to_string()),
                 "top_n": config.top_n,
                 "entry_rank_limit": config.entry_rank_limit,
                 "min_score": config.min_score,
                 "require_bull_regime": config.require_bull_regime,
+                "max_open_gap_pct": config.max_open_gap_pct,
+                "sell_on_bear_regime": config.sell_on_bear_regime,
                 "stop_loss_enabled": config.stop_loss_enabled,
                 "stop_loss_pct": config.stop_loss_pct,
                 "trailing_enabled": config.trailing_enabled,
@@ -237,6 +280,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "signal_rows": signal_rows,
                 "limit_up_blocked": limit_up_blocked,
                 "limit_up_days": limit_up_days,
+                "open_gap_blocked": open_gap_blocked,
+                "open_gap_blocked_days": open_gap_blocked_days,
                 "require_bull_regime": require_bull_regime,
                 "bull_regime_blocked_signals": bull_regime_blocked_signals,
                 "bull_regime_blocked_days": bull_regime_blocked_days,
@@ -245,6 +290,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             portfolio,
             trading_dates.len(),
         )?;
+        let report_dir = report_paths.json_path.parent().map(|p| p.to_path_buf());
         append_amv_topn_registry_entry(
             signal_meta.as_ref(),
             &args.data,
@@ -255,6 +301,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &report_paths.txt_path,
             &report_paths.json_path,
         )?;
+        if let Some(report_dir) = report_dir {
+            let trades_path = report_dir.join("trades.csv");
+            let equity_path = report_dir.join("daily_equity.csv");
+            write_closed_trades_csv(app.world_mut(), &trades_path)?;
+            write_daily_equity_csv(&daily_equity, &equity_path)?;
+            println!("📈 Daily equity CSV saved: {}", equity_path.display());
+            println!("📋 Trades CSV saved: {}", trades_path.display());
+        }
     }
 
     Ok(())
@@ -266,7 +320,7 @@ fn print_config(config: &AmvTopnConfig) {
     println!("Max Positions: {}", config.max_positions);
     println!("Max Daily Buys: {}", config.max_daily_buys);
     println!("Position Size: {:.1}%", config.position_size_pct * 100.0);
-    println!("Max Hold Days: {}", config.max_hold_days);
+    println!("Max Hold Trading Days: {}", config.max_hold_trading_days);
     let start_str = config
         .start_date
         .map(|d| d.to_string())
@@ -285,6 +339,18 @@ fn print_config(config: &AmvTopnConfig) {
         "Require Bull Regime: {}",
         if config.require_bull_regime {
             "ON (entry-only)"
+        } else {
+            "OFF"
+        }
+    );
+    match config.max_open_gap_pct {
+        Some(pct) => println!("Max Open Gap: +{:.1}%", pct * 100.0),
+        None => println!("Max Open Gap: OFF"),
+    }
+    println!(
+        "Sell On Bear Regime: {}",
+        if config.sell_on_bear_regime {
+            "ON"
         } else {
             "OFF"
         }
@@ -357,6 +423,11 @@ fn build_market_data(
 
     all_dates.sort();
     all_dates.dedup();
+    market_data.date_index = all_dates
+        .iter()
+        .enumerate()
+        .map(|(idx, date)| (*date, idx as i32))
+        .collect();
     Ok((market_data, all_dates))
 }
 
@@ -374,7 +445,7 @@ fn format_config(config: &AmvTopnConfig, trading_days: usize) -> String {
         config.position_size_pct * 100.0
     )
     .unwrap();
-    writeln!(s, "Max Hold Days:    {}", config.max_hold_days).unwrap();
+    writeln!(s, "Max Hold Trading Days: {}", config.max_hold_trading_days).unwrap();
     let start_str = config
         .start_date
         .map(|d| d.to_string())
@@ -393,6 +464,20 @@ fn format_config(config: &AmvTopnConfig, trading_days: usize) -> String {
         "Require Bull Regime: {}",
         if config.require_bull_regime {
             "true (entry-only gate)"
+        } else {
+            "false"
+        }
+    )
+    .unwrap();
+    match config.max_open_gap_pct {
+        Some(pct) => writeln!(s, "Max Open Gap:     +{:.1}%", pct * 100.0).unwrap(),
+        None => writeln!(s, "Max Open Gap:     OFF").unwrap(),
+    }
+    writeln!(
+        s,
+        "Sell On Bear Regime: {}",
+        if config.sell_on_bear_regime {
+            "true"
         } else {
             "false"
         }
@@ -477,11 +562,13 @@ fn append_amv_topn_registry_entry(
         "max_positions": config.max_positions,
         "max_daily_buys": config.max_daily_buys,
         "position_size_pct": config.position_size_pct,
-        "max_hold_days": config.max_hold_days,
+        "max_hold_trading_days": config.max_hold_trading_days,
         "top_n": config.top_n,
         "entry_rank_limit": config.entry_rank_limit,
         "min_score": config.min_score,
         "require_bull_regime": config.require_bull_regime,
+        "max_open_gap_pct": config.max_open_gap_pct,
+        "sell_on_bear_regime": config.sell_on_bear_regime,
         "stop_loss_enabled": config.stop_loss_enabled,
         "stop_loss_pct": config.stop_loss_pct,
         "trailing_enabled": config.trailing_enabled,
@@ -538,7 +625,12 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
         let net = gross - commission - stamp_duty - slippage;
         let pnl = net - position.cost;
         let pnl_pct = pnl / position.cost;
-        let hold_days = (end_date - position.entry_date).num_days() as i32;
+        let exit_trade_index = market_data
+            .date_index
+            .get(&end_date)
+            .copied()
+            .unwrap_or(position.entry_trade_index);
+        let hold_trading_days = exit_trade_index - position.entry_trade_index;
 
         world.resource_mut::<Portfolio>().cash += net;
         {
@@ -547,12 +639,12 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
         }
 
         println!(
-            "[{}] [CLOSE] {} @ {:.2} | PnL: {:+.1}% | Hold: {}d",
+            "[{}] [CLOSE] {} @ {:.2} | PnL: {:+.1}% | Hold: {}td",
             end_date,
             position.code,
             exit_price,
             pnl_pct * 100.0,
-            hold_days
+            hold_trading_days
         );
 
         world.entity_mut(entity).insert(ClosedTrade {
@@ -562,11 +654,106 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
             entry_price: position.entry_price,
             exit_price,
             shares: position.shares,
+            cost: position.cost,
+            exit_value: net,
             pnl,
             pnl_pct,
-            hold_days,
+            hold_trading_days,
             exit_reason: ExitReason::EndOfBacktest,
         });
         world.entity_mut(entity).remove::<Position>();
+    }
+}
+
+fn snapshot_daily_equity(world: &mut World, date: NaiveDate) -> DailyEquity {
+    let cash = world.resource::<Portfolio>().cash;
+    let mut query = world.query::<&Position>();
+    let positions: Vec<(String, u32)> = query
+        .iter(world)
+        .map(|position| (position.code.clone(), position.shares))
+        .collect();
+    let market_data = world.resource::<MarketData>();
+    let positions_value = positions
+        .iter()
+        .filter_map(|(code, shares)| {
+            market_data
+                .prices
+                .get(code)
+                .and_then(|prices| prices.get(&date))
+                .map(|bar| *shares as f64 * bar.close)
+        })
+        .sum::<f64>();
+    DailyEquity {
+        date,
+        cash,
+        positions_value,
+        total_value: cash + positions_value,
+    }
+}
+
+fn write_closed_trades_csv(
+    world: &mut World,
+    path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+
+    let mut query = world.query::<&ClosedTrade>();
+    let mut trades: Vec<ClosedTrade> = query.iter(world).cloned().collect();
+    trades.sort_by(|a, b| {
+        a.exit_date
+            .cmp(&b.exit_date)
+            .then_with(|| a.entry_date.cmp(&b.entry_date))
+            .then_with(|| a.code.cmp(&b.code))
+    });
+
+    let mut file = std::fs::File::create(path)?;
+    writeln!(
+        file,
+        "code,entry_date,exit_date,entry_price,exit_price,shares,cost,exit_value,pnl,pnl_pct,hold_trading_days,exit_reason"
+    )?;
+    for trade in trades {
+        writeln!(
+            file,
+            "{},{},{},{:.6},{:.6},{},{:.6},{:.6},{:.6},{:.8},{},{}",
+            csv_escape(&trade.code),
+            trade.entry_date,
+            trade.exit_date,
+            trade.entry_price,
+            trade.exit_price,
+            trade.shares,
+            trade.cost,
+            trade.exit_value,
+            trade.pnl,
+            trade.pnl_pct,
+            trade.hold_trading_days,
+            trade.exit_reason
+        )?;
+    }
+    Ok(())
+}
+
+fn write_daily_equity_csv(
+    rows: &[DailyEquity],
+    path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+
+    let mut file = std::fs::File::create(path)?;
+    writeln!(file, "date,cash,positions_value,total_value")?;
+    for row in rows {
+        writeln!(
+            file,
+            "{},{:.6},{:.6},{:.6}",
+            row.date, row.cash, row.positions_value, row.total_value
+        )?;
+    }
+    Ok(())
+}
+
+fn csv_escape(value: &str) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
     }
 }

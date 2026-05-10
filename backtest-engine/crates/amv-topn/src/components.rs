@@ -7,6 +7,7 @@ use chrono::NaiveDate;
 pub struct Position {
     pub code: String,
     pub entry_date: NaiveDate,
+    pub entry_trade_index: i32,
     pub entry_price: f64,
     pub shares: u32,
     pub cost: f64,
@@ -35,9 +36,11 @@ pub struct ClosedTrade {
     pub entry_price: f64,
     pub exit_price: f64,
     pub shares: u32,
+    pub cost: f64,
+    pub exit_value: f64,
     pub pnl: f64,
     pub pnl_pct: f64,
-    pub hold_days: i32,
+    pub hold_trading_days: i32,
     pub exit_reason: ExitReason,
 }
 
@@ -45,6 +48,7 @@ pub struct ClosedTrade {
 pub enum ExitReason {
     StopLoss,
     TrailingStop,
+    BearRegime,
     MaxHoldDays,
     EndOfBacktest,
 }
@@ -54,6 +58,7 @@ impl std::fmt::Display for ExitReason {
         match self {
             ExitReason::StopLoss => write!(f, "StopLoss"),
             ExitReason::TrailingStop => write!(f, "TrailingStop"),
+            ExitReason::BearRegime => write!(f, "BearRegime"),
             ExitReason::MaxHoldDays => write!(f, "MaxHoldDays"),
             ExitReason::EndOfBacktest => write!(f, "EndOfBacktest"),
         }

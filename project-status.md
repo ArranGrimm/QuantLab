@@ -147,7 +147,16 @@
   - Learning-to-Rank 论文 (`Empirical Asset Pricing via Learning-to-Rank`) 支持当前“直接优化 topN 排序”方向; 后续可尝试 LightGBM ranker / LambdaRank, 但短期仍先做 Rust 真实回测兑现
   - 持有期曲线 (`20260503_215103`, Canvas: `amv-bull-pool-horizon-curve.canvas.tsx`) 显示绝对收益到 `30d` 仍增加, 但单位时间收益从 `1d` 起持续下降; `5d/10d` 更像交易候选, `20d/30d` 更像研究观察窗
   - Rust 真实回测首轮 (`bt-amv-topn`, `20260503_221922`, Canvas: `amv-topn-rust-backtest.canvas.tsx`) 已完成 `5d/10d/20d` 对照: `10d` 最优, 净收益 `+65.54%`, 最大回撤 `-14.69%`, 胜率 `54.58%`; `5d` 净收益 `+29.88% / MaxDD -35.99%`, `20d` 净收益 `+10.26% / MaxDD -28.01%`
-  - 当前判断: `top3 高位+K线确认` 在真实回测下仍成立, 但交易周期应从研究阶段的 `20d` 下修到 `10d`; 下一步围绕 `10d` 验证止损开关、AMV 转空主动清仓、风险因子过滤/仓位控制
+  - 增强消融首轮自然日口径结果已废弃: 旧 `max_hold_days` 实际按 `NaiveDate` 差值计算自然日, 不再作为当前判断依据
+  - 当前 `bt-amv-topn` 已改为 `max_hold_trading_days`, 使用全市场交易日索引计持仓天数; 交易日口径完整消融 (`enhancement_20260510_122315_991`, Canvas: `amv-topn-enhancement-sweep.canvas.tsx`) 显示: `baseline_10d` 净收益 `+25.67% / MaxDD -22.21%`, `stop_off 10td` 为 `+50.30% / MaxDD -18.85%`; 补测 `5td/6td + no stop` 后, 当前最优为 `6td + no stop`: 净收益 `+144.02% / MaxDD -14.71%`, `7td + no stop` 为 `+99.68% / MaxDD -14.95%`, `5td + no stop` 为 `+21.56% / MaxDD -28.46%`
+  - 当前判断: `top3 高位+K线确认 + 6td + 无固定止损` 是新的规则主线; 自然日持有期异常强势后续应以显式 `max_hold_calendar_days` 分支复刻, 不恢复有歧义的旧 `max_hold_days`
+  - 6td 交易归因 (`analysis_20260510_125808`, Canvas: `amv-topn-6td-trade-analysis.canvas.tsx`) 已完成: 年度收益为 2021 `+0.48%`, 2022 `+38.36%`, 2023 `+14.18%`, 2024 `+49.00%`, 2025 `+12.53%`, 2026 YTD `-8.79%`; 单笔均值 `+1.12%`, 中位数 `+0.19%`, Top10 盈利占正收益 `40.45%` / 占净 PnL `97.74%`; 同入口 5% 止损错杀 `18/29` 笔, 错杀 PnL 差额约 `+18.56 万`
+  - 分段归因 (`segment_analysis_20260510_130534`, Canvas: `amv-topn-segment-attribution.canvas.tsx`) 显示: 2024 盈利交易 `25` 笔贡献 `+60.72 万`, 平均 `MFE +14.72%`; 2024 Top10 盈利贡献 `+51.13 万`, 平均 `MFE +26.81%`; 2026 全部 `18` 笔贡献 `-11.76 万`, 平均 `MFE +1.77% / MAE -4.20%`; 2026 亏损交易平均入场日表现 `-1.30%`, 平均 `MFE` 仅 `+1.01%`
+  - 因子年度稳定性补充 (`artifacts/amv_bull_pool_yearly_factor/20260510_151739`, Canvas: `amv-bull-pool-yearly-factor.canvas.tsx`) 显示: 当前组合 `高位+K线确认 P2/K0.5/R0` 在 pre-backtest `top3 / 6d-only` 口径下 2024 单笔均值 `+3.30%`, 相对随机 `+2.12pp`, 明显强于其他完整年份; 2025 为 `-0.75pp`; 2026 覆盖到 `2026-04-27` 后降为 `+0.05pp`; 组成因子里 `K线振幅收缩` 和 `实体占比偏强` 分别为全样本 edge `+1.16pp / +1.06pp` 且 `6/6` 年正 edge; 权重网格里 `P3/K0.5/R0` 全样本 edge `+0.93pp`, 略优于当前 `P2/K0.5/R0` 的 `+0.82pp`
+  - 因子分年份 / 分 regime 标签分析 (`artifacts/amv_bull_pool_factor_regime/20260510_221119`, Canvas: `amv-bull-pool-factor-regime.canvas.tsx`) 使用 Polars, 统一 `6d/top3`, 分析 10 个 AMV TopN 相关因子 + 当前组合。全样本 top3 edge: `KLEN +1.16pp`, `KMID2 +1.06pp`, `接近20日新高 +0.86pp`, 当前组合 `+0.82pp`, `5日动量 +0.75pp`; 2024 由 `KLEN +2.44pp` 和当前组合 `+2.12pp` 主导, 2025 由 `KMID2 +2.17pp` / `接近20日新高 +2.03pp` 主导, 2026 切换到 `5日动量 +4.13pp` / `20日动量 +4.00pp`, 当前组合仅 `+0.05pp`
+  - 最新 LTR 启发: 当前问题更像“不同 AMV bull 阶段和赚钱效应下, topN 有效因子会切换”, 不是单一因子线性 IC 很强; LTR 值得做, 但必须加入市场状态特征, 学习何时偏 `KLEN/KMID2`, 何时偏动量
+  - 重要口径差异: 首轮 yearly factor lab 截止到 `2026-02-02` 不是 AMV 数据缺失, 而是多 horizon (`5/6/10/20d`) 版本全局要求 `fwd_ret_20d` 有效; 20d 前瞻样本最多到 `2026-04-07`, 而 2026-04 AMV bull 从 `2026-04-09` 才重新开始, 导致短周期分析被 20d 过滤误截。后续短周期 yearly 分析必须使用 `6d-only` 或 per-horizon dataset
+  - 最新判断: 2024 大赢家来自 AMV bull 叠加高弹性行情窗口, 不是 `score/rank` 本身明显更强; 2026 亏损段的问题是入场后缺乏上冲空间, 而不是开盘 gap 异常。下一步优先测试“入场确认 / 环境确认”, 例如执行日不能明显收弱, 或在 AMV bull 中叠加短期市场宽度/赚钱效应确认
 
 ### 当前最新主线候选 (2026-04-03 更新, `core_plus_alpha158 + kbar_shape`)
 | 指标 | 值 | 备注 |

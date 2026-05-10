@@ -1,5 +1,217 @@
 # Progress
 
+## 2026-05-10
+
+### [AMV] Bull Pool 因子分年份 / 分 regime 标签分析
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - 新增 `scripts/amv_bull_pool_factor_regime_analysis.py`
+  - 新增 Canvas: `amv-bull-pool-factor-regime.canvas.tsx`
+- **实现说明**:
+  - 脚本已按项目偏好使用 Polars, 未使用 pandas
+  - 分析 10 个 AMV TopN 相关因子 + 当前组合, 统一使用 `6d` 标签和 `top3`
+  - 指标: 日度 Spearman IC, top3 edge, Hit15 edge
+  - 分组: 年份, AMV bull 初/中/后期, 近 5 日宽池赚钱效应强/弱, 未来宽池收益强/弱
+- **产物**:
+  - `artifacts/amv_bull_pool_factor_regime/20260510_221119/summary.json`
+  - pool: `636,042` 行, `2021-04-20 -> 2026-04-27`, `555` 个 AMV bull 交易日, `2,335` 只股票
+- **全样本 top3 edge**:
+  - `K线振幅收缩(KLEN)`: `+1.16pp`, IC `+0.0499`
+  - `实体占比偏强(KMID2)`: `+1.06pp`, IC `-0.0104`
+  - `接近20日新高`: `+0.86pp`, IC `+0.0107`
+  - 当前组合 `P2/K0.5/R0`: `+0.82pp`, IC `+0.0035`
+  - `5日动量`: `+0.75pp`, IC `-0.0223`
+  - `20日高位`: `+0.35pp`
+  - `换手放大`: `-0.82pp`
+- **分年份重点**:
+  - 2024: `KLEN` edge `+2.44pp`, 当前组合 `+2.12pp`
+  - 2025: `KMID2` edge `+2.17pp`, `接近20日新高` edge `+2.03pp`, 当前组合 `-0.75pp`
+  - 2026: `5日动量` edge `+4.13pp`, `20日动量` edge `+4.00pp`, 当前组合仅 `+0.05pp`
+- **分 AMV bull 阶段**:
+  - 初期: `KLEN +1.98pp`, 当前组合 `+1.68pp`
+  - 中期: `KLEN +1.23pp`, 当前组合仅 `+0.10pp`
+  - 后期: `5日动量 +2.24pp`, `KMID2 +2.07pp`, 当前组合 `+1.18pp`
+- **结论**:
+  - 当前组合不是最稳的单一信号; `KLEN` 和 `KMID2` 更像稳定核心
+  - 2026 的有效因子显著切换到动量, 这解释了当前固定权重组合在 2026-04 edge 几乎归零
+  - 多数因子 IC 不强但 top3 edge 明显, 说明问题更偏“极值 topN 选择 / 状态条件”而不是简单线性 IC
+  - 对 LTR 的启发: LTR 值得做, 但必须加入市场状态特征, 学习何时偏 `KLEN/KMID2`, 何时偏动量, 而不是只让模型学固定个股因子排序
+
+### [AMV] Bull Pool 因子年度稳定性补充
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - 新增 `scripts/amv_bull_pool_yearly_factor_analysis.py`
+  - 新增 Canvas: `amv-bull-pool-yearly-factor.canvas.tsx`
+- **问题背景**:
+  - 当前 `6td + no stop` Rust 回测显示收益高度依赖 2024 大赢家
+  - 需要回到接入 Rust 前的 AMV bull pool 排序实验, 补充分年份评价, 检查当前因子/权重是否只是更适配 2024 行情
+- **产物**:
+  - `artifacts/amv_bull_pool_yearly_factor/20260510_150556/summary.json`
+  - 对当前组合 `高位+K线确认 P2/K0.5/R0`, 四个组成因子, 以及 36 组权重网格按年重算
+  - 主观察口径为 `top3 / 6d horizon`, 同时输出 `5d/10d/20d`
+- **重要口径差异与修正**:
+  - 首轮多 horizon (`5/6/10/20d`) yearly factor lab 的 pool 日期为 `2021-04-20 -> 2026-02-02`
+  - 原因不是 AMV 数据缺失: AMV 原始数据/机械 regime 都到 `2026-05-08`, QMT 行情也到 `2026-05-08`
+  - 真正原因是脚本复用 `build_dataset()` 时使用 `max(args.horizons)=20`, 全局过滤 `fwd_ret_20d is not null`; 在当前 QMT 截止日下 20d 前瞻样本最多到 `2026-04-07`, 而 2026-04 的 AMV bull 从 `2026-04-09` 才重新开始, 因此多 horizon pool 最晚 bull 日期停在上一段 bull 的 `2026-02-02`
+  - 已补跑 6d-only: `artifacts/amv_bull_pool_yearly_factor/20260510_151739/summary.json`, pool 日期为 `2021-04-20 -> 2026-04-27`
+- **当前组合 6d 分年份 (以 6d-only 修正版为准)**:
+  - 2021: 单笔均值 `+1.10%`, 相对随机 `+0.40pp`
+  - 2022: 单笔均值 `+1.14%`, 相对随机 `+0.77pp`
+  - 2023: 单笔均值 `+0.64%`, 相对随机 `+1.25pp`
+  - 2024: 单笔均值 `+3.30%`, 相对随机 `+2.12pp`
+  - 2025: 单笔均值 `+0.63%`, 相对随机 `-0.75pp`
+  - 2026: 单笔均值 `+1.10%`, 相对随机 `+0.05pp`, 覆盖到 `2026-04-27`, 样本日 `33`
+- **组成因子 6d 稳定性**:
+  - 当前组合: 全样本 edge `+0.82pp`, `5/6` 年正 edge
+  - `20日高位`: 全样本 edge `+0.35pp`, `5/6` 年正 edge, 2026 为 `-0.14pp`
+  - `接近20日新高`: 全样本 edge `+0.87pp`, `5/6` 年正 edge, 2026 为 `-0.53pp`
+  - `K线振幅收缩`: 全样本 edge `+1.16pp`, `6/6` 年正 edge, 2026 为 `+2.80pp`
+  - `实体占比偏强`: 全样本 edge `+1.06pp`, `6/6` 年正 edge, 2026 为 `+1.56pp`
+- **权重网格启发**:
+  - 当前不是明确“权重天花板”: `P3/K0.5/R0` 在 6d-only 全样本 edge `+0.93pp`, 略优于当前 `P2/K0.5/R0` 的 `+0.82pp`
+  - 加风险项的组合没有出现在 6d 稳定性前列, 暂时不支持直接加 `atr/panic` 权重来解决问题
+- **结论**:
+  - 用户提出的“当前因子更适配 2024”成立: 2024 的 edge 明显高于其他完整年份
+  - 但不能简单说组合天花板已到; 更准确的判断是“同一类高位+K线确认框架仍有小幅权重优化空间, 但 2026-04 把当前组合 edge 压到几乎为零”
+  - 下一步如果继续做因子层研究, 应用 6d-only / per-horizon 数据集重跑权重网格, 避免 20d 前瞻过滤污染短周期结论; 如果继续做交易规则, 应测试执行日收弱过滤与短期赚钱效应确认
+
+### [AMV] TopN 6td 分段归因: 2024 大赢家 vs 2026 亏损段
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - 新增 `scripts/amv_topn_segment_analysis.py`
+  - 新增 Canvas: `amv-topn-segment-attribution.canvas.tsx`
+- **分段归因产物**:
+  - `artifacts/amv_topn/20260510_115834/backtests/enhancement_20260510_125746_630/segment_analysis_20260510_130534/summary.json`
+  - `enriched_trades.csv`: 每笔交易补充 `score/rank`, 入场 gap, 入场日表现, AMV regime, 市值/成交额, 持有期 `MFE/MAE`
+  - `segment_summary.csv`, `monthly_summary.csv`, `top_2024_winners.csv`, `trades_2026.csv`, `loss_2026_worst.csv`
+- **核心对照**:
+  - 全样本: `264` 笔, PnL `+72.01 万`, 胜率 `52.27%`, 单笔均值 `+1.12%`, 平均 `MFE +5.11%`, `MAE -3.15%`
+  - 2024 盈利交易: `25` 笔, PnL `+60.72 万`, 单笔均值 `+8.28%`, 平均 `MFE +14.72%`, `MAE -2.67%`
+  - 2024 Top10 盈利: PnL `+51.13 万`, 单笔均值 `+17.10%`, 平均 `MFE +26.81%`, 平均入场 gap `+2.26%`
+  - 2026 全部: `18` 笔, PnL `-11.76 万`, 胜率 `33.33%`, 单笔均值 `-1.52%`, 平均 `MFE +1.77%`, `MAE -4.20%`
+  - 2026 亏损交易: `12` 笔, PnL `-16.30 万`, 单笔均值 `-3.13%`, 平均 `MFE +1.01%`, `MAE -5.41%`, 入场日表现 `-1.30%`
+- **月份结论**:
+  - 2024-10 是最大正贡献月份: `6` 笔, PnL `+30.89 万`, 单笔均值 `+17.09%`
+  - 2024-09 次强: `9` 笔, PnL `+11.06 万`
+  - 2026-04 是最大亏损月份: `9` 笔, PnL `-10.26 万`, 胜率 `11.11%`
+- **解释**:
+  - 2024 大赢家并不是 `score/rank` 明显更强, 而是持有期内给了极高 MFE; 本质更像 AMV bull 叠加行情窗口
+  - 2026 亏损段的 `score` 仍接近全样本, 但入场后几乎没有上冲空间, 且入场日平均走弱; 这说明当前排序信号在弱赚钱效应阶段无法区分“仍在高位但已经没弹性”的票
+- **下一步建议**:
+  - 不优先继续扫 `gap` 阈值, 因为 2026 平均 gap 并不异常
+  - 优先尝试入场确认 / 环境确认: 如执行日不能明显收弱, 或在 AMV bull 中叠加短期市场宽度/赚钱效应确认
+
+### [AMV] TopN 6td 无止损交易归因
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `backtest-engine/crates/amv-topn/src/components.rs`
+  - `backtest-engine/crates/amv-topn/src/main.rs`
+  - `backtest-engine/crates/amv-topn/src/systems.rs`
+  - `scripts/amv_topn_enhancement_sweep.py`
+  - 新增 `scripts/amv_topn_trade_analysis.py`
+  - 新增 Canvas: `amv-topn-6td-trade-analysis.canvas.tsx`
+- **新增回测产物**:
+  - Sweep: `artifacts/amv_topn/20260510_115834/backtests/enhancement_20260510_125746_630/summary.json`
+  - 6td 无止损: `artifacts/amv_topn/20260510_115834/backtests/enhancement_20260510_125746_630/stop_off_hold_6d/`
+  - 6td + 5% stop: `artifacts/amv_topn/20260510_115834/backtests/enhancement_20260510_125746_630/hold_6d/`
+  - 交易归因: `artifacts/amv_topn/20260510_115834/backtests/enhancement_20260510_125746_630/analysis_20260510_125808/summary.json`
+- **工程修正**:
+  - `bt-amv-topn` 回测报告目录新增 `trades.csv`, 记录完整平仓明细
+  - `bt-amv-topn` 回测报告目录新增 `daily_equity.csv`, 记录每日 cash / 持仓市值 / 总权益
+  - `amv_topn_enhancement_sweep.py` 运行 Cargo 时自动移除 `CARGO_TARGET_DIR`, 避免 Cursor 沙箱 release 构建权限问题
+- **6td 对照结果**:
+  - `6td + no stop`: 净收益 `+144.02%`, `MaxDD -14.71%`, 胜率 `52.27%`, 交易数 `264`
+  - `6td + 5% stop`: 净收益 `+39.64%`, `MaxDD -17.33%`, 胜率 `48.20%`, 交易数 `278`
+- **归因结论**:
+  - 年度收益: 2021 `+0.48%`, 2022 `+38.36%`, 2023 `+14.18%`, 2024 `+49.00%`, 2025 `+12.53%`, 2026 YTD `-8.79%`
+  - 单笔分布: 均值 `+1.12%`, 中位数 `+0.19%`, P10 `-4.74%`, P90 `+6.33%`, payoff ratio `1.56`
+  - Top10 盈利占正收益 `40.45%`, 占净 PnL `97.74%`; Top10 亏损占总亏损 `27.19%`
+  - 5% 止损同入口匹配到 `29` 笔, 其中 `18` 笔后续反弹优于止损退出, 错杀比例 `62.07%`, 合计 PnL 差额约 `+18.56 万`
+- **当前判断**:
+  - `6td + no stop` 可作为新基线, 但收益集中度偏高, 需要继续检查 2024 大赢家与 2026 亏损段
+  - 下一步优先做分段归因: 大赢家的 AMV 位置 / 买入 gap / 行业主题集中度, 以及 2026 亏损段是否需要过热过滤或弱市降仓
+
+### [AMV] TopN 持有期改为交易日口径并重跑增强消融
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `backtest-engine/crates/amv-topn/src/components.rs`
+  - `backtest-engine/crates/amv-topn/src/resources.rs`
+  - `backtest-engine/crates/amv-topn/src/systems.rs`
+  - `backtest-engine/crates/amv-topn/src/main.rs`
+  - `backtest-engine/crates/amv-topn/config*.toml`
+  - `scripts/amv_topn_enhancement_sweep.py`
+  - Canvas: `amv-topn-enhancement-sweep.canvas.tsx`
+- **重要修正**:
+  - 旧 `max_hold_days` 使用 `NaiveDate` 差值, 实际是自然日
+  - AMV TopN 已删除旧字段, 改为 `max_hold_trading_days`
+  - Rust 侧使用全市场 `trading_dates` 生成 `date_index`, 买入时记录 `entry_trade_index`, 卖出时按交易日索引差值判断持有期
+- **交易日口径消融 artifact**:
+  - 快速核验: `artifacts/amv_topn/20260510_115834/backtests/enhancement_20260510_122252_006/summary.json`
+  - 完整消融: `artifacts/amv_topn/20260510_115834/backtests/enhancement_20260510_122315_991/summary.json`
+- **核心结果 (交易日口径)**:
+  - `baseline_10d` (`10td + 5% stop`): 净收益 `+25.67%`, `MaxDD -22.21%`, 胜率 `44.28%`, 交易数 `201`
+  - `stop_off` (`10td + no stop`): 净收益 `+50.30%`, `MaxDD -18.85%`, 胜率 `47.54%`, 交易数 `183`
+  - `stop_off_hold_5d` (`5td + no stop`): 净收益 `+21.56%`, `MaxDD -28.46%`, 胜率 `44.22%`, 交易数 `303`
+  - `stop_off_hold_6d` (`6td + no stop`): 净收益 `+144.02%`, `MaxDD -14.71%`, 胜率 `52.27%`, 交易数 `264`
+  - `stop_off_hold_7d` (`7td + no stop`): 净收益 `+99.68%`, `MaxDD -14.95%`, 胜率 `47.16%`, 交易数 `229`
+  - `stop_off_trailing_8_4`: 净收益 `+78.91%`, `MaxDD -16.94%`
+  - `stop_off_bear_exit`: 净收益 `+56.69%`, `MaxDD -19.52%`
+  - `stop_3pct`: 净收益 `-5.89%`, `MaxDD -26.06%`
+- **结论**:
+  - 自然日口径的 `stop_off +224.23%` 已废弃, 不再作为当前判断依据
+  - 交易日口径下, 关固定止损仍显著优于 `5% stop`, 但幅度回归正常
+  - 当前新主线从 `10d no stop` 调整为 `6td no stop`
+  - 自然日持有期异常强势值得单独研究, 但后续应显式新增 `max_hold_calendar_days`, 不恢复有歧义的旧 `max_hold_days`
+  - 下一步应输出完整交易明细, 做年度收益/回撤、单笔分布、最大盈利贡献占比、最大亏损、以及 `stop_off vs 5% stop` 的错杀分析
+
+### [AMV] TopN 增强消融首轮完成
+
+- **状态更新**: 本节使用旧自然日持有期口径, 已被上一节交易日口径重跑结果取代, 不再作为当前策略判断依据。
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `backtest-engine/crates/amv-topn/src/resources.rs`
+  - `backtest-engine/crates/amv-topn/src/systems.rs`
+  - `backtest-engine/crates/amv-topn/src/main.rs`
+  - `backtest-engine/crates/amv-topn/config*.toml`
+  - 新增 `scripts/amv_topn_enhancement_sweep.py`
+  - 新增 Canvas: `amv-topn-enhancement-sweep.canvas.tsx`
+- **新增规则开关**:
+  - `entry.max_open_gap_pct`: 执行日高开过滤, 用于跳过开盘涨幅过高的追高买入
+  - `exit.sell_on_bear_regime`: AMV 非 bull 时主动退出已有持仓
+  - sweep 脚本自动生成临时 TOML, 逐个调用 `bt-amv-topn`, 并汇总 `report.json`
+- **最新信号**:
+  - `artifacts/amv_topn/20260510_115834/signal.parquet`
+  - 日期范围 `2021-01-04 -> 2026-05-08`
+  - 执行信号日 `560`, 执行信号行 `1679`
+- **首轮消融 artifact**:
+  - `artifacts/amv_topn/20260510_115834/backtests/enhancement_20260510_115853_773/summary.json`
+  - `artifacts/amv_topn/20260510_115834/backtests/enhancement_20260510_120008_207/summary.json`
+- **核心结果**:
+  - `baseline_10d`: 净收益 `+64.74%`, `MaxDD -14.69%`, 胜率 `54.55%`, 交易数 `242`
+  - `stop_off`: 净收益 `+224.23%`, `MaxDD -12.69%`, 胜率 `58.74%`, 交易数 `223`
+  - `stop_8pct`: 净收益 `+107.53%`, `MaxDD -13.07%`
+  - `stop_3pct`: 净收益 `+18.96%`, `MaxDD -24.98%`
+  - `stop_off_trailing_8_4`: 净收益 `+215.01%`, `MaxDD -15.19%`
+  - `stop_off_trailing_10_5`: 净收益 `+214.77%`, `MaxDD -14.61%`
+  - `stop_off_gap_5pct`: 净收益 `+182.35%`, `MaxDD -12.66%`
+  - `stop_off_bear_exit`: 净收益 `+152.58%`, `MaxDD -11.41%`
+- **结论**:
+  - 固定 `5%` 止损是当前最大拖累, 关掉后收益和回撤同时改善
+  - `3%` 止损明显过紧; `8%` 止损好于 `5%`, 但仍显著弱于无固定止损
+  - 高开过滤、AMV 转空主动清仓、移动止盈均降低收益; 其中 AMV 转空清仓能降回撤, 但收益牺牲较大
+  - 下一步应优先对 `stop_off` 做年度拆分与风险暴露检查, 再决定是否需要更温和的风险退出
+
 ## 2026-05-03
 
 ### [AMV] TopN Rust 真实回测首轮完成

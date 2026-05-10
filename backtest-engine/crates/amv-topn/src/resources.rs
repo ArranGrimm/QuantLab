@@ -12,6 +12,8 @@ use std::path::Path;
 pub struct ConfigFile {
     pub backtest: BacktestSection,
     pub entry: EntrySection,
+    #[serde(default)]
+    pub exit: ExitSection,
     pub stop_loss: StopLossSection,
     pub trailing_stop: TrailingStopSection,
     pub costs: CostModel,
@@ -23,7 +25,7 @@ pub struct BacktestSection {
     pub max_positions: usize,
     pub max_daily_buys: usize,
     pub position_size_pct: f64,
-    pub max_hold_days: i32,
+    pub max_hold_trading_days: i32,
     #[serde(default)]
     pub start_date: Option<String>,
     #[serde(default)]
@@ -45,10 +47,18 @@ pub struct EntrySection {
     pub min_score: f64,
     #[serde(default = "default_require_bull_regime")]
     pub require_bull_regime: bool,
+    #[serde(default)]
+    pub max_open_gap_pct: Option<f64>,
 }
 
 fn default_require_bull_regime() -> bool {
     true
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct ExitSection {
+    #[serde(default)]
+    pub sell_on_bear_regime: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -78,7 +88,7 @@ pub struct AmvTopnConfig {
     pub max_positions: usize,
     pub max_daily_buys: usize,
     pub position_size_pct: f64,
-    pub max_hold_days: i32,
+    pub max_hold_trading_days: i32,
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
     pub min_position_ratio: f64,
@@ -87,6 +97,9 @@ pub struct AmvTopnConfig {
     pub entry_rank_limit: usize,
     pub min_score: f64,
     pub require_bull_regime: bool,
+    pub max_open_gap_pct: Option<f64>,
+
+    pub sell_on_bear_regime: bool,
 
     pub stop_loss_enabled: bool,
     pub stop_loss_pct: f64,
@@ -105,7 +118,7 @@ impl Default for AmvTopnConfig {
             max_positions: 3,
             max_daily_buys: 3,
             position_size_pct: 1.0 / 3.0,
-            max_hold_days: 10,
+            max_hold_trading_days: 10,
             start_date: None,
             end_date: None,
             min_position_ratio: 0.5,
@@ -113,6 +126,8 @@ impl Default for AmvTopnConfig {
             entry_rank_limit: 3,
             min_score: 0.0,
             require_bull_regime: true,
+            max_open_gap_pct: None,
+            sell_on_bear_regime: false,
             stop_loss_enabled: true,
             stop_loss_pct: 0.05,
             trailing_enabled: false,
@@ -136,7 +151,7 @@ impl From<ConfigFile> for AmvTopnConfig {
             max_positions: cfg.backtest.max_positions,
             max_daily_buys,
             position_size_pct: cfg.backtest.position_size_pct,
-            max_hold_days: cfg.backtest.max_hold_days,
+            max_hold_trading_days: cfg.backtest.max_hold_trading_days,
             start_date: bt_core::parse_date_opt(&cfg.backtest.start_date),
             end_date: bt_core::parse_date_opt(&cfg.backtest.end_date),
             min_position_ratio: cfg.backtest.min_position_ratio,
@@ -144,6 +159,8 @@ impl From<ConfigFile> for AmvTopnConfig {
             entry_rank_limit,
             min_score: cfg.entry.min_score,
             require_bull_regime: cfg.entry.require_bull_regime,
+            max_open_gap_pct: cfg.entry.max_open_gap_pct,
+            sell_on_bear_regime: cfg.exit.sell_on_bear_regime,
             stop_loss_enabled: cfg.stop_loss.enabled,
             stop_loss_pct: cfg.stop_loss.pct,
             trailing_enabled: cfg.trailing_stop.enabled,
@@ -169,6 +186,7 @@ pub struct PriceBar {
 #[derive(Resource, Default, Clone)]
 pub struct MarketData {
     pub prices: HashMap<String, HashMap<NaiveDate, PriceBar>>,
+    pub date_index: HashMap<NaiveDate, i32>,
 }
 
 #[derive(Resource, Default)]

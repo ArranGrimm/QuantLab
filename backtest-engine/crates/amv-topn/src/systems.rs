@@ -25,6 +25,10 @@ pub fn process_buy_signals(
         Some(d) => d,
         None => return,
     };
+    let entry_trade_index = match market_data.date_index.get(&current_date) {
+        Some(idx) => *idx,
+        None => return,
+    };
 
     let current_positions = positions.iter().count();
     if current_positions >= config.max_positions {
@@ -82,6 +86,7 @@ pub fn process_buy_signals(
         commands.spawn(Position {
             code: code.clone(),
             entry_date: current_date,
+            entry_trade_index,
             entry_price: *open_price,
             shares,
             cost,
@@ -121,9 +126,13 @@ pub fn check_exit_conditions(
         };
 
         position.update_high(bar.high);
-        let hold_days = (current_date - position.entry_date).num_days() as i32;
+        let current_trade_index = match market_data.date_index.get(&current_date) {
+            Some(idx) => *idx,
+            None => continue,
+        };
+        let hold_trading_days = current_trade_index - position.entry_trade_index;
         // A-share T+1: a position opened this morning cannot be sold at today's close.
-        if hold_days <= 0 {
+        if hold_trading_days <= 0 {
             continue;
         }
 
@@ -147,7 +156,10 @@ pub fn check_exit_conditions(
                 should_sell = true;
                 exit_reason = ExitReason::TrailingStop;
             }
-        } else if hold_days >= config.max_hold_days {
+        } else if config.sell_on_bear_regime && !bar.is_bull_regime {
+            should_sell = true;
+            exit_reason = ExitReason::BearRegime;
+        } else if hold_trading_days >= config.max_hold_trading_days {
             should_sell = true;
             exit_reason = ExitReason::MaxHoldDays;
         }
@@ -174,12 +186,12 @@ pub fn check_exit_conditions(
             stats.record_trade(pnl, commission, stamp_duty, slippage);
 
             println!(
-                "[{}] [SELL] {} @ {:.2} | PnL: {:+.1}% | Hold: {}d | {}",
+                "[{}] [SELL] {} @ {:.2} | PnL: {:+.1}% | Hold: {}td | {}",
                 current_date,
                 position.code,
                 bar.close,
                 pnl_pct * 100.0,
-                hold_days,
+                hold_trading_days,
                 exit_reason
             );
 
@@ -190,9 +202,11 @@ pub fn check_exit_conditions(
                 entry_price: position.entry_price,
                 exit_price: bar.close,
                 shares: position.shares,
+                cost: position.cost,
+                exit_value: net,
                 pnl,
                 pnl_pct,
-                hold_days,
+                hold_trading_days,
                 exit_reason,
             });
             commands.entity(entity).remove::<Position>();
