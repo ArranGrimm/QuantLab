@@ -93,6 +93,8 @@ def build_feature_frame(args: argparse.Namespace) -> pl.DataFrame:
             "pre_close_adj",
             "market_cap_100m",
             "amount",
+            "ret_5d",
+            "ret_20d",
             "price_pos_20d",
             "close_to_high_20d",
             *ALPHA158_KBAR_COLS,

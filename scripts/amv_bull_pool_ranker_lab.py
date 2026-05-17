@@ -222,6 +222,20 @@ def add_combo_scores(df_pool: pl.DataFrame, rankers: list[dict[str, Any]]) -> pl
     return df_pool.with_columns(exprs)
 
 
+def _price_limit_pct_expr() -> pl.Expr:
+    is_20pct_board = (
+        pl.col("code").str.starts_with("sz.300")
+        | pl.col("code").str.starts_with("sz.301")
+        | pl.col("code").str.starts_with("sh.688")
+        | pl.col("code").str.starts_with("sh.689")
+        | pl.col("code").str.starts_with("300")
+        | pl.col("code").str.starts_with("301")
+        | pl.col("code").str.starts_with("688")
+        | pl.col("code").str.starts_with("689")
+    )
+    return pl.when(is_20pct_board).then(0.20).otherwise(0.10)
+
+
 def build_dataset(args: argparse.Namespace) -> pl.DataFrame:
     conn = duckdb.connect(str(args.qmt_db), read_only=True)
     try:
@@ -251,15 +265,19 @@ def build_dataset(args: argparse.Namespace) -> pl.DataFrame:
         temp_cols = []
 
         for step in range(1, max_horizon + 1):
+            open_col = f"_fwd_open_{step}"
             high_col = f"_fwd_high_{step}"
             low_col = f"_fwd_low_{step}"
             close_col = f"_fwd_close_{step}"
-            temp_cols.extend([high_col, low_col, close_col])
+            pre_close_col = f"_fwd_pre_close_{step}"
+            temp_cols.extend([open_col, high_col, low_col, close_col, pre_close_col])
             future_exprs.extend(
                 [
+                    pl.col("open_adj").shift(-step).over("code").alias(open_col),
                     pl.col("high_adj").shift(-step).over("code").alias(high_col),
                     pl.col("low_adj").shift(-step).over("code").alias(low_col),
                     pl.col("close_adj").shift(-step).over("code").alias(close_col),
+                    pl.col("pre_close_adj").shift(-step).over("code").alias(pre_close_col),
                 ]
             )
 
@@ -279,11 +297,51 @@ def build_dataset(args: argparse.Namespace) -> pl.DataFrame:
                     ),
                 ]
             )
+        if getattr(args, "label_mode", "close_to_close") == "next_open_to_close":
+            lag = int(getattr(args, "execution_lag_days", 1))
+            horizon = int(args.horizon)
+            exit_step = lag + horizon
+            if exit_step > max_horizon:
+                raise ValueError(
+                    f"execution label requires max horizon >= {exit_step}, got {max_horizon}"
+                )
+            high_cols = [f"_fwd_high_{step}" for step in range(lag, exit_step + 1)]
+            low_cols = [f"_fwd_low_{step}" for step in range(lag, exit_step + 1)]
+            entry_open = pl.col(f"_fwd_open_{lag}")
+            entry_pre_close = pl.col(f"_fwd_pre_close_{lag}")
+            entry_gap = entry_open / entry_pre_close - 1.0
+            derived_exprs.extend(
+                [
+                    (pl.col(f"_fwd_close_{exit_step}") / entry_open - 1.0).alias(
+                        f"fwd_exec_ret_{horizon}d"
+                    ),
+                    (pl.max_horizontal(*high_cols) / entry_open - 1.0).alias(
+                        f"fwd_exec_mfe_{horizon}d"
+                    ),
+                    (pl.min_horizontal(*low_cols) / entry_open - 1.0).alias(
+                        f"fwd_exec_mae_{horizon}d"
+                    ),
+                    entry_gap.alias("fwd_exec_entry_gap"),
+                    (
+                        entry_gap
+                        >= (
+                            _price_limit_pct_expr()
+                            - float(getattr(args, "price_limit_tolerance", 0.001))
+                        )
+                    ).alias("fwd_exec_entry_limit_up"),
+                ]
+            )
 
         keep_cols = [
             "date",
             "code",
+            "open_adj",
+            "high_adj",
+            "low_adj",
             "close_adj",
+            "pre_close_adj",
+            "amount",
+            "amount_ma5",
             "market_cap_100m",
             "amount_ma20",
             *FACTOR_COLS,
@@ -297,11 +355,27 @@ def build_dataset(args: argparse.Namespace) -> pl.DataFrame:
                     f"fwd_mae_{horizon}d",
                 ]
             )
+        if getattr(args, "label_mode", "close_to_close") == "next_open_to_close":
+            horizon = int(args.horizon)
+            keep_cols.extend(
+                [
+                    f"fwd_exec_ret_{horizon}d",
+                    f"fwd_exec_mfe_{horizon}d",
+                    f"fwd_exec_mae_{horizon}d",
+                    "fwd_exec_entry_gap",
+                    "fwd_exec_entry_limit_up",
+                ]
+            )
 
         df = (
             q_factor.with_columns(future_exprs)
             .with_columns(derived_exprs)
-            .with_columns(pl.col("amount").rolling_mean(20).over("code").alias("amount_ma20"))
+            .with_columns(
+                [
+                    pl.col("amount").rolling_mean(5).over("code").alias("amount_ma5"),
+                    pl.col("amount").rolling_mean(20).over("code").alias("amount_ma20"),
+                ]
+            )
             .drop(temp_cols)
             .filter(pl.col(f"fwd_ret_{max_horizon}d").is_not_null())
             .select(keep_cols)

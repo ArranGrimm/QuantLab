@@ -1,0 +1,36 @@
+[backtest]
+initial_capital = 500000.0
+max_positions = 3
+max_daily_buys = 3
+position_size_pct = 0.333333333333
+max_hold_trading_days = 30
+start_date = "2021-01-01"
+end_date = ""
+entry_rank_limit = 3
+min_score = 0.0
+require_bull_regime = true
+min_position_ratio = 0.5
+sort_field = "score"        # 默认使用信号导出时的排序分；可切到 "rw_dif_pct" 做 B1 周动能对照
+sort_ascending = false
+
+[exit]
+structural_stop_enabled = true
+structural_stop_buffer_pct = 0.0
+break_white_line_enabled = true
+break_white_line_buffer_pct = 0.0
+fast_fail_enabled = true
+fast_fail_days = 3
+fast_fail_loss_pct = 0.03
+weak_enabled = true
+weak_days = 10
+weak_min_gain_pct = 0.02
+
+[trailing_stop]
+enabled = true
+activation_pct = 0.12
+trailing_pct = 0.08
+
+[costs]
+commission_rate = 0.00025
+stamp_duty_rate = 0.001
+slippage_pct = 0.001

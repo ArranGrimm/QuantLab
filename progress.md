@@ -1,6 +1,753 @@
 # Progress
 
+## 如何阅读
+
+- 本文件是实验流水账，按日期倒序记录探索过程、修正、失败路线和阶段性结论。
+- 当前状态、主线策略、归档路线和下一步优先级以 `project-status.md` 为准。
+- 已归档探索的集中索引见 `experiments/archive-index.md`。
+- 历史小节中的“下一步”只代表当时判断；如果与顶部最新收口或 `project-status.md` 冲突，以最新收口为准。
+
+## 最新收口索引
+
+- B3 TDX: 已归档为事件型补充候选，不作为当前主线继续深挖。
+- Direct LTR Top3: 因 executable label 与真实执行口径错配，暂不接交易。
+- `attack_ok` 第一版: 当前状态特征未证明可稳定学习进攻切换，需收紧标签后再回看。
+- AMV 受约束 Oracle: 仍是当前 sleeve switching / gating 的理论锚点。
+- `manual_p2_k0p5_r0_6td`: 仍是当前 AMV bull pool 主策略底座。
+
+## 2026-05-17
+
+### [B3] 最终收口: 归档为事件型补充候选
+
+- 决策:
+  - B3 不作为当前主线继续深挖
+  - 保留 `backtest-engine/crates/b3`、`scripts/b3_tdx_signal_export.py`、`scripts/b3_candidate_ranking_lab.py` 作为后续事件型补充研究资产
+  - 后续只有在做组合/低重合度补充时再回看 B3，不再单独优化排序字段、波段参数或专用 crate 逻辑
+- 收口依据:
+  - 固定 `6td` B3: 净收益 `+22.61%`，最大回撤 `42.20%`
+  - B3 波段 v0: 净收益 `+18.49%`，最大回撤 `43.39%`
+  - B1 `rw_dif_pct` 排序迁移失败: 净收益 `-28.32%`，最大回撤 `56.31%`
+  - 全量 B3 候选信号 `6td`: 平均收益 `+1.02%`，胜率 `49.87%`，平均盈亏比 `1.50`
+  - 单字段 Top3 排序均未跑赢全部候选平均
+  - 收益主要依赖少数大涨事件票，不像稳定可反复利用的主策略 alpha
+- 对比锚点:
+  - `manual_p2_k0p5_r0_6td` 修正后仍为净收益 `+168.01%`，最大回撤 `14.97%`
+  - B3 与该底座差距过大，不值得继续占用主线研发时间
+- 文档整理:
+  - `project-status.md` 已新增“当前决策摘要”
+  - B3 在 `project-status.md` 中已标记为归档/非主线
+  - 后续应让 `project-status.md` 保持当前状态和最终决策，历史过程继续留在 `progress.md` / `experiments/` / Canvas
+
+### [AMV] attack_ok 第一版结论
+
+- 今日修正:
+  - 本文件顶部新增 `2026-05-17` 记录，避免后续误以为最新 AMV sleeve/gating 分析仍属于 `2026-05-10`
+- 当前理论锚点:
+  - `amv-constrained-oracle.canvas.tsx`（AMV 受约束 Oracle）
+  - `attack_ok` 标签来自 `top_ret_dailyized + 3% margin + allow_cash=true`
+- 第一版实验:
+  - 脚本: `scripts/amv_attack_ok_lab.py`
+  - 产物: `artifacts/amv_attack_ok/20260517_150811/summary.json`
+  - Canvas: `amv-attack-ok-lab.canvas.tsx`
+- 当前结论:
+  - 第一版 `attack_ok` 没有证明当前交易前状态特征能稳定学习“什么时候进攻”
+  - 2023/2024 AUC 接近随机，2025 仅略高，2026 样本太少
+  - 验证集 F1 阈值退化为接近 `always_attack`，固定高阈值又召回过低
+  - 下一步需要收紧标签或固定单一进攻袖子后再评估，而不是直接把当前 `attack_ok` 接交易
+
+### [B3] TDX 公式 Polars 复刻 v0
+
+> 历史探索记录: 本节及后续 B3 中间“下一步”已被顶部 `[B3] 最终收口` 替代，B3 当前状态以归档结论为准。
+
+- 背景:
+  - 暂停继续堆 AMV sleeve switching，转向研究 AMV bull 下另一个明确 archetype
+  - B3 定位为 `AMV bull` 择时下的“强异动 K 后确认接力”子策略，未来可与 `manual_p2_k0p5_r0_6td` 做组合/互补性分析
+- 新增:
+  - `scripts/b3_tdx_signal_export.py`
+  - Canvas: `b3-tdx-signal-backtest.canvas.tsx`
+- 翻译口径:
+  - 只复刻最终 `B3触发` 直接依赖的变量，不翻译未参与最终决策的 KDJ/RSI/砖型图/异动统计等中间指标
+  - 保留 AMV bull 前置过滤
+  - 加 ST 剔除、流动性过滤: `market_cap_100m >= 100`, `amount_ma20 >= 5e7`
+  - 原始 B3 触发后，按前一日触发 K 涨幅排序，每日取 Top3 写入 Rust `signal.parquet`
+  - TDX 原式 `(REF(知行短期趋势线,1) >= REF(知行短期趋势线,2))+0.01` 在布尔上下文近似恒真；当前主信号按 TDX 语义处理，同时输出 strict 版本计数做诊断
+- 信号产物:
+  - `artifacts/b3_tdx_signals/20260517_173457/signal.meta.json`
+  - `signal.parquet`
+  - `raw_candidate_signals.csv`
+- 信号统计 (`2019-01-02 ~ 2026-05-08`):
+  - 原始 B3 触发: `13,171` 行, `1,522` 天
+  - strict 短趋势线版本: `10,648` 行
+  - AMV bull + 流动性后: `2,026` 行, `529` 天
+  - Top3 后执行日信号: `1,166` 行, `528` 天
+  - 执行日开盘涨停诊断: `1` 行，占比 `0.086%`
+  - Rust `2021+` 实际读取信号: `873` 行；AMV 非 bull 阻止 `24` 行；修正后涨停过滤 `1` 行
+- 回测口径修正:
+  - 发现 `bt_core::price_limit_pct` 只识别裸代码 `300/301/688/689`，未识别 QMT 格式 `sz.300xxx / sh.688xxx`
+  - 已修复 `backtest-engine/crates/core/src/lib.rs`，同时保留裸代码和 `sz./sh.` 前缀代码支持
+  - 新增单测 `price_limit_pct_supports_qmt_prefixed_codes`
+  - `cargo test -p bt-core` 通过
+- Rust 修正后回测 (`bt-amv-topn`, `T+1 open`, Top3, no-stop, config start `2021-01-01`):
+  - `1td`: 净收益 `-54.40%`, 毛收益 `-14.58%`, 最大回撤 `63.31%`, 交易 `562`, 胜率 `42.0%`
+  - `2td`: 净收益 `-28.79%`, 毛收益 `+4.34%`, 最大回撤 `57.19%`, 交易 `433`, 胜率 `43.6%`
+  - `3td`: 净收益 `+0.48%`, 毛收益 `+33.92%`, 最大回撤 `40.30%`, 交易 `352`, 胜率 `46.0%`
+  - `6td`: 净收益 `+22.61%`, 毛收益 `+50.57%`, 最大回撤 `42.20%`, 交易 `230`, 胜率 `47.4%`
+  - 涨停过滤从 `2` 行修正为 `1` 行；多放入的 20cm 代码样本对 B3 结果有负面影响，说明旧结果不是同一真实口径
+- 当前判断:
+  - B3 不是废策略；在 AMV bull + 真实执行下，修正后 `6td` 仍能跑出正收益，`3td` 仅小幅为正
+  - 但第一版明显弱于 `manual_p2_k0p5_r0_6td`，暂时不能替代主策略底座
+  - `1td/2td` 对交易成本非常敏感，短持仓不适合作为当前主方向
+  - 下一步不应立刻调参，而应先分析 B3 与 `manual_p2_k0p5_r0_6td` 的信号重合度、年度互补性和组合价值
+  - 额外注意: 涨跌停代码前缀 bug 已修复；如果要严谨比较历史 AMV/LTR/oracle 结果，后续应重跑关键基线
+
+### [B3] Rust 波段回测 crate 起步
+
+- 背景:
+  - 用户确认 B3 原始视频是波段策略，买入后存在多种应对情况，不应继续只用固定 `1td/2td/3td/6td` 持有期评估
+  - 决策: 不重命名 `b1`，新增独立 crate `backtest-engine/crates/b3`
+- 新增:
+  - `backtest-engine/crates/b3/Cargo.toml`
+  - `backtest-engine/crates/b3/config.toml`
+  - `backtest-engine/crates/b3/src/{main.rs,resources.rs,components.rs,systems.rs}`
+  - `backtest-engine/Cargo.toml` workspace member 加入 `crates/b3`
+- 入口/退出 v0:
+  - 买入: 消费 `scripts/b3_tdx_signal_export.py` 生成的执行日 `is_signal / score / rank`
+  - 结构止损: 默认以前一日触发 K 的 `trigger_low` 为结构止损位
+  - 波段退出: 跌破白线、早期失败、弱势未兑现、移动止损、最长持有交易日
+  - 保留 AMV bull gate，默认 `require_bull_regime = true`
+- 信号导出同步补充:
+  - `scripts/b3_tdx_signal_export.py` 现在输出 `white_line / yellow_line / trigger_type / trigger_low / trigger_high / trigger_close / prev_trigger_volume_ratio`
+  - 这些字段供 `bt-b3` 做结构止损和趋势线退出，不再要求 Rust 端重算 TDX 指标
+- 验证:
+  - `cargo check --manifest-path backtest-engine/Cargo.toml -p bt-b3` 通过
+  - `uv run python -m py_compile scripts/b3_tdx_signal_export.py` 通过
+- 注意:
+  - 当前只是第一版机制落地，还没有重导出新字段信号并跑真实 B3 波段结果
+  - 后续需要用新 `signal.parquet` 跑 `bt-b3`，再对比固定 6td 和 `manual_p2_k0p5_r0_6td`
+
+### [B3] Rust 波段回测 v0 试跑
+
+- 信号:
+  - 新导出: `artifacts/b3_tdx_signals/20260517_180746/signal.parquet`
+  - 统计: 原始 B3 触发 `13,171` 行；AMV bull + 流动性后 `2,026` 行；Top3 执行日信号 `1,166` 行
+  - 仍使用临时排序 `score = prev_trigger_ret_pct`，不是已验证 alpha 排序字段
+- 发现并修复:
+  - 第一版试跑发现 `TrailingStop` 激活后未触发时会挡住后续 `Weak/MaxHold` 检查
+  - 已修复 `backtest-engine/crates/b3/src/systems.rs`，并在报告中补充 exit reason 汇总
+- 最终参考结果:
+  - 报告: `artifacts/b3_tdx_signals/20260517_180746/backtests_v0_summary/report.json`
+  - 时间: `2021-01-01 ~ 2026-05-08`
+  - 初始资金 `50 万`，Top3，最多 3 仓，默认波段出场规则
+  - 净收益 `+18.49%`，毛收益 `+39.00%`，最大回撤 `43.39%`
+  - 交易 `191` 笔，胜率 `35.08%`，总成本 `10.25 万`
+- Exit reason 诊断:
+  - `TrailingStop`: `24` 笔，胜率 `100%`，平均 `+19.97%`，贡献 `+72.12 万`
+  - `FastFail`: `62` 笔，胜率 `0%`，平均 `-5.15%`，拖累 `-47.18 万`
+  - `BreakWhiteLine`: `62` 笔，胜率 `33.9%`，平均 `-0.87%`，拖累 `-9.57 万`
+  - `StructuralStop`: `8` 笔，平均 `-7.95%`，拖累 `-10.53 万`
+  - `Weak`: `30` 笔，平均约 `0%`，接近资金占用退出
+  - `MaxHoldDays`: 最大观察持仓已收敛到 `30td`
+- 当前判断:
+  - B3 波段 v0 有正收益，但仍弱于固定 `6td` B3 的 `+22.61% / DD 42.20%`，更远弱于 `manual_p2_k0p5_r0_6td`
+  - 真正赚钱来自少数走成波段的 `TrailingStop`；主要问题是大量早期失败和跌破白线退出
+  - 下一步不应先调止盈，而应先处理入场质量: 执行日开盘是否已跌破触发 K 低点/白线、候选排序字段是否有效、是否需要确认触发后不破结构再买
+
+### [B3] B1 `rw_dif_pct` 排序对照
+
+- 背景:
+  - 用户建议参考 `backtest-engine/crates/b1/config.toml` 的 `sort_field = "rw_dif_pct"`
+  - 已在 `scripts/b3_tdx_signal_export.py` 中复刻 B1 running weekly MACD 强度字段: `rw_dif_pct / rw_hist / rw_dif`
+  - `bt-b3` 已支持 `sort_field / sort_ascending`，可从 parquet 任意 f64 字段排序
+- 对照信号:
+  - `artifacts/b3_tdx_signals/20260517_184650/signal.parquet`
+  - 导出参数: `--sort-field rw_dif_pct`
+  - 候选数量不变: Top3 执行日信号 `1,166` 行，排序字段范围 `-7.29 ~ 16.21`
+- 波段回测:
+  - 报告: `artifacts/b3_tdx_signals/20260517_184650/backtests_rw_dif_pct/report.json`
+  - 净收益 `-28.32%`，毛收益 `-13.24%`，最大回撤 `56.31%`
+  - 交易 `197` 笔，胜率 `32.99%`
+- Exit reason:
+  - `TrailingStop`: `23` 笔，平均 `+14.95%`，贡献 `+37.31 万`
+  - `FastFail`: `62` 笔，平均 `-4.84%`，拖累 `-32.78 万`
+  - `BreakWhiteLine`: `67` 笔，平均 `-1.27%`，拖累 `-10.75 万`
+  - `StructuralStop`: `14` 笔，平均 `-8.40%`，拖累 `-14.34 万`
+- 当前判断:
+  - B1 的 `rw_dif_pct` 不能直接迁移为 B3 排序字段
+  - 它会偏向周线动能很强的票，但 B3 是“异动后确认接力”，更怕执行日接力失败和结构破位
+  - 已保留字段与配置能力，但默认导出排序恢复为 `prev_trigger_ret_pct`，`bt-b3` 默认 `sort_field = "score"`，避免误用失败口径
+
+### [B3] 候选排序字段诊断 lab
+
+- 新增:
+  - `scripts/b3_candidate_ranking_lab.py`
+  - Canvas: `b3-candidate-ranking-lab.canvas.tsx`
+- 输入:
+  - 候选文件: `artifacts/b3_tdx_signals/20260517_184650/raw_candidate_signals.csv`
+  - 输出: `artifacts/b3_candidate_ranking_lab/20260517_185254/summary.json`
+  - 标签: `T+1 open` 入场，观察 `3/6/10/20td` close/MFE/MAE
+  - 有效样本: `1,496` 行，`381` 个 signal days，回测口径从 `2021-01-01` 开始
+- 全部候选基准:
+  - `6td` 均值 `+1.02%`
+  - `10td` 均值 `+1.53%`
+  - `20td MFE` 均值 `+12.44%`
+  - `3td MAE` 均值 `-3.02%`
+  - 快速失败代理率 `39.24%`
+- 单字段 Top3 排序结论:
+  - 每日按单字段 Top3 都没有跑赢全部候选平均
+  - 最好的 `market_cap_100m` 升序 Top3 也只有 `6td +0.82%`，低于全部候选 `+1.02%`
+  - `prev_trigger_ret_pct` 降序 Top3 为 `+0.74%`，快速失败率升到 `46.62%`
+  - `rw_dif_pct` 降序 Top3 为 `+0.64%`，进一步确认 B1 周动能不适合直接当 B3 主排序
+- 过滤/分桶结论:
+  - `仅30日振幅Q2`: `6td +1.65%`，快速失败率 `32.62%`
+  - `仅B1周线红柱Q2`: `6td +1.64%`，快速失败率 `29.95%`
+  - `仅B1周线DIF最低25%`: `6td +1.56%`，快速失败率 `30.93%`
+  - `仅触发K涨幅低/中50%`: `6td +1.41%`，快速失败率 `29.24%`
+  - `剔除振幅/触发涨幅/白线距离最高25%`: `6td +1.32%`，快速失败率 `29.28%`
+- 当前判断:
+  - B3 的排序问题不是“找到一个越大越好的字段”
+  - 更像是要先剔除过热、距离过远、接力失败风险高的候选
+  - 下一步优先把 `drop_overheat_combo` 或 `drop_range_amp_q4` 接入信号导出后跑 Rust；前者覆盖 `871` 行且快速失败率从 `39.24%` 降到 `29.28%`，后者覆盖 `1,122` 行且规则更简单
+
+### [B3] 全量信号盈亏比与Top盈利票
+
+- 新增 Canvas:
+  - `b3-all-signal-payoff.canvas.tsx`
+- 输入:
+  - `artifacts/b3_candidate_ranking_lab/20260517_185254/candidate_labels.parquet`
+  - 口径: AMV bull + 流动性后的全部 B3 候选信号，`T+1 open` 入场
+  - 样本: `1,496` 行，`381` 个信号日，`2020-12-31 ~ 2026-04-27`
+- 全量信号盈亏比:
+  - `3td`: 平均收益 `+0.55%`，胜率 `48.13%`，平均盈亏比 `1.43`，利润因子 `1.36`
+  - `6td`: 平均收益 `+1.02%`，胜率 `49.87%`，平均盈利 `+6.12%`，平均亏损 `-4.08%`，平均盈亏比 `1.50`，利润因子 `1.50`
+  - `10td`: 平均收益 `+1.53%`，胜率 `51.28%`，平均盈亏比 `1.53`，利润因子 `1.63`
+  - `20td`: 平均收益 `+2.11%`，胜率 `49.11%`，平均盈亏比 `1.63`，利润因子 `1.58`
+- 6td Top10 盈利信号:
+  - `sh.601567` `2021-04-29 -> 2021-04-30`: `6td +69.41%`, `20td MFE +155.14%`
+  - `sz.300188` `2023-03-27 -> 2023-03-28`: `6td +48.10%`, `20td MFE +62.65%`
+  - `sh.688222` `2026-01-06 -> 2026-01-07`: `6td +44.29%`, `20td MFE +55.39%`
+  - `sz.002657` `2025-08-12 -> 2025-08-13`: `6td +41.28%`, `20td MFE +53.22%`
+  - `sz.002636` `2026-01-16 -> 2026-01-19`: `6td +39.03%`, `20td MFE +45.25%`
+- 当前判断:
+  - B3 全量信号不是完全没有 edge，但胜率接近五五开，主要靠少数大涨票拉开盈亏比
+  - Top盈利票多数是单次或少数事件贡献，说明 B3 更像事件型脉冲，不像稳定可反复交易的股票池 alpha
+  - 这进一步支持“B3 不值得作为主线深挖”，最多保留为事件型补充策略候选
+
+### [AMV] manual_p2_k0p5_r0 baseline rerun after price-limit fix
+
+- 背景:
+  - 修复 Rust `price_limit_pct` 支持 `sz./sh.` 前缀后，用户要求重跑核心基线 `manual_p2_k0p5_r0`
+  - 复用既有信号: `artifacts/amv_static_sleeve_signals/20260516_222301_manual_p2_k0p5_r0/signal.parquet`
+- 修正后 Rust 回测 (`bt-amv-topn`, `T+1 open`, Top3, no-stop):
+  - `1td`: 净收益 `-51.03%`, 毛收益 `+17.94%`, 最大回撤 `54.79%`, 交易 `835`, 胜率 `41.9%`
+  - `2td`: 净收益 `-37.33%`, 毛收益 `+17.82%`, 最大回撤 `43.96%`, 交易 `573`, 胜率 `41.0%`
+  - `3td`: 净收益 `+38.11%`, 毛收益 `+102.42%`, 最大回撤 `36.00%`, 交易 `439`, 胜率 `45.8%`
+  - `6td`: 净收益 `+168.01%`, 毛收益 `+225.39%`, 最大回撤 `14.97%`, 交易 `273`, 胜率 `51.6%`
+- 影响判断:
+  - 核心 `manual_p2_k0p5_r0_6td` 基线完全不变，仍是当前最强底座
+  - `1td/3td/6td` 与修复前一致
+  - `2td` 轻微变化: `-37.05% -> -37.33%`，不影响结论
+  - 涨停过滤仍为 `49` 行，说明该基线没有受到 QMT 代码前缀 bug 的实质影响
+  - 已同步更新 `static_sleeve_backtest_summary.csv` 和 `amv-static-sleeve-backtest.canvas.tsx` 中 manual_p2 2td 的轻微变化
+
 ## 2026-05-10
+
+### [AMV] Bull Pool Listwise LTR v0
+
+> 历史探索记录: 本节及后续 LTR 阶段性“下一步”已被后续 Rust 回测和执行口径标签校准替代，direct LTR Top3 当前状态以 `project-status.md` / `experiments/archive-index.md` 为准。
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - 新增 `scripts/amv_bull_pool_listwise_ranker_lab.py`
+- **实验目的**:
+  - 按 `Empirical Asset Pricing via Learning-to-Rank` 的思路, 在 AMV bull 宽池内直接优化横截面 topN 排序
+  - 验证模型是否能学习 `KLEN/KMID2/动量` 在不同年份和 AMV bull 阶段的有效性切换
+- **实现口径**:
+  - 数据起点: `2019-01-01`
+  - 标签: `fwd_ret_6d`, 每日横截面前 `100` 名赋递减 relevance, 其余为 `0`
+  - 模型: `LightGBM LGBMRanker`, `objective=lambdarank`, `metric=ndcg`, `label_gain` 使用线性增益
+  - 训练/验证/测试: 年度 expanding walk-forward
+    - `2019-2021 -> valid 2022 -> test 2023`
+    - `2019-2022 -> valid 2023 -> test 2024`
+    - `2019-2023 -> valid 2024 -> test 2025`
+    - `2019-2024 -> valid 2025 -> test 2026`
+  - 特征: 12 个个股截面 rank 特征 + AMV bull 阶段 / AMV 涨幅 / 宽池赚钱效应状态特征, 全程使用 Polars 构造数据
+- **产物**:
+  - `artifacts/amv_bull_pool_listwise_ranker/20260516_104849/summary.json`
+  - `fold_metrics.csv`, `daily_metrics.csv`, `ltr_topn_selected.csv`, `feature_importance.csv`
+  - pool: `827,388` 行, `2019-01-29 -> 2026-04-27`, `808` 个 AMV bull 交易日, `2,397` 只股票
+- **默认 v0 结果 (`6d/top3`)**:
+  - LTR 平均 top3 edge: `+1.153pp`, Precision@3 `0.040`
+  - 年度 edge: 2023 `+0.817pp`, 2024 `+0.118pp`, 2025 `+1.538pp`, 2026 `+2.140pp`
+  - 对照: `KLEN` 平均 edge `+1.818pp`, `5日动量` `+1.373pp`, `KMID2` `+1.242pp`, 当前组合 `P2/K0.5/R0` `+0.665pp`
+  - 重要特征: `rank_ret_20d`, `rank_atr_14_pct`, `rank_ret_5d`, `pool_candidate_count_scaled`, `rank_KLEN`, `rank_close_to_high_20d`
+- **结论**:
+  - LTR v0 已经能在 2025/2026 做出正 edge, 说明模型确实捕捉到一部分因子切换
+  - 但 v0 未超过最强单因子 `KLEN`, 暂时不能直接替代当前规则进入 Rust 回测
+  - 下一步应做 LTR 归因和约束实验: 去掉风险类特征、按年份看 topN 选股重合度、比较 `relevance_top_k` 与 top3/top5 标签, 再决定是否进入真实交易回测
+
+### [AMV] Bull Pool Listwise LTR 特征消融
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `scripts/amv_bull_pool_listwise_ranker_lab.py`
+  - 新增 Canvas: `amv-ltr-variant-ablation.canvas.tsx`
+  - 归档 Canvas: `reports/canvases/amv-ltr-variant-ablation.canvas.tsx`
+- **脚本改动**:
+  - 新增 `--variants`, 支持在同一份 dataset 上训练多个 LTR 特征组
+  - 默认 variants: `full`, `no_risk`, `stock_only`, `core_state`, `kbar_momentum_state`, `momentum_state`
+  - 输出中新增 `feature_variant`, `feature_count`, 分 variant 的 `feature_importance.csv`, 以及 `ltr_topn_selected.csv`
+- **正式产物**:
+  - `artifacts/amv_bull_pool_listwise_ranker/20260516_105316/summary.json`
+  - pool 不变: `827,388` 行, `2019-01-29 -> 2026-04-27`, `808` 个 AMV bull 交易日
+- **平均 edge 排名 (`6d/top3`)**:
+  - `ltr_no_risk`: `+2.523pp`, Precision@3 `0.045`
+  - `ltr_kbar_momentum_state`: `+2.386pp`, Precision@3 `0.036`
+  - `ltr_core_state`: `+1.880pp`, Precision@3 `0.036`
+  - `baseline_klen`: `+1.818pp`, Precision@3 `0.024`
+  - `baseline_ret_5d`: `+1.373pp`, Precision@3 `0.049`
+  - `ltr_full`: `+1.153pp`, Precision@3 `0.040`
+- **分年重点**:
+  - `ltr_no_risk`: 2023 `-0.292pp`, 2024 `+2.731pp`, 2025 `+1.292pp`, 2026 `+6.362pp`
+  - `ltr_kbar_momentum_state`: 2023 `-0.186pp`, 2024 `+1.665pp`, 2025 `+1.224pp`, 2026 `+6.842pp`
+  - `ltr_core_state`: 2023 `+0.378pp`, 2024 `+3.268pp`, 2025 `-0.321pp`, 2026 `+4.196pp`
+  - `baseline_klen`: 2023 `+0.469pp`, 2024 `+2.438pp`, 2025 `+1.560pp`, 2026 `+2.804pp`
+- **结论更新**:
+  - LTR 方向从“能学到但不够强”升级为“有候选可以继续推进”: `no_risk` 与 `kbar_momentum_state` 已超过最强单因子 `KLEN`
+  - `full` 明显弱于 `no_risk`, 说明当前 `atr_14_pct / panic_vol_ratio_20d` 这类风险特征在 listwise 训练中更像噪声或错误约束
+  - 单纯 `momentum_state` 不稳, 说明 2026 的动量强并不代表可以放弃 K线结构; 更可靠的是 `KLEN/KMID2 + 动量 + AMV 状态`
+  - 暂不直接接 Rust; 下一步先做 `ltr_no_risk` / `ltr_kbar_momentum_state` 的 topN 选股重合度、2026 大贡献拆解和入场后 MFE/MAE 路径归因
+
+### [AMV] Bull Pool LTR 市场状态特征补齐
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `scripts/amv_bull_pool_ranker_lab.py`
+  - `scripts/amv_bull_pool_listwise_ranker_lab.py`
+  - 新增 Canvas: `amv-ltr-state-feature-completion.canvas.tsx`
+  - 归档 Canvas: `reports/canvases/amv-ltr-state-feature-completion.canvas.tsx`
+- **用户提醒的问题**:
+  - 之前讨论过的状态特征里, v0/v1 已使用:
+    - `AMV bull 持续天数`: `bull_day_scaled`
+    - `AMV ret_1d / ret_2d`: `amv_ret_1d_scaled / amv_ret_2d_scaled`
+    - `AMV bull 初期 / 中期 / 后期`: `bull_phase_code`
+    - `宽池近 5 日平均收益`: `trail_pool_ret_5d`
+    - `宽池上涨比例`: `pool_up_ratio_5d`
+  - 但缺少两个明确状态量:
+    - `宽池 topN 动量强度`
+    - `宽池成交额变化`
+- **实现补齐**:
+  - `scripts/amv_bull_pool_ranker_lab.py` 的 `build_dataset()` 现在保留 `amount`, `amount_ma5`, `amount_ma20`
+  - `scripts/amv_bull_pool_listwise_ranker_lab.py` 新增:
+    - `--state-top-n`, 默认 `20`
+    - `pool_topn_ret_5d`: 宽池中 `ret_5d` 前 `state_top_n` 的均值
+    - `pool_topn_ret_20d`: 宽池中 `ret_5d` 前 `state_top_n` 的 `ret_20d` 均值
+    - `pool_amount_ma5_vs_20`: 宽池成交额 `sum(amount_ma5) / sum(amount_ma20) - 1`
+- **正式产物**:
+  - `artifacts/amv_bull_pool_listwise_ranker/20260516_111818/summary.json`
+  - 只重跑核心候选: `no_risk`, `kbar_momentum_state`
+- **补齐后结果 (`6d/top3`, state_top_n=20)**:
+  - `ltr_no_risk`: 平均 edge `+2.304pp`, Precision@3 `0.051`
+    - 2023 `+0.054pp`, 2024 `+2.821pp`, 2025 `+2.872pp`, 2026 `+3.471pp`
+  - `ltr_kbar_momentum_state`: 平均 edge `+1.953pp`, Precision@3 `0.041`
+    - 2023 `+0.411pp`, 2024 `+0.910pp`, 2025 `+2.186pp`, 2026 `+4.307pp`
+  - 对照 `baseline_klen`: 平均 edge `+1.818pp`
+- **重要性观察**:
+  - `pool_topn_ret_20d` 与 `pool_amount_ma5_vs_20` 在两个候选里都有实际增益贡献:
+    - `no_risk`: `pool_topn_ret_20d` gain `412`, `pool_amount_ma5_vs_20` gain `291`
+    - `kbar_momentum_state`: `pool_topn_ret_20d` gain `435`, `pool_amount_ma5_vs_20` gain `330`
+- **结论更新**:
+  - 之前版本不是完全没用市场状态, 但确实漏掉了“topN 动量强度”和“宽池成交额变化”这两个明确状态维度
+  - 补齐后 `no_risk` 仍优于 `KLEN`, 且 2023 从负 edge 转为微正, 2025 明显增强
+  - 但补齐后 2026 极端 edge 回落, 说明新增状态更像稳定器, 不是纯收益放大器
+  - 下一步应比较补齐前后 `ltr_no_risk` 的选股重合度和 2026 贡献来源, 判断回落是减少偶然暴露, 还是错过真正强势票
+
+### [AMV] LTR 选股重合度与 2026 贡献归因
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `scripts/amv_bull_pool_listwise_ranker_lab.py`
+  - 新增 `scripts/amv_ltr_selection_analysis.py`
+  - 新增 Canvas: `amv-ltr-selection-attribution.canvas.tsx`
+  - 归档 Canvas: `reports/canvases/amv-ltr-selection-attribution.canvas.tsx`
+- **实现说明**:
+  - `ltr_topn_selected.csv` 新增 `fwd_mae_6d`, 便于做入场后路径归因
+  - 重跑状态补齐后的核心候选:
+    - `artifacts/amv_bull_pool_listwise_ranker/20260516_112444/summary.json`
+  - 归因脚本产物:
+    - `artifacts/amv_bull_pool_listwise_ranker/20260516_112444/selection_analysis_20260516_112604/summary.json`
+    - 输出 `variant_summary`, `variant_year_summary`, `contribution_2026`, `top_worst_2026`, `top_code_contributors_2026`, `overlap_summary`, `before_after_*`
+- **2026 路径归因**:
+  - `ltr_kbar_momentum_state`: 单笔均值 `+5.36%`, 中位数 `+3.67%`, 胜率 `56.6%`, Hit15 `61.6%`, 平均 MFE `+19.49%`, 平均 MAE `-7.68%`
+  - `ltr_no_risk`: 单笔均值 `+4.52%`, 中位数 `+0.76%`, 胜率 `53.5%`, Hit15 `57.6%`, 平均 MFE `+18.53%`, 平均 MAE `-7.99%`
+- **贡献集中度**:
+  - `ltr_kbar_momentum_state`: Top10 选股贡献占正收益 `43.3%`, 占净收益 `88.1%`, Worst10 合计 `-248.6pp`
+  - `ltr_no_risk`: Top10 选股贡献占正收益 `46.3%`, 占净收益 `102.6%`, Worst10 合计 `-224.0pp`
+  - 代码级贡献显示 `sz.002931` 是 2026 核心来源:
+    - `kbar_momentum_state`: 入选 `6` 次, 累计贡献 `+239.5pp`, 约占净收益 `45%`
+    - `no_risk`: 入选 `5` 次, 累计贡献 `+232.5pp`, 约占净收益 `52%`
+- **重合度**:
+  - `no_risk` vs `kbar_momentum_state` 日均重合:
+    - 2023: `0.88/3`
+    - 2024: `1.42/3`
+    - 2025: `1.29/3`
+    - 2026: `1.42/3`
+  - 状态补齐前后 `no_risk` 日均重合:
+    - 2023: `0.88/3`, 平均收益差 `+0.35pp`
+    - 2024: `1.17/3`, 平均收益差 `+0.09pp`
+    - 2025: `1.62/3`, 平均收益差 `+1.58pp`
+    - 2026: `1.18/3`, 平均收益差 `-2.89pp`
+- **结论更新**:
+  - LTR 候选确实有 alpha, 但 2026 的强表现仍明显依赖少数股票重复入选
+  - `kbar_momentum_state` 的 2026 路径优于 `no_risk`（均值/中位数/Hit15/MFE 都更高, MAE 略小）, 但同样存在 `sz.002931` 集中贡献
+  - 状态补齐让 2023/2025 更稳, 但牺牲了 2026 的极端收益, 更像降低偶然暴露而非单纯增强
+  - 接 Rust 前应先做稳健性测试: 去掉最大贡献股票、限制同一股票重复入选次数、或按单票贡献上限做敏感性分析
+
+### [AMV] LTR 新增状态特征精确 A/B
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `scripts/amv_bull_pool_listwise_ranker_lab.py`
+- **问题**:
+  - 用户追问 `宽池 topN 动量强度` 与 `宽池成交额变化` 是否应该保留
+  - 需要在同一版代码、同一份数据里做精确 A/B, 避免只用历史 artifact 做近似比较
+- **实现**:
+  - 新增 `NEW_STATE_FEATURES`:
+    - `pool_topn_ret_5d`
+    - `pool_topn_ret_20d`
+    - `pool_amount_ma5_vs_20`
+  - 新增 `OLD_STATE_FEATURES`
+  - 新增 variants:
+    - `full_old_state`
+    - `no_risk_old_state`
+    - `kbar_momentum_old_state`
+- **产物**:
+  - `artifacts/amv_bull_pool_listwise_ranker/20260516_112948/summary.json`
+  - 运行 variants: `no_risk`, `no_risk_old_state`, `kbar_momentum_state`, `kbar_momentum_old_state`
+- **结果 (`6d/top3`)**:
+  - `ltr_no_risk_old_state`: 平均 edge `+2.523pp`, Precision@3 `0.045`
+    - 2023 `-0.292pp`, 2024 `+2.731pp`, 2025 `+1.292pp`, 2026 `+6.362pp`
+  - `ltr_no_risk`: 平均 edge `+2.304pp`, Precision@3 `0.051`
+    - 2023 `+0.054pp`, 2024 `+2.821pp`, 2025 `+2.872pp`, 2026 `+3.471pp`
+  - `ltr_kbar_momentum_old_state`: 平均 edge `+2.386pp`, Precision@3 `0.036`
+    - 2023 `-0.186pp`, 2024 `+1.665pp`, 2025 `+1.224pp`, 2026 `+6.842pp`
+  - `ltr_kbar_momentum_state`: 平均 edge `+1.953pp`, Precision@3 `0.041`
+    - 2023 `+0.411pp`, 2024 `+0.910pp`, 2025 `+2.186pp`, 2026 `+4.307pp`
+- **结论**:
+  - 如果目标是最大化平均 edge / 2026 爆发力, 去掉新增状态特征更强
+  - 如果目标是提升年份稳定性和 Precision@3, 保留新增状态特征更好
+  - 当前建议: 不删除字段; 将 `old_state` 作为收益上限候选, 将完整状态版作为稳健候选, 后续稳健性测试同时比较两组
+  - 接 Rust 前的下一步: 对 `no_risk_old_state`, `kbar_momentum_old_state`, `no_risk`, `kbar_momentum_state` 同时做去最大贡献股票 / 限制同票重复 / 单票贡献上限敏感性
+
+### [AMV] LTR 四候选稳健性测试
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - `scripts/amv_ltr_selection_analysis.py`
+  - 新增 Canvas: `amv-ltr-robustness-test.canvas.tsx`
+  - 归档 Canvas: `reports/canvases/amv-ltr-robustness-test.canvas.tsx`
+- **产物**:
+  - `artifacts/amv_bull_pool_listwise_ranker/20260516_112948/selection_analysis_20260516_113241/summary.json`
+  - 新增 `robustness_2026.csv`
+- **稳健性口径**:
+  - `remove_top_code`: 删除当年累计贡献最高股票后重算均值
+  - `max_repeat`: 同一股票每年最多保留 `3` 次入选
+  - `single_pick_cap`: 单笔 `fwd_ret_6d` 上限截断到 `30%`
+  - `code_cap`: 单股票年度累计贡献上限封顶到 `100pp`
+- **2026 稳健性结果**:
+  - `kbar_momentum_old_state`: 原始 `+7.89%`, 去最大票 `+4.50%`, 限制重复 `+6.57%`, 单笔截断 `+5.49%`, 单票封顶 `+5.15%`
+  - `no_risk_old_state`: 原始 `+7.41%`, 去最大票 `+3.98%`, 限制重复 `+6.11%`, 单笔截断 `+4.91%`, 单票封顶 `+4.67%`
+  - `kbar_momentum_state`: 原始 `+5.36%`, 去最大票 `+3.13%`, 限制重复 `+5.03%`, 单笔截断 `+3.67%`, 单票封顶 `+3.95%`
+  - `no_risk`: 原始 `+4.52%`, 去最大票 `+2.29%`, 限制重复 `+4.19%`, 单笔截断 `+2.89%`, 单票封顶 `+3.18%`
+- **集中度**:
+  - 四个候选的最大贡献股票均为 `sz.002931`
+  - `kbar_momentum_old_state`: `sz.002931` 入选 `8` 次, 贡献 `+371.6pp`, 占净收益 `47.6%`
+  - `no_risk_old_state`: `sz.002931` 入选 `8` 次, 贡献 `+371.6pp`, 占净收益 `50.6%`
+  - 完整状态版通过新增状态特征减少了对 `sz.002931` 的入选次数, 但并未在稳健性口径下反超
+- **结论更新**:
+  - `old_state` 不只是 2026 爆发更强, 在去最大票、限制重复、收益截断和单票封顶后仍然领先
+  - 当前主候选应切到 `kbar_momentum_old_state` 与 `no_risk_old_state`
+  - 新增状态特征不删除, 但暂不作为主模型输入; 更适合后续作为 gating / 二次风控条件重新评估
+  - 接 Rust 前仍建议加入候选层风控: 同票重复约束、单票贡献监控、以及 top/worst 入场路径复盘
+
+### [AMV] LTR 主候选信号导出
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - 新增 `scripts/amv_ltr_signal_export.py`
+- **目的**:
+  - 将 LTR 研究结果沉淀为 `bt-amv-topn` 可消费的 `signal.parquet + signal.meta.json`
+  - Rust 侧不实现模型逻辑, 只消费 Python 侧已经 OOS 训练并导出的分数/排名
+- **实现口径**:
+  - 输入: `artifacts/amv_bull_pool_listwise_ranker/20260516_112948/ltr_topn_selected.csv`
+  - 输出列对齐 `bt-amv-topn`:
+    - `date/code/open_adj/high_adj/low_adj/close_adj/pre_close_adj`
+    - `is_bull_regime/amv_mechanical_regime`
+    - `score/rank/is_signal`
+  - 信号已做 T+1 shift: `signal_date` 为模型选股日, `date` 为次一交易日执行日
+  - 导出层支持:
+    - `--variants`
+    - `--combine-mode separate|union|intersection`
+    - `--max-code-repeats`, 当前主候选使用 `3`
+  - `separate` 模式已限制只能传入一个 variant, 避免同一 `date/code` 因多个 variant 重复写入 parquet
+- **已导出 artifact**:
+  - `artifacts/amv_ltr_signals/20260516_113742_separate_kbar_momentum_old_state/signal.meta.json`
+    - `signal.parquet`: `7,531,367` 行, `990` 条 T+1 信号, `368` 个执行日
+    - label 侧同票最多 3 次后: 全样本年度均值 `+2.85%`; 2026 `+6.57%`, Hit15 `62.64%`, MFE `+20.54%`, MAE `-7.12%`
+    - T+1 执行日落入非 bull regime 的信号: `48` 条, 后续 Rust 若 `require_bull_regime=true` 会在执行层过滤
+  - `artifacts/amv_ltr_signals/20260516_113806_separate_no_risk_old_state/signal.meta.json`
+    - `signal.parquet`: `7,531,367` 行, `918` 条 T+1 信号, `364` 个执行日
+    - label 侧同票最多 3 次后: 全样本年度均值 `+3.15%`; 2026 `+6.11%`, Hit15 `53.26%`, MFE `+19.34%`, MAE `-7.05%`
+    - T+1 执行日落入非 bull regime 的信号: `39` 条
+- **校验**:
+  - 已用 Polars 读取两个 `signal.parquet` 核验行数、信号数、日期范围和 `rank` 类型
+  - `uv run ruff check scripts/amv_ltr_signal_export.py` 通过
+- **下一步**:
+  - 用 `bt-amv-topn` 对上述两个 signal artifact 跑真实回测
+  - 回测配置建议沿用当前 `6td + no stop`, 并保留 `require_bull_regime=true` 作为执行层二次确认
+
+### [AMV] LTR 主候选 Rust 真实回测首轮
+
+- 已更新:
+  - 本文件 (本条)
+  - `project-status.md`
+  - 新增 `backtest-engine/crates/amv-topn/config_6td_no_stop.toml`
+  - 新增 Canvas: `amv-ltr-rust-backtest.canvas.tsx`
+  - 归档 Canvas: `reports/canvases/amv-ltr-rust-backtest.canvas.tsx`
+- **回测口径**:
+  - 引擎: `bt-amv-topn`
+  - 配置: `6td + no stop`
+  - 执行: T+1 open buy, 6 trading days close sell
+  - 执行层仍保留:
+    - `require_bull_regime=true`
+    - 涨停不可买
+    - 跌停不可卖
+    - 交易成本: commission `0.025%`, stamp duty `0.1%`, slippage `0.1%`
+- **回测产物**:
+  - `kbar_momentum_old_state`:
+    - signal: `artifacts/amv_ltr_signals/20260516_113742_separate_kbar_momentum_old_state/signal.meta.json`
+    - report: `artifacts/amv_ltr_signals/20260516_113742_separate_kbar_momentum_old_state/backtests/6td_no_stop_20260516_114038_751/report.json`
+    - analysis: `artifacts/amv_ltr_signals/20260516_113742_separate_kbar_momentum_old_state/backtests/analysis_20260516_114132/summary.json`
+  - `no_risk_old_state`:
+    - signal: `artifacts/amv_ltr_signals/20260516_113806_separate_no_risk_old_state/signal.meta.json`
+    - report: `artifacts/amv_ltr_signals/20260516_113806_separate_no_risk_old_state/backtests/6td_no_stop_20260516_114054_426/report.json`
+    - analysis: `artifacts/amv_ltr_signals/20260516_113806_separate_no_risk_old_state/backtests/analysis_20260516_114133/summary.json`
+- **真实回测结果**:
+  - `kbar_momentum_old_state`: Total Return `-66.97%`, Gross `-55.36%`, MaxDD `74.93%`, Trades `166`, WinRate `43.37%`
+  - `no_risk_old_state`: Total Return `-0.01%`, Gross `+20.55%`, MaxDD `52.93%`, Trades `165`, WinRate `43.03%`
+  - 当前规则基线 `6td + no stop`: Total Return `+144.02%`, Gross `+195.18%`, MaxDD `14.71%`, Trades `264`, WinRate `52.27%`
+- **年度路径**:
+  - `kbar_momentum_old_state`: 2023 `-37.97%`, 2024 `-35.95%`, 2025 `-7.44%`, 2026 YTD `-9.62%`
+  - `no_risk_old_state`: 2023 `+1.02%`, 2024 `+47.51%`, 2025 `-27.52%`, 2026 YTD `-7.63%`
+- **标签兑现诊断**:
+  - 原 LTR 标签是 signal-date close-to-close `fwd_ret_6d`
+  - 真实执行是 next-day open buy, 6td close sell
+  - 将样本改成“执行日 open -> h 日 close”后, edge 基本塌缩:
+    - `kbar`: 1td 全样本均值 `+0.16%`, 6td `+0.13%`; 2026 1td `+2.16%`, 6td `-0.01%`
+    - `no_risk`: 1td 全样本均值 `+0.23%`, 6td `-0.61%`; 2026 1td `+2.22%`, 6td `-1.76%`
+  - LTR 当前学到的更像“信号日收盘后次日短线/冲高”而不是可持有 6td 的执行口径 alpha
+- **结论更新**:
+  - 当前 `6d close-to-close` LTR 不能直接用于 Rust 回测
+  - 问题不是 Rust 接入本身, 而是训练标签与真实执行口径错配
+  - 下一步应重做 LTR 标签:
+    - label 改成 `T+1 open -> T+N close`
+    - 训练样本中加入“次日涨停不可买”过滤
+    - 优先测试 `1td/2td/3td` 执行口径标签, 而不是继续沿用当前 `6d close-to-close`
+- **Rotation same-day close 理论上限诊断**:
+  - 目的: 检查当前 LTR 如果改用 Rotation 的“当日 close 成交”口径是否存在明显上限惊喜
+  - 临时产物: `artifacts/amv_ltr_rotation_theory/20260516_135751/`
+  - 生成方式: 用已导出的 LTR signal 反向回到 `signal_date`, 不做 T+1 shift; 非 top3 股票设为 `score=0/rank=9999/is_top_n=false`
+  - 口径 A: `same-day close + rank-drop rotation + no stop`
+    - config: `rotation_theory_top3_close.toml`
+    - `kbar_momentum_old_state`: Total Return `-67.90%`, Gross `-21.46%`, MaxDD `76.03%`, Trades `551`
+    - `no_risk_old_state`: Total Return `-52.17%`, Gross `-16.16%`, MaxDD `58.74%`, Trades `370`
+    - 解读: 当前 LTR 是 6d 标签, strict rank-drop 近似变成 1 日高换手, 成本与噪音很重
+  - 口径 B: `same-day close + no rank-drop + max_hold_days=10 calendar + no stop`
+    - config: `rotation_theory_top3_close_hold10_no_rankdrop.toml`
+    - `kbar_momentum_old_state`: Total Return `-48.88%`, Gross `-34.37%`, MaxDD `69.01%`, Trades `158`
+    - `no_risk_old_state`: Total Return `-6.99%`, Gross `+10.91%`, MaxDD `44.64%`, Trades `145`
+    - 解读: `no_risk` 在 same-day close + hold10 的毛收益为正, 但扣成本后仍为负, 且远弱于规则基线; `kbar` 无理论上限惊喜
+  - 结论: 直接复用当前 Rotation close 口径不能挽救这版 LTR; 最大问题仍然是训练标签/可交易约束与执行口径不匹配, 尤其涨停不可买和高开兑现损失
+
+### [AMV] LTR 执行口径标签校准
+
+- 已更新:
+  - `scripts/amv_bull_pool_ranker_lab.py`
+  - `scripts/amv_bull_pool_listwise_ranker_lab.py`
+  - 本文件 (本条)
+  - `project-status.md`
+- **实现口径**:
+  - 新增 `--label-mode next_open_to_close`
+  - 新增 `--execution-lag-days` (默认 `1`)
+  - 新增 `--exclude-limit-up-entry`
+  - 新增 `--price-limit-tolerance` (默认 `0.001`)
+  - 执行标签定义为: `signal_date + 1td open` 买入, `execution_lag_days + horizon` 对应交易日 close 卖出
+  - MFE / MAE 使用执行入场 open 到持有窗口内 high / low
+  - 次日涨停不可买样本可在训练集和评估集统一剔除
+- **重要修正**:
+  - 初版实现曾在已过滤 AMV bull pool 后再做 `shift`, 会跳过非候选交易日, 导致执行标签被高估
+  - 该错误结果已作废:
+    - `artifacts/amv_bull_pool_listwise_ranker/20260516_141014`
+    - `artifacts/amv_bull_pool_listwise_ranker/20260516_141041`
+    - `artifacts/amv_bull_pool_listwise_ranker/20260516_141110`
+  - 正确实现已移动到底层 `build_dataset()`: 在完整日线序列上先计算未来 open/high/low/close/pre_close, 再过滤 AMV bull pool / 市值 / 成交额
+- **正式修正后实验**:
+  - 公共参数:
+    - `--label-mode next_open_to_close`
+    - `--exclude-limit-up-entry`
+    - `--variants no_risk_old_state,kbar_momentum_old_state`
+  - `1td` run: `artifacts/amv_bull_pool_listwise_ranker/20260516_141305`
+    - `baseline_ret_5d`: avg edge `+0.662pp`, avg mean `+0.924%`
+    - `ltr_kbar_momentum_old_state`: avg edge `+0.571pp`, avg mean `+0.833%`
+    - `ltr_no_risk_old_state`: avg edge `+0.518pp`, avg mean `+0.780%`
+  - `2td` run: `artifacts/amv_bull_pool_listwise_ranker/20260516_141334`
+    - `baseline_ret_5d`: avg edge `+0.686pp`, avg mean `+1.075%`
+    - `ltr_kbar_momentum_old_state`: avg edge `+0.454pp`, avg mean `+0.842%`
+    - `ltr_no_risk_old_state`: avg edge `+0.446pp`, avg mean `+0.835%`
+  - `3td` run: `artifacts/amv_bull_pool_listwise_ranker/20260516_141402`
+    - `baseline_ret_5d`: avg edge `+0.660pp`, avg mean `+1.146%`
+    - `ltr_no_risk_old_state`: avg edge `+0.261pp`, avg mean `+0.747%`
+    - `ltr_kbar_momentum_old_state`: avg edge `+0.259pp`, avg mean `+0.745%`
+- **结论更新**:
+  - 执行标签校准后, 当前两个 old_state LTR 变体没有超过简单 `ret_5d` 基线
+  - 原先 LTR 的高 edge 主要来自不可交易 / 错位标签, 不是稳定可执行 alpha
+  - 短线执行口径下, `ret_5d` 本身是更强的候选方向; 后续更应该围绕 `ret_5d` 做执行层 Rust 回测、风控和组合约束, 而不是继续强化当前 LTR old_state
+
+### [AMV] Regime-aware 因子袖子切换实验
+
+- 已更新:
+  - 新增 `scripts/amv_bull_pool_regime_sleeve_lab.py`
+  - 新增 Canvas: `amv-regime-sleeve-lab.canvas.tsx`
+  - 归档 Canvas: `reports/canvases/amv-regime-sleeve-lab.canvas.tsx`
+  - 本文件 (本条)
+  - `project-status.md`
+- **实验目的**:
+  - 不再让 LTR 直接从全股票池选 Top3
+  - 改为评估“因子袖子”是否存在可切换空间:
+    - `ret_5d`
+    - `ret_20d`
+    - `klen`
+    - `kmid2`
+    - `kbar`
+    - `kbar_momentum`
+    - `manual_p2_k0p5_r0`
+    - `manual_p3_k0p5_r0`
+  - 用执行口径标签: `T+1 open -> T+N close`, 并剔除次日涨停不可买样本
+  - 对比:
+    - 静态单袖子
+    - 每日 oracle (事后每天选最佳袖子, 仅看上限)
+    - `state_classifier` (只用旧状态特征预测当天该选哪个袖子)
+    - `train_best_sleeve` (训练期/验证期平均最优袖子)
+- **产物**:
+  - `1td`: `artifacts/amv_bull_pool_regime_sleeve/20260516_142833`
+  - `2td`: `artifacts/amv_bull_pool_regime_sleeve/20260516_142854`
+  - `3td`: `artifacts/amv_bull_pool_regime_sleeve/20260516_142915`
+- **核心结果**:
+  - `1td`:
+    - `daily_oracle`: avg edge `+5.138pp`
+    - `static_ret_5d`: `+0.662pp`
+    - `static_ret_20d`: `+0.593pp`
+    - `state_classifier`: `+0.538pp`
+  - `2td`:
+    - `daily_oracle`: avg edge `+6.138pp`
+    - `static_ret_20d`: `+0.705pp`
+    - `static_ret_5d`: `+0.686pp`
+    - `state_classifier`: `+0.242pp`
+  - `3td`:
+    - `daily_oracle`: avg edge `+6.991pp`
+    - `static_ret_5d`: `+0.660pp`
+    - `static_ret_20d`: `+0.483pp`
+    - `state_classifier`: `+0.091pp`
+- **年度拆解**:
+  - oracle 每年都强:
+    - `1td`: 2023 `+4.441pp`, 2024 `+4.899pp`, 2025 `+5.371pp`, 2026 `+5.842pp`
+    - `2td`: 2023 `+5.164pp`, 2024 `+6.156pp`, 2025 `+6.019pp`, 2026 `+7.214pp`
+    - `3td`: 2023 `+5.820pp`, 2024 `+7.257pp`, 2025 `+7.387pp`, 2026 `+7.500pp`
+  - `state_classifier` 不稳:
+    - `1td`: 2023 `+1.381pp`, 2024 `-0.015pp`, 2025 `+0.494pp`, 2026 `+0.291pp`
+    - `2td`: 2023 `+0.423pp`, 2024 `-0.779pp`, 2025 `+0.637pp`, 2026 `+0.689pp`
+    - `3td`: 2023 `+0.460pp`, 2024 `-0.827pp`, 2025 `+0.123pp`, 2026 `+0.609pp`
+- **模型选择分布**:
+  - `state_classifier` 基本只在 `ret_5d` / `ret_20d` 间切换:
+    - `1td`: `ret_20d` 361 天, `ret_5d` 13 天
+    - `2td`: `ret_20d` 200 天, `ret_5d` 173 天
+    - `3td`: `ret_5d` 322 天, `ret_20d` 50 天
+- **结论更新**:
+  - “因子袖子切换”存在很高事后上限, 所以方向没有错
+  - 当前状态特征 + 简单 classifier 没学到可交易切换, 不能直接进入 Rust 回测
+  - 下一步不应急着做动态权重实盘信号, 而应先研究 oracle 可预测性:
+    - oracle 当天选择了哪些袖子
+    - oracle 选择是否能被 AMV 阶段、宽池赚钱效应、动量强度、涨停/高开风险解释
+    - 如果可解释, 再做规则化 gating; 如果不可解释, 切换更像噪声
+
+### [AMV] Oracle 袖子 Rust 上限回测
+
+- 已更新:
+  - 新增 `scripts/amv_oracle_sleeve_signal_export.py`
+  - 新增 `backtest-engine/crates/amv-topn/config_1td_no_stop.toml`
+  - 新增 `backtest-engine/crates/amv-topn/config_2td_no_stop.toml`
+  - 新增 `backtest-engine/crates/amv-topn/config_3td_no_stop.toml`
+  - 新增 Canvas: `amv-oracle-sleeve-rust-backtest.canvas.tsx`
+  - 归档 Canvas: `reports/canvases/amv-oracle-sleeve-rust-backtest.canvas.tsx`
+  - 本文件 (本条)
+  - `project-status.md`
+- **重要警告**:
+  - oracle 是“事后诸葛亮”, 使用未来收益选择当天最优 sleeve
+  - 该回测只表示可交易约束下的理论天花板, 不能作为实盘策略
+- **信号产物**:
+  - `1td`: `artifacts/amv_oracle_sleeve_signals/20260516_143515_oracle_1td/signal.meta.json`
+  - `2td`: `artifacts/amv_oracle_sleeve_signals/20260516_143558_oracle_2td/signal.meta.json`
+  - `3td`: `artifacts/amv_oracle_sleeve_signals/20260516_143629_oracle_3td/signal.meta.json`
+- **Rust 回测产物**:
+  - `1td`: `artifacts/amv_oracle_sleeve_signals/20260516_143515_oracle_1td/backtests/1td_no_stop_20260516_143827_653/report.json`
+  - `2td`: `artifacts/amv_oracle_sleeve_signals/20260516_143558_oracle_2td/backtests/2td_no_stop_20260516_143832_676/report.json`
+  - `3td`: `artifacts/amv_oracle_sleeve_signals/20260516_143629_oracle_3td/backtests/3td_no_stop_20260516_143837_004/report.json`
+- **Rust 真实约束口径**:
+  - T+1 open 买入
+  - `max_hold_trading_days = 1/2/3`
+  - no stop
+  - `require_bull_regime=true`
+  - 涨停不可买 / 跌停不可卖
+  - 成本: commission `0.025%`, stamp `0.1%`, slippage `0.1%`
+- **回测结果**:
+  - `1td oracle`:
+    - Total Return `+15,806,636%`
+    - Gross Return `+16,785,773%`
+    - MaxDD `31.76%`
+    - Trades `825`
+    - WinRate `73.58%`
+    - Avg trade PnL `+4.59%`
+  - `2td oracle`:
+    - Total Return `+891,251%`
+    - Gross Return `+945,000%`
+    - MaxDD `37.37%`
+    - Trades `571`
+    - WinRate `70.75%`
+    - Avg trade PnL `+5.12%`
+  - `3td oracle`:
+    - Total Return `+639,900%`
+    - Gross Return `+671,457%`
+    - MaxDD `41.78%`
+    - Trades `436`
+    - WinRate `71.79%`
+    - Avg trade PnL `+6.49%`
+- **年度路径**:
+  - `1td`: 2021 `+746.8%`, 2022 `+489.3%`, 2023 `+1078.3%`, 2024 `+899.7%`, 2025 `+755.2%`, 2026 YTD `+206.2%`
+  - `2td`: 2021 `+446.7%`, 2022 `+357.5%`, 2023 `+446.9%`, 2024 `+483.5%`, 2025 `+436.7%`, 2026 YTD `+106.3%`
+  - `3td`: 2021 `+552.6%`, 2022 `+179.2%`, 2023 `+487.7%`, 2024 `+443.4%`, 2025 `+459.8%`, 2026 YTD `+95.5%`
+- **结论更新**:
+  - 即使加入真实执行约束和交易成本, oracle sleeve 仍有巨大上限
+  - 这强烈说明“因子袖子切换”不是没有空间, 问题在于我们当前还无法提前预测切换
+  - 后续研究重点应转为 oracle 可解释性:
+    - 哪些状态下 oracle 选择 `ret_5d` / `ret_20d` / `kmid2`
+    - 选择前是否存在可观测先验, 如 AMV bull 阶段、宽池赚钱效应、涨停/高开风险、市场宽度
+    - 若有稳定先验, 再落地成规则 gating 或弱模型; 若无, oracle 主要是噪声/未来函数
 
 ### [AMV] Bull Pool 因子分年份 / 分 regime 标签分析
 
@@ -2457,3 +3204,258 @@
   - `python -m py_compile notebooks/b1_case_expansion_mining.py`
   - `uv run python -c "import importlib.util; ... b1_case_expansion_mining.py"` 通过
   - `uv run marimo check notebooks/b1_case_expansion_mining.py` 通过
+
+### AMV 多子策略: 静态袖子 Rust 回测起点
+
+- 背景:
+  - LTR 直接 Top3 与简单状态分类器暂时都未能稳定超过规则基线
+  - Oracle Rust 回测显示“选对袖子”的理论空间极大，但 oracle 本身存在严重未来函数
+  - 当前阶段改为先把可复现的静态子策略单独接入 Rust，建立每个袖子的真实收益/回撤画像
+- 新增/调整:
+  - 新增 `scripts/amv_static_sleeve_signal_export.py`
+  - 扩展 `scripts/amv_bull_pool_export_signals.py` 的 feature frame，保留 `ret_5d / ret_20d`
+  - 导出 5 个静态袖子信号:
+    - `ret_5d`
+    - `ret_20d`
+    - `kmid2`
+    - `klen`
+    - `manual_p2_k0p5_r0`
+  - 每个袖子使用 `bt-amv-topn` 跑 `1td / 2td / 3td / 6td`
+  - 其中 `6td` 是与 AMV Bull Pool 因子年度稳定性、既有 AMV TopN 基线可比的主口径；`1td / 2td / 3td` 仅作为持仓周期敏感性扫描
+  - 均为 no-stop、T+1 open、Top3、AMV bull regime required
+- 本轮数据注意:
+  - ST 实时源访问失败，导出时使用过期本地 ST 缓存，共 239 只；结果可用于研究排序，但后续正式批量回测建议在网络恢复后刷新 ST 缓存复跑
+- 输出:
+  - 信号根目录: `artifacts/amv_static_sleeve_signals/`
+  - 汇总表: `artifacts/amv_static_sleeve_signals/static_sleeve_backtest_summary.csv`
+  - 年度表: `artifacts/amv_static_sleeve_signals/static_sleeve_annual_returns.csv`
+  - Canvas: `amv-static-sleeve-backtest.canvas.tsx`
+- `6td` 主口径 Rust 净收益结论:
+  - `manual_p2_k0p5_r0 6td`: `+168.01%`, gross `+225.39%`, max DD `14.97%`, trades `273`, win rate `51.65%`
+  - `ret_5d 6td`: `+71.48%`, gross `+102.12%`, max DD `70.29%`, trades `269`, win rate `46.10%`
+  - `ret_20d 6td`: `+6.46%`, gross `+28.36%`, max DD `84.14%`, trades `268`, win rate `44.40%`
+  - `kmid2 6td`: `-48.93%`, gross `-30.01%`, max DD `73.40%`, trades `273`, win rate `45.05%`
+  - `klen 6td`: `-72.49%`, gross `-62.39%`, max DD `76.95%`, trades `154`, win rate `36.36%`
+- `6td` 年度稳定性:
+  - `manual_p2_k0p5_r0 6td`: 2021 `+9.7%`, 2022 `+38.4%`, 2023 `+14.3%`, 2024 `+48.9%`, 2025 `+12.4%`, 2026 YTD `-8.7%`
+  - `ret_5d 6td`: 2021 `+3.2%`, 2022 `+25.1%`, 2023 `-47.2%`, 2024 `-1.1%`, 2025 `+88.9%`, 2026 YTD `+37.5%`
+  - `ret_20d 6td`: 2021 `-14.3%`, 2022 `-27.6%`, 2023 `-14.7%`, 2024 `+30.4%`, 2025 `+13.8%`, 2026 YTD `+25.8%`
+- 短持仓扫描结论:
+  - `ret_20d 2td`: `+59.01%`
+  - `manual_p2_k0p5_r0 3td`: `+38.11%`
+  - 这些结果说明持仓周期敏感，但不应替代 6td 主基线
+- 当前判断:
+  - 和 6td 基线对齐后，第一批主候选应改为 `manual_p2_k0p5_r0 6td`
+  - `ret_5d 6td` 可以作为高波动候选，但最大回撤约 `70%`，不能直接视为成熟主线
+  - `ret_20d 6td` 净收益很弱且回撤极大；它在 `2td` 强，说明它更像短周期动量袖子
+  - 下一步应围绕 `manual_p2_k0p5_r0 6td`、`ret_5d 6td`、`ret_20d 2td` 做状态画像，分清“主策略”、“高波动增强”和“短周期动量”的适用环境
+
+### AMV Horizon-aware sleeve oracle
+
+- 背景:
+  - 旧 oracle 主要是 `1td / 2td / 3td`，不能直接回答 `6td` 主基线下应该怎么做策略/权重切换
+  - `manual_p2_k0p5_r0` 和 `manual_p3_k0p5_r0` 本身来自 6d 因子与权重网格实验，因此新的 oracle 必须把 “因子/权重 + 持仓周期” 一起作为 sleeve 定义
+- 新增:
+  - `scripts/amv_horizon_aware_oracle_lab.py`
+  - Canvas: `amv-horizon-aware-oracle.canvas.tsx`
+- 默认候选:
+  - `manual_p2_k0p5_r0_6td`
+  - `manual_p3_k0p5_r0_6td`
+  - `ret_5d_6td`
+  - `ret_20d_2td`
+  - `ret_20d_6td`
+  - `klen_6td`
+  - `kmid2_6td`
+  - `kbar_momentum_6td`
+- 口径:
+  - 使用 `next_open_to_close` 执行标签，即 `T+1 open -> T+N close`
+  - `--exclude-limit-up-entry`
+  - 每个候选每天 Top3
+  - 只保留全部候选都有结果的 common dates，共 `807` 天
+  - 同时输出两个 oracle:
+    - `oracle_raw_return_with_cash`: 按候选持有期总收益选，若全部 <= 0 则选 cash
+    - `oracle_dailyized_with_cash`: 按候选日化收益选，若全部 <= 0 则选 cash
+- 产物:
+  - `artifacts/amv_horizon_aware_oracle/20260517_130248/summary.json`
+  - `daily_candidate_sleeves.csv`
+  - `selected_candidate_signals.csv`
+  - `daily_oracle_choices.csv`
+  - `candidate_summary.csv`
+  - `candidate_year_summary.csv`
+  - `oracle_choice_summary.csv`
+- 静态候选标签侧均值:
+  - `ret_5d_6td`: mean `+0.96%`, dailyized `+0.07%`
+  - `kmid2_6td`: mean `+0.74%`, dailyized `+0.08%`
+  - `manual_p2_k0p5_r0_6td`: mean `+0.70%`, dailyized `+0.10%`, positive ratio `54.0%`
+  - `ret_20d_2td`: mean `+0.70%`, dailyized `+0.27%`
+  - `manual_p3_k0p5_r0_6td`: mean `+0.69%`, dailyized `+0.10%`, positive ratio `54.5%`
+  - `klen_6td`: mean `-0.30%`
+- Oracle 选择分布:
+  - 按总收益选:
+    - `ret_5d_6td`: `163` 天
+    - `ret_20d_6td`: `138` 天
+    - `kmid2_6td`: `125` 天
+    - `ret_20d_2td`: `120` 天
+    - `manual_p2_k0p5_r0_6td`: `68` 天
+    - `cash`: `57` 天
+  - 按日化收益选:
+    - `ret_20d_2td`: `294` 天
+    - `ret_5d_6td`: `106` 天
+    - `kmid2_6td`: `104` 天
+    - `ret_20d_6td`: `75` 天
+    - `manual_p2_k0p5_r0_6td`: `61` 天
+    - `cash`: `57` 天
+- 当前判断:
+  - `6td` 不是天然最优，而是当前主基线；模型目标必须显式区分“持有期总收益”与“资金效率/日化收益”
+  - 如果目标是单笔总收益，oracle 更偏 `ret_5d_6td / ret_20d_6td`
+  - 如果目标是资金效率，oracle 明显偏 `ret_20d_2td`
+  - `manual_p2_k0p5_r0_6td` 更像稳定主策略底座，不是 hindsight oracle 最常选择的进攻袖子
+  - 下一步训练切换模型前，应先决定目标函数: 固定 6td 收益、混合 horizon 总收益、还是日化/资金效率收益
+
+### AMV Horizon-aware oracle explainability
+
+- 背景:
+  - 用户确认目标不是回到固定人工规则，而是让模型学习策略/权重/持仓周期切换
+  - 在训练切换模型前，需要先判断 horizon-aware oracle 的选择是否能被交易前状态解释
+- 新增:
+  - `scripts/amv_horizon_oracle_explainability.py`
+  - Canvas: `amv-horizon-oracle-explainability.canvas.tsx`
+- 产物:
+  - `artifacts/amv_horizon_oracle_explainability/20260517_131130/summary.json`
+  - `oracle_choices_with_state.csv`
+  - `choice_state_summary.csv`
+  - `phase_choice_distribution.csv`
+  - `feature_separation.csv`
+  - `candidate_feature_diffs.csv`
+  - `candidate_top_feature_diffs.csv`
+- 方法:
+  - 读取 horizon-aware oracle 的 `daily_oracle_choices.csv`
+  - 使用 `build_ltr_dataset(..., horizon=6, label_mode=next_open_to_close)` 生成交易前状态特征
+  - 按 oracle 选择的 candidate 汇总 AMV 状态、宽池赚钱效应、topN 动量、成交额变化等特征
+  - 计算各候选组之间的状态均值差异，单位为全样本标准差
+- 核心观察:
+  - 当前状态特征对 oracle class 的分离度偏弱，最强组间差异约 `0.59 std`
+  - `oracle_dailyized_with_cash` 最强分离特征:
+    - `pool_candidate_count_scaled`: `0.59 std`
+    - `bull_day_scaled`: `0.58 std`
+    - `amv_bull_trigger_ret_scaled`: `0.54 std`
+    - `trail_pool_ret_5d`: `0.51 std`
+  - `manual_p2_k0p5_r0_6td` 被选时更偏 AMV bull 早期:
+    - raw oracle: early `36.8%`, middle `33.8%`, late `29.4%`
+    - dailyized oracle: early `36.1%`, middle `32.8%`, late `31.1%`
+  - `ret_20d_6td` 更偏宽池上涨比例与 topN 20d 动量较强的状态:
+    - dailyized oracle 下 `pool_up_ratio_5d = 60.6%`
+    - `pool_topn_ret_20d = 45.5%`
+  - `cash` 并不是简单对应“弱市场”，反而在 AMV bull age、AMV trigger、近 5 日宽池收益偏高时出现；这更像过热/后段而非低迷
+- 当前判断:
+  - 直接训练多分类模型去预测完整 oracle candidate 可能会很噪，当前状态特征不足以清晰分开所有袖子
+  - 更合理的第一版模型目标是:
+    - 默认使用 `manual_p2_k0p5_r0_6td`
+    - 学习何时切到进攻袖子 (`ret_5d_6td / ret_20d_6td / ret_20d_2td`)
+    - 学习何时切到 `cash` 或降仓
+  - 下一步应做二分类/三分类 gating，而不是直接做 8 类 sleeve classifier:
+    - `base_ok`: 是否继续用 `manual_p2_6td`
+    - `attack_ok`: 是否允许动量进攻袖子
+    - `cash_ok`: 是否需要空仓/降仓
+
+### AMV constrained oracle: base + attack/cash 上限
+
+- 背景:
+  - 在使用模型前，先验证“默认主策略 + 少数例外切换”的理论空间
+  - 这是比完整 oracle 更接近落地的受约束上限，但仍是使用未来收益的标签侧实验，不是可交易规则
+- 新增:
+  - `scripts/amv_constrained_oracle_lab.py`
+  - Canvas: `amv-constrained-oracle.canvas.tsx`
+- 产物:
+  - `artifacts/amv_constrained_oracle/20260517_131848/summary.json`
+  - `daily_constrained_choices.csv`
+  - `strategy_summary.csv`
+  - `choice_summary.csv`
+  - `year_summary.csv`
+- 设定:
+  - base: `manual_p2_k0p5_r0_6td`
+  - attack candidates:
+    - `ret_5d_6td`
+    - `ret_20d_6td`
+    - `ret_20d_2td`
+    - `kmid2_6td`
+  - margin: `0% / 1% / 2% / 3%`
+  - 两个目标:
+    - `top_ret`: 按持有期总收益比较
+    - `top_ret_dailyized`: 按日化/资金效率比较
+  - 两个规则:
+    - `base + attack`: attack 超过 base + margin 才切
+    - `base + attack + cash`: 若 base < 0 且 best_attack <= 0 则 cash，否则按 attack 规则
+- 关键结果:
+  - `top_ret + attack + cash, margin=3%`:
+    - mean chosen ret `+9.14%`
+    - lift vs base `+8.44pp`
+    - attack `518` 天, base `206` 天, cash `83` 天
+  - `top_ret_dailyized + attack + cash, margin=3%`:
+    - mean chosen ret `+4.57%`
+    - lift vs base `+3.87pp`
+    - attack `197` 天, base `527` 天, cash `83` 天
+  - `top_ret + attack + cash, margin=0%`:
+    - mean chosen ret `+9.31%`
+    - attack `602` 天, base `122` 天, cash `83` 天
+- 当前判断:
+  - 受约束 oracle 仍有很大上限，说明“主策略 + 例外切换”方向值得继续
+  - 但如果用持有期总收益作为目标，即使 margin 提到 `3%`，仍需要 `518/807` 天切 attack；这不是“少数例外”，而是高频状态切换
+  - 如果用日化/资金效率目标，`3% margin` 下 attack 降到 `197/807` 天，形态更接近可学习的例外切换
+  - cash 上限稳定为 `83` 天，且带来额外提升，后续应单独建 `cash_ok`/降仓标签
+  - 当前理论分析锚点是 Canvas `amv-constrained-oracle.canvas.tsx`（AMV 受约束 Oracle）；后续讨论切换模型时，应优先引用这个结论，避免回到完整 hindsight oracle 或重复 8 类 sleeve selector 分析
+  - 目前不再把“完整 oracle 哪天选哪个袖子”当作直接训练目标；它只作为上限诊断，真正建模入口是 `manual_p2_k0p5_r0_6td` 底座上的 `cash_ok` / `attack_ok`
+  - 下一步更合理的建模目标:
+    - 第一优先: `cash_ok` 二分类，识别是否应该避开主策略亏损日
+    - 第二优先: `attack_ok` 二分类，先用 dailyized `3% margin` 作为较保守标签
+    - 暂不直接训练完整多分类 sleeve selector
+
+### AMV attack_ok first binary lab
+
+- 背景:
+  - 用户要求直接推进 `attack_ok`
+  - 理论锚点继续使用 `amv-constrained-oracle.canvas.tsx`（AMV 受约束 Oracle），不回到完整 hindsight oracle
+- 新增:
+  - `scripts/amv_attack_ok_lab.py`
+  - Canvas: `amv-attack-ok-lab.canvas.tsx`
+- 运行:
+  - `uv run python scripts/amv_attack_ok_lab.py`
+  - 产物: `artifacts/amv_attack_ok/20260517_150811/summary.json`
+- 标签定义:
+  - 从 `artifacts/amv_constrained_oracle/20260517_131848/daily_constrained_choices.csv` 读取
+  - 使用 `target_metric = top_ret_dailyized`
+  - 使用 `margin = 3%`
+  - 使用 `allow_cash = true`
+  - `choice_type == attack` 记为 `attack_ok = 1`
+  - 全样本 `807` 天: attack `197`, base `527`, cash `83`
+- 特征:
+  - 使用交易前 `STATE_FEATURES`
+  - 优先复用 `artifacts/amv_horizon_oracle_explainability/20260517_131130/oracle_choices_with_state.csv`，避免重复构建 ST/宽池状态
+- Walk-forward 测试:
+  - test years: `2023 / 2024 / 2025 / 2026`
+  - AUC:
+    - 2023: `0.489`
+    - 2024: `0.497`
+    - 2025: `0.549`
+    - 2026: `0.619`（样本仅 `32` 天）
+  - AP:
+    - 2023: `0.270`
+    - 2024: `0.273`
+    - 2025: `0.247`
+    - 2026: `0.625`
+- 策略侧诊断（仍是标签侧，不是可交易回测）:
+  - `always_base`: avg dailyized `+0.11%`
+  - `label_oracle_attack_ok`: avg dailyized `+1.48%`, lift `+1.37pp`, attack `93/369`
+  - `model_threshold_0.30`: avg dailyized `+0.24%`, lift `+0.13pp`, precision `0.326`, recall `0.076`, pred attack `24/369`
+  - `model_valid_best_f1`: avg dailyized `+1.86%`, lift `+1.75pp`, precision `0.267`, recall `0.841`, pred attack `282/369`
+  - `always_attack`: avg dailyized `+2.14%`, lift `+2.03pp`, precision `0.268`, recall `1.000`, pred attack `369/369`
+- 当前判断:
+  - 第一版 `attack_ok` 没有证明当前状态特征能稳定学习“什么时候进攻”
+  - 2023/2024 AUC 接近随机；2025 略高；2026 虽高但样本过少
+  - 验证集 F1 阈值在 2024-2026 退化为近似 `always_attack`，说明模型不是在精确识别少数例外，而是在低阈值下高召回
+  - 固定 `0.30` 阈值更保守，但只召回 `7/93` 个真实 attack 日，收益提升很小
+  - 由于当前 attack 侧仍使用 future-best attack sleeve，`always_attack` 和模型经济指标都只能作为标签侧诊断，不能解释为真实可交易收益
+  - 下一步不应直接把当前 `attack_ok` 接交易，而应先收紧目标:
+    - 固定单一进攻袖子后重新做二分类
+    - 或提高 `attack_ok` 标签门槛，追求更高 precision
+    - 或先补 `cash_ok`，减少“该避险却被迫在 base/attack 中选”的噪声

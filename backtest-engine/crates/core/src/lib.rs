@@ -220,10 +220,11 @@ pub struct ReportBundlePaths {
 /// 根据股票代码判断涨跌幅限制
 /// 主板 (60/00) → 10%, 创业板 (300/301) → 20%, 科创板 (688/689) → 20%
 pub fn price_limit_pct(code: &str) -> f64 {
-    if code.starts_with("300")
-        || code.starts_with("301")
-        || code.starts_with("688")
-        || code.starts_with("689")
+    let normalized = code.strip_prefix("sz.").or_else(|| code.strip_prefix("sh.")).unwrap_or(code);
+    if normalized.starts_with("300")
+        || normalized.starts_with("301")
+        || normalized.starts_with("688")
+        || normalized.starts_with("689")
     {
         0.20
     } else {
@@ -761,5 +762,18 @@ mod tests {
             stats.max_drawdown_recovery_date,
             NaiveDate::from_ymd_opt(2026, 1, 3)
         );
+    }
+
+    #[test]
+    fn price_limit_pct_supports_qmt_prefixed_codes() {
+        assert_eq!(price_limit_pct("sz.300750"), 0.20);
+        assert_eq!(price_limit_pct("sz.301001"), 0.20);
+        assert_eq!(price_limit_pct("sh.688981"), 0.20);
+        assert_eq!(price_limit_pct("sh.689009"), 0.20);
+        assert_eq!(price_limit_pct("sz.002415"), 0.10);
+        assert_eq!(price_limit_pct("sh.600000"), 0.10);
+
+        assert_eq!(price_limit_pct("300750"), 0.20);
+        assert_eq!(price_limit_pct("688981"), 0.20);
     }
 }
