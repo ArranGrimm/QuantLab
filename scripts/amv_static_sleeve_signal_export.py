@@ -28,6 +28,9 @@ SLEEVE_IDS = [
     "kmid2",
     "manual_p2_k0p5_r0",
     "manual_p3_k0p5_r0",
+    "pkm_p1_k0p5_m1",
+    "pkm_p2_k0p5_m0p5",
+    "pkm_p3_k1_m2",
 ]
 
 
@@ -78,7 +81,37 @@ def sleeve_score_expr(sleeve_id: str) -> tuple[pl.Expr, list[str]]:
             / 7.0,
             cols,
         )
+    if sleeve_id == "pkm_p1_k0p5_m1":
+        return pkm_score_expr(price_weight=1.0, kbar_weight=0.5, momentum_weight=1.0)
+    if sleeve_id == "pkm_p2_k0p5_m0p5":
+        return pkm_score_expr(price_weight=2.0, kbar_weight=0.5, momentum_weight=0.5)
+    if sleeve_id == "pkm_p3_k1_m2":
+        return pkm_score_expr(price_weight=3.0, kbar_weight=1.0, momentum_weight=2.0)
     raise ValueError(f"unknown sleeve_id: {sleeve_id}")
+
+
+def pkm_score_expr(
+    *,
+    price_weight: float,
+    kbar_weight: float,
+    momentum_weight: float,
+) -> tuple[pl.Expr, list[str]]:
+    cols = ["price_pos_20d", "close_to_high_20d", "KLEN", "KMID2", "ret_5d", "ret_20d"]
+    total_weight = 2.0 * (price_weight + kbar_weight + momentum_weight)
+    if total_weight <= 0:
+        raise ValueError("P/K/M total weight must be positive")
+    return (
+        (
+            _score_component("price_pos_20d", higher_is_better=True, weight=price_weight)
+            + _score_component("close_to_high_20d", higher_is_better=False, weight=price_weight)
+            + _score_component("KLEN", higher_is_better=False, weight=kbar_weight)
+            + _score_component("KMID2", higher_is_better=True, weight=kbar_weight)
+            + _score_component("ret_5d", higher_is_better=True, weight=momentum_weight)
+            + _score_component("ret_20d", higher_is_better=True, weight=momentum_weight)
+        )
+        / total_weight,
+        cols,
+    )
 
 
 def build_one_sleeve_signal(

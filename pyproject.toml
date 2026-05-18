@@ -35,9 +35,9 @@ dependencies = [
     "duckdb>=1.4.3",
     "google-genai>=1.67.0",
     "kaleido>=1.2.0",
-    "pyobjc-framework-cocoa",
-    "pyobjc-framework-quartz",
-    "pyobjc-framework-vision",
+    "pyobjc-framework-cocoa; sys_platform == 'darwin'",
+    "pyobjc-framework-quartz; sys_platform == 'darwin'",
+    "pyobjc-framework-vision; sys_platform == 'darwin'",
     "pyyaml>=6.0.2",
     "lightgbm>=4.6.0",
 ]

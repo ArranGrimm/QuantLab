@@ -10,6 +10,16 @@
   - 修正涨跌停口径后仍为净收益 `+168.01%`
   - 最大回撤 `14.97%`
   - 当前仍是 AMV bull pool 下最强可交易基线
+- 最新 P/K/M 验证: `amv-pkm-sleeve-rust-backtest.canvas.tsx`
+  - 标签侧动量增强没有兑现为更好的 Rust 主基线
+  - `P1/K0.5/M1 / P3/K1/M2` 明显改善 2025，但总收益约为主基线一半，MaxDD 接近 `49%`
+  - `1td` 到 `7td` 持仓周期扫描后，P/K/M 最佳仍是 `6td`；`4td / 5td / 7td` 也没有改善结论
+  - 2026 YTD 亏损比当前主基线更深，因此 P/K/M 不作为默认替代
+- 待验证 rolling cohort 口径:
+  - 当前 `max_positions = 3` 只允许一组 Top3 在场，可能压低每日 Top3 信号的资金利用
+  - 可用 `max_positions / max_daily_buys / position_size_pct` 测试每天买 Top3、多组 cohort 同时持有的真实组合
+  - 当前执行顺序为开盘先买、收盘再卖；`6td` rolling cohort 完整槽位约为 `21`
+  - 当前手数口径为 `LOT_SIZE = 300`，rolling cohort 前需决定是否改为更贴近 A 股主板的 `100`
 - 当前理论锚点: `amv-constrained-oracle.canvas.tsx`
   - 后续讨论 sleeve switching、降仓、进攻切换时优先从“AMV 受约束 Oracle”出发
   - 不再回到完整 hindsight oracle 或 8 类 sleeve selector 重新推导
@@ -32,7 +42,7 @@
 - Rust 口径:
   - 引擎: `bt-amv-topn`
   - 执行: `T+1 open`
-  - 持有: `6td`
+  - 持有: `6td`，当前已明确为 `max_hold_trading_days = 6` 的交易日口径
   - TopN: `3`
   - 固定止损: 当前主基线为 no-stop
 - 修正后核心指标:
@@ -50,11 +60,16 @@
 - 第一优先: `cash_ok` / 降仓标签
   - 目标是识别是否应该避开 `manual_p2_k0p5_r0_6td` 的亏损日
   - 理论依据来自 AMV 受约束 Oracle 中的 cash 上限
-- 第二优先: 收紧 `attack_ok`
+- 第二优先: rolling cohort 真实组合口径
+  - 测试 `max_positions = 21 / 18`、`max_daily_buys = 3`、`position_size_pct = 1 / max_positions`
+  - 同时扫 `5td / 6td`，判断每日 Top3 信号滚动持有后是否改变最佳持仓期
+  - 先明确 `LOT_SIZE = 300` 是否继续作为保守手数假设
+- 第三优先: 回到主策略入场/环境确认
+  - 2026 亏损段主要是入场后上冲空间不足，P/K/M 排序权重没有解决
+  - 关注执行日是否明显收弱、AMV bull 中短期市场宽度、赚钱效应、涨停阻塞率等可观测变量
+- 第四优先: 收紧 `attack_ok`
   - 第一版 `attack_ok` 太抽象，且 future-best attack sleeve 噪声较高
   - 后续如继续，应固定单一进攻袖子或提高标签门槛，追求更高 precision
-- 第三优先: 回到主策略入场/环境确认
-  - 关注执行日是否明显收弱、AMV bull 中短期市场宽度、赚钱效应、涨停阻塞率等可观测变量
 
 ---
 
@@ -195,6 +210,8 @@
 
 ### 关键 Canvas
 
+- `amv-pkm-sleeve-rust-backtest.canvas.tsx`: P/K/M 动量增强袖子 Rust 真实回测
+- `amv-yearly-weight-grid.canvas.tsx`: 年度权重网格与 P/K/M 动量增强诊断
 - `amv-constrained-oracle.canvas.tsx`: 当前理论锚点
 - `amv-static-sleeve-backtest.canvas.tsx`: 静态袖子 Rust 对比
 - `amv-bull-pool-factor-regime.canvas.tsx`: 因子分年份 / 分 regime 标签分析

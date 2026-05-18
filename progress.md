@@ -9,11 +9,198 @@
 
 ## 最新收口索引
 
+- AMV P/K/M Rust 验证: 标签侧动量增强未兑现为更好主基线；可解释为 2025 补充袖子，但未解决 2026。
+- AMV 年度权重网格: 2025/2026 弱势更像旧 `P2/K0.5/R0` 缺少动量项，但该结论已被 Rust 验证降级为标签侧线索。
 - B3 TDX: 已归档为事件型补充候选，不作为当前主线继续深挖。
 - Direct LTR Top3: 因 executable label 与真实执行口径错配，暂不接交易。
 - `attack_ok` 第一版: 当前状态特征未证明可稳定学习进攻切换，需收紧标签后再回看。
 - AMV 受约束 Oracle: 仍是当前 sleeve switching / gating 的理论锚点。
 - `manual_p2_k0p5_r0_6td`: 仍是当前 AMV bull pool 主策略底座。
+
+## 2026-05-18
+
+### [AMV] Rolling cohort 持仓口径讨论
+
+- 背景:
+  - 当前 `amv-topn` 主基线使用 `max_positions = 3`，等价于只允许一组 Top3 在场
+  - 用户提出更接近 rolling NAV 的真实组合口径: 每天最多买 Top3，多组 cohort 同时持有，到期组在收盘卖出
+- 当前 Rust 执行顺序确认:
+  - 每日流程为 `[open] buy T+1 shifted signals`，再 `[close] sell by risk or max hold days`
+  - `max_hold_trading_days = 6` 时，若执行买入日记为 `E`，则 `E+6 close` 触发卖出
+  - 因为是开盘先买、收盘再卖，`6td` rolling cohort 若每天都买 Top3，完整槽位约为 `7 * 3 = 21`
+  - 若未来设计“先卖再买”或盘中/开盘卖出机制，槽位才可能降为 `6 * 3 = 18`
+- 配置可行性:
+  - `amv-topn` 已有 `max_positions` 与 `max_daily_buys`
+  - 第一版 rolling cohort 可通过配置测试:
+    - `max_daily_buys = 3`
+    - `max_positions = 21` for `6td` 当前流程
+    - `position_size_pct = 1 / max_positions`
+  - `5td` 也应重新扫，因为滚动持仓后最佳持有期可能不再等于单组 Top3 的 `6td`
+- 手数口径:
+  - 当前回测引擎买入时使用 `bt_core::round_to_lot`
+  - 当前 `LOT_SIZE = 300`，比真实 A 股常见 `100` 股一手更保守
+  - rolling cohort 下单票资金更小，手数向下取整会更显著影响可买入数量与跳单率
+- 当前判断:
+  - rolling cohort 是值得补测的真实组合口径，能检验 P/K/M 标签侧优势是否被 `max_positions = 3` 的资金槽限制压掉
+  - 补测前应明确是否继续沿用保守 `300` 股手数，或改成更贴近 A 股主板的 `100` 股口径
+
+### [AMV] P/K/M 动量增强袖子 Rust 真实回测
+
+- 背景:
+  - 年度权重网格发现 `P/K/M` 动量增强组合在 2025/2026 标签侧显著强于旧 `P2/K0.5/R0`
+  - 用户提醒 `6td` 命名来自早期自然日/交易日口径迁移，本轮必须确认使用当前更严谨的交易日持有期
+- 口径确认:
+  - 当前 Rust `bt-amv-topn` 使用 `max_hold_trading_days`
+  - `config_6td_no_stop.toml` 中 `max_hold_trading_days = 6`
+  - `systems.rs` 中 `hold_trading_days = current_trade_index - entry_trade_index`
+  - 因此本轮 `6td` 明确是交易日持有期，不是早期自然日口径
+- 新增/调整:
+  - `scripts/amv_static_sleeve_signal_export.py` 新增:
+    - `pkm_p1_k0p5_m1`
+    - `pkm_p2_k0p5_m0p5`
+    - `pkm_p3_k1_m2`
+  - Canvas: `amv-pkm-sleeve-rust-backtest.canvas.tsx`
+- 信号导出:
+  - `uv run python scripts/amv_static_sleeve_signal_export.py --sleeves pkm_p1_k0p5_m1,pkm_p2_k0p5_m0p5,pkm_p3_k1_m2 --end-date 2026-05-10`
+  - 产物:
+    - `artifacts/amv_static_sleeve_signals/20260518_115914_pkm_p1_k0p5_m1/signal.meta.json`
+    - `artifacts/amv_static_sleeve_signals/20260518_115916_pkm_p2_k0p5_m0p5/signal.meta.json`
+    - `artifacts/amv_static_sleeve_signals/20260518_115918_pkm_p3_k1_m2/signal.meta.json`
+  - 三组均为 `812` 个执行信号日；执行日非 bull 阻断 `126` 行
+- Rust 回测:
+  - 配置: `backtest-engine/crates/amv-topn/config_6td_no_stop.toml`
+  - 口径: `T+1 open`, Top3, `6td` trading days, no-stop, AMV bull entry gate
+  - 汇总产物:
+    - `artifacts/amv_static_sleeve_signals/pkm_rust_6td_no_stop_summary_20260518_120000.json`
+    - `artifacts/amv_static_sleeve_signals/pkm_rust_6td_no_stop_summary_20260518_120000.csv`
+- 核心结果:
+  - 当前主基线 `manual_p2_k0p5_r0_6td`: net `+168.01%`, MaxDD `14.97%`, trades `273`, win rate `51.65%`
+  - `pkm_p1_k0p5_m1`: net `+83.18%`, gross `+120.07%`, MaxDD `49.27%`, trades `268`, win rate `47.01%`
+  - `pkm_p3_k1_m2`: net `+92.79%`, gross `+130.17%`, MaxDD `48.94%`, trades `267`, win rate `46.82%`
+  - `pkm_p2_k0p5_m0p5`: net `+11.45%`, gross `+46.14%`, MaxDD `61.87%`, trades `270`, win rate `45.56%`
+- 分年份:
+  - `pkm_p1_k0p5_m1`: 2021 `+6.0%`, 2022 `+21.0%`, 2023 `-13.1%`, 2024 `+23.4%`, 2025 `+59.2%`, 2026 YTD `-16.4%`
+  - `pkm_p3_k1_m2`: 2021 `+1.2%`, 2022 `+24.6%`, 2023 `-11.2%`, 2024 `+36.7%`, 2025 `+50.9%`, 2026 YTD `-16.5%`
+  - `pkm_p2_k0p5_m0p5`: 2021 `+1.4%`, 2022 `+8.6%`, 2023 `-7.3%`, 2024 `+55.1%`, 2025 `-9.1%`, 2026 YTD `-22.6%`
+- 当前判断:
+  - 年度权重网格的 `P/K/M` 标签侧优势没有兑现为更好的 Rust 主基线
+  - `P1/K0.5/M1` 和 `P3/K1/M2` 明显改善 2025，但总收益只有主基线约一半，最大回撤接近 `49%`
+  - 2026 并未被修复，P/K/M 候选的 2026 YTD 亏损比当前主基线更深
+  - 因此 `P/K/M` 不应替代 `manual_p2_k0p5_r0_6td`
+  - 它最多作为“2025 型高波动动量补充袖子”保留观察，不能解释为 2026 解法
+  - 下一步应回到执行日/环境确认和 `cash_ok`，尤其是识别入场后上冲空间不足、执行日收弱、短期市场宽度/赚钱效应恶化的状态
+
+### [AMV] P/K/M 动量增强袖子持仓周期扫描
+
+- 背景:
+  - 用户提醒 `manual P2/K0.5/R0` 主基线也是先扫持仓周期，才定位到当前 `6td`
+  - 因此 P/K/M 不能只看 `6td`，需要同口径扫描 `1td` 到 `7td`
+- 口径:
+  - 复用三组 P/K/M 静态信号
+  - 配置:
+    - `config_1td_no_stop.toml`
+    - `config_2td_no_stop.toml`
+    - `config_3td_no_stop.toml`
+    - `config_6td_no_stop.toml`
+    - 从 `config_6td_no_stop.toml` 派生临时 `4td / 5td / 7td` no-stop 配置
+  - 均为 `T+1 open`, Top3, no-stop, AMV bull entry gate
+  - 所有 `td` 均为 `max_hold_trading_days` 交易日口径
+- 产物:
+  - `artifacts/amv_static_sleeve_signals/pkm_rust_horizon_scan_1td_to_7td_summary_20260518_121300.json`
+  - `artifacts/amv_static_sleeve_signals/pkm_rust_horizon_scan_1td_to_7td_summary_20260518_121300.csv`
+  - Canvas `amv-pkm-sleeve-rust-backtest.canvas.tsx` 已补充“持仓周期扫描”
+- 核心结果:
+  - `pkm_p1_k0p5_m1`:
+    - `1td`: net `-79.91%`, gross `-32.28%`, MaxDD `86.75%`, trades `784`
+    - `2td`: net `-72.90%`, gross `-31.00%`, MaxDD `83.87%`, trades `541`
+    - `3td`: net `-39.99%`, gross `+8.93%`, MaxDD `79.38%`, trades `427`
+    - `4td`: net `-52.18%`, gross `-23.77%`, MaxDD `73.48%`, trades `359`
+    - `5td`: net `-19.32%`, gross `+14.72%`, MaxDD `65.47%`, trades `299`
+    - `6td`: net `+83.18%`, gross `+120.07%`, MaxDD `49.27%`, trades `268`
+    - `7td`: net `-17.70%`, gross `+15.13%`, MaxDD `72.81%`, trades `231`
+  - `pkm_p2_k0p5_m0p5`:
+    - `1td`: net `-69.71%`, gross `-16.09%`, MaxDD `77.77%`
+    - `2td`: net `-74.68%`, gross `-27.63%`, MaxDD `87.61%`
+    - `3td`: net `-45.79%`, gross `+2.54%`, MaxDD `73.67%`
+    - `4td`: net `-64.87%`, gross `-40.32%`, MaxDD `81.39%`
+    - `5td`: net `-19.43%`, gross `+17.28%`, MaxDD `66.47%`
+    - `6td`: net `+11.45%`, gross `+46.14%`, MaxDD `61.87%`
+    - `7td`: net `-10.50%`, gross `+22.45%`, MaxDD `67.32%`
+  - `pkm_p3_k1_m2`:
+    - `1td`: net `-79.99%`, gross `-28.93%`, MaxDD `86.88%`
+    - `2td`: net `-78.04%`, gross `-37.77%`, MaxDD `86.96%`
+    - `3td`: net `-29.48%`, gross `+25.38%`, MaxDD `76.64%`
+    - `4td`: net `-61.11%`, gross `-33.00%`, MaxDD `78.18%`
+    - `5td`: net `-15.06%`, gross `+19.61%`, MaxDD `63.45%`
+    - `6td`: net `+92.79%`, gross `+130.17%`, MaxDD `48.94%`
+    - `7td`: net `-34.44%`, gross `-6.18%`, MaxDD `76.11%`
+- 当前判断:
+  - P/K/M 和主基线一样，最佳持仓周期仍是 `6td`
+  - `4td / 5td / 7td` 补扫后没有改变结论；`5td` 比短持仓有所修复但仍为负，`7td` 又明显回落
+  - 这说明标签侧 P/K/M 动量优势不是“换个持仓期就能兑现”的 edge
+  - 结论仍然是不替代 `manual_p2_k0p5_r0_6td`；下一步继续回到 `cash_ok` / 入场环境确认
+
+### [AMV] 年度权重网格诊断: 回到早期 TopN 探索框架
+
+- 背景:
+  - 用户指出后续 LTR、sleeve oracle、B3 等探索，本质上都在尝试补 `manual_p2_k0p5_r0_6td` 在 2025/2026 的弱势
+  - 既然后续复杂路线暂未证明有效，本轮回到更可解释的 `AMV 多头宽池权重网格` 模式，按年份诊断最佳权重
+- 环境修复:
+  - `pyproject.toml` 中 `pyobjc-framework-cocoa / quartz / vision` 已加 `sys_platform == 'darwin'` marker
+  - 这样 Windows 与 macOS 后续都继续统一使用 `uv run`
+  - `uv lock` 已重新解析通过
+- 新增:
+  - `scripts/amv_yearly_weight_grid.py`
+  - Canvas: `amv-yearly-weight-grid.canvas.tsx`
+- 运行:
+  - `uv run python scripts/amv_yearly_weight_grid.py --end-date 2026-05-08`
+  - 产物: `artifacts/amv_bull_pool_yearly_weight_grid/20260518_100342/summary.json`
+- 口径:
+  - AMV bull + LF2
+  - Top3
+  - `6d close-to-close` 标签侧诊断
+  - 覆盖 `2021-04-20 -> 2026-04-27`
+  - 候选共 `90` 个:
+    - 当前基线 `P2/K0.5/R0`
+    - 价格/K线/动量/风险单因子
+    - 旧 `P/K/R` 网格
+    - 新增去重后的 `P/K/M` 网格，其中 `M` 使用 `ret_5d / ret_20d`
+- 当前基线分年份:
+  - 2021: mean `+1.10%`, edge `+0.39pp`
+  - 2022: mean `+1.17%`, edge `+0.80pp`
+  - 2023: mean `+0.66%`, edge `+1.26pp`
+  - 2024: mean `+3.34%`, edge `+2.17pp`
+  - 2025: mean `+0.69%`, edge `-0.70pp`
+  - 2026: mean `+1.10%`, edge `+0.03pp`
+- 年度最佳:
+  - 2024:
+    - `KLEN` 单因子 mean `+3.81%`, edge `+2.64pp`, rolling NAV `+86.78%`
+    - `P3/K0.5/M0.5` mean `+3.62%`, edge `+2.44pp`
+    - 当前 `P2/K0.5/R0` 仍有 edge `+2.17pp`
+  - 2025:
+    - `P1/K0.5/M1` mean `+4.76%`, edge `+3.37pp`, rolling NAV `+86.31%`
+    - `P3/K1/M2` mean `+4.74%`, edge `+3.35pp`
+    - 当前 `P2/K0.5/R0` edge `-0.70pp`
+  - 2026:
+    - `P1/K0.5/M1` mean `+7.05%`, edge `+5.98pp`, rolling NAV `+39.09%`
+    - `P3/K1/M2` mean `+6.94%`, edge `+5.87pp`
+    - 当前 `P2/K0.5/R0` edge `+0.03pp`
+- 弱年份综合:
+  - `P1/K0.5/M1`: 2025/2026 平均 edge `+4.68pp`, 全样本 edge `+2.06pp`, `6/6` 年正 edge
+  - `P3/K1/M2`: 2025/2026 平均 edge `+4.61pp`, 全样本 edge `+2.11pp`, `6/6` 年正 edge
+  - `P2/K0.5/M1`: 2025/2026 平均 edge `+4.25pp`, 全样本 edge `+2.03pp`, `6/6` 年正 edge
+- Walk-forward 检查:
+  - 用 2021-2024 训练 edge / tradeoff 选参数，都会选到 `P2/K0.5/M0.5`
+    - 2025 测试 edge `+2.07pp`, mean `+3.45%`
+  - 用 2021-2025 训练:
+    - edge 均值选择 `P3/K1/M2`, 2026 测试 edge `+5.87pp`, mean `+6.94%`
+    - tradeoff 选择 `P1/K0.5/M1`, 2026 测试 edge `+5.98pp`, mean `+7.05%`
+- 当前判断:
+  - 2025/2026 弱势不是 AMV bull 宽池 Top3 框架整体失效，更像旧 `P2/K0.5/R0` 价格位置权重过重、缺少动量项
+  - 新增动量后的 `P/K/M` 组合不是单一年份 hindsight 偶然；walk-forward 也能从历史样本选出动量增强权重
+  - 但这仍是 `6d close-to-close` 标签侧诊断，不能直接替代 Rust 主基线
+  - 下一步应把 `P1/K0.5/M1 / P2/K0.5/M0.5 / P3/K1/M2` 导出为静态 sleeve，接 `T+1 open / 6td / Top3 / no-stop` Rust 真实回测
+  - 当前 `manual_p2_k0p5_r0_6td` 仍是已验证主策略底座；`P/K/M` 是新候选，不是已上线替代
 
 ## 2026-05-17
 
