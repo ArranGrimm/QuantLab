@@ -10,8 +10,10 @@ use bevy_ecs::prelude::*;
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
-/// A-share lot size (每手 300 股，科创板/北交所除外)
-pub const LOT_SIZE: u32 = 300;
+/// Standard A-share buy lot size.
+pub const A_SHARE_LOT_SIZE: u32 = 100;
+/// STAR Market buy orders require at least 200 shares, then can increase by 1 share.
+pub const STAR_MARKET_MIN_BUY_SHARES: u32 = 200;
 
 // ============================================================================
 // Portfolio
@@ -88,6 +90,11 @@ pub struct BacktestStats {
     pub total_pnl: f64,
     pub max_drawdown: f64,
     pub peak_value: f64,
+    pub peak_date: Option<NaiveDate>,
+    pub max_drawdown_peak_value: Option<f64>,
+    pub max_drawdown_peak_date: Option<NaiveDate>,
+    pub max_drawdown_trough_date: Option<NaiveDate>,
+    pub max_drawdown_recovery_date: Option<NaiveDate>,
     pub total_commission: f64,
     pub total_stamp_duty: f64,
     pub total_slippage: f64,
@@ -136,17 +143,36 @@ impl BacktestStats {
     }
 
     /// 更新最大回撤
-    pub fn update_drawdown(&mut self, total_value: f64) {
+    pub fn update_drawdown(&mut self, total_value: f64, as_of: NaiveDate) {
         if total_value > self.peak_value {
             self.peak_value = total_value;
+            self.peak_date = Some(as_of);
         }
+
+        if self.max_drawdown_recovery_date.is_none()
+            && self
+                .max_drawdown_peak_value
+                .is_some_and(|peak_value| total_value >= peak_value)
+        {
+            self.max_drawdown_recovery_date = Some(as_of);
+        }
+
         if self.peak_value > 0.0 {
             let drawdown = (self.peak_value - total_value) / self.peak_value;
             if drawdown > self.max_drawdown {
                 self.max_drawdown = drawdown;
+                self.max_drawdown_peak_value = Some(self.peak_value);
+                self.max_drawdown_peak_date = self.peak_date;
+                self.max_drawdown_trough_date = Some(as_of);
+                self.max_drawdown_recovery_date = None;
             }
         }
     }
+}
+
+fn format_date_or_na(date: Option<NaiveDate>) -> String {
+    date.map(|d| d.to_string())
+        .unwrap_or_else(|| "N/A".to_string())
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -196,10 +222,14 @@ pub struct ReportBundlePaths {
 /// 根据股票代码判断涨跌幅限制
 /// 主板 (60/00) → 10%, 创业板 (300/301) → 20%, 科创板 (688/689) → 20%
 pub fn price_limit_pct(code: &str) -> f64 {
-    if code.starts_with("300")
-        || code.starts_with("301")
-        || code.starts_with("688")
-        || code.starts_with("689")
+    let normalized = code
+        .strip_prefix("sz.")
+        .or_else(|| code.strip_prefix("sh."))
+        .unwrap_or(code);
+    if normalized.starts_with("300")
+        || normalized.starts_with("301")
+        || normalized.starts_with("688")
+        || normalized.starts_with("689")
     {
         0.20
     } else {
@@ -242,9 +272,31 @@ pub fn epoch_days_to_date(days: i32) -> Option<NaiveDate> {
     NaiveDate::from_num_days_from_ce_opt(days + 719163)
 }
 
-/// Round down to A-share lot size
-pub fn round_to_lot(shares_f64: f64) -> u32 {
-    ((shares_f64 / LOT_SIZE as f64).floor() as u32) * LOT_SIZE
+/// Whether a code belongs to the STAR Market (科创板).
+pub fn is_star_market_code(code: &str) -> bool {
+    let normalized = code
+        .strip_prefix("sh.")
+        .or_else(|| code.strip_prefix("SH."))
+        .unwrap_or(code);
+    normalized.starts_with("688")
+}
+
+/// Round down to the valid A-share buy quantity for a code.
+pub fn round_to_lot(code: &str, shares_f64: f64) -> u32 {
+    if !shares_f64.is_finite() || shares_f64 <= 0.0 {
+        return 0;
+    }
+
+    let shares = shares_f64.floor() as u32;
+    if is_star_market_code(code) {
+        if shares >= STAR_MARKET_MIN_BUY_SHARES {
+            shares
+        } else {
+            0
+        }
+    } else {
+        (shares / A_SHARE_LOT_SIZE) * A_SHARE_LOT_SIZE
+    }
 }
 
 /// Format backtest results as text (strategy-agnostic)
@@ -263,6 +315,24 @@ pub fn format_results(stats: &BacktestStats, portfolio: &Portfolio, trading_days
     writeln!(s, "Final Portfolio:   {:.2}", portfolio.cash).unwrap();
     writeln!(s, "Total Return:     {:+.2}%", total_return).unwrap();
     writeln!(s, "Max Drawdown:     {:.2}%", stats.max_drawdown * 100.0).unwrap();
+    writeln!(
+        s,
+        "Drawdown Peak:    {}",
+        format_date_or_na(stats.max_drawdown_peak_date)
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Drawdown Trough:  {}",
+        format_date_or_na(stats.max_drawdown_trough_date)
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Drawdown Recovery: {}",
+        format_date_or_na(stats.max_drawdown_recovery_date)
+    )
+    .unwrap();
     writeln!(s).unwrap();
     writeln!(s, "--- Trading Costs ---").unwrap();
     writeln!(s, "Commission:       {:.2}", stats.total_commission).unwrap();
@@ -273,7 +343,12 @@ pub fn format_results(stats: &BacktestStats, portfolio: &Portfolio, trading_days
     writeln!(s, "--- Derived ---").unwrap();
     writeln!(s, "Gross PnL:        {:+.2}", gross_pnl).unwrap();
     writeln!(s, "Gross Return:     {:+.2}%", gross_return).unwrap();
-    writeln!(s, "Avg Trades/Day:   {:.1}", stats.total_trades as f64 / trading_days.max(1) as f64).unwrap();
+    writeln!(
+        s,
+        "Avg Trades/Day:   {:.1}",
+        stats.total_trades as f64 / trading_days.max(1) as f64
+    )
+    .unwrap();
 
     s
 }
@@ -308,6 +383,9 @@ pub fn build_metrics_json(
         "final_portfolio": portfolio.cash,
         "total_return_pct": derived.total_return_pct,
         "max_drawdown_pct": stats.max_drawdown * 100.0,
+        "drawdown_peak_date": stats.max_drawdown_peak_date.map(|d| d.to_string()),
+        "drawdown_trough_date": stats.max_drawdown_trough_date.map(|d| d.to_string()),
+        "drawdown_recovery_date": stats.max_drawdown_recovery_date.map(|d| d.to_string()),
         "gross_pnl": derived.gross_pnl,
         "gross_return_pct": derived.gross_return_pct,
         "total_commission": stats.total_commission,
@@ -333,6 +411,18 @@ pub fn print_results(stats: &BacktestStats, portfolio: &Portfolio) {
         (portfolio.cash / portfolio.initial_capital - 1.0) * 100.0
     );
     println!("Max Drawdown: {:.2}%", stats.max_drawdown * 100.0);
+    println!(
+        "Drawdown Peak: {}",
+        format_date_or_na(stats.max_drawdown_peak_date)
+    );
+    println!(
+        "Drawdown Trough: {}",
+        format_date_or_na(stats.max_drawdown_trough_date)
+    );
+    println!(
+        "Drawdown Recovery: {}",
+        format_date_or_na(stats.max_drawdown_recovery_date)
+    );
     println!("----------------------------------------");
     println!("Trading Costs:");
     println!("  Commission: {:.2}", stats.total_commission);
@@ -493,7 +583,10 @@ pub fn resolve_meta_relative_path(
     if rel_path_obj.is_absolute() {
         return Some(rel_path_obj);
     }
-    signal_meta.meta_dir.as_ref().map(|base| base.join(rel_path_obj))
+    signal_meta
+        .meta_dir
+        .as_ref()
+        .map(|base| base.join(rel_path_obj))
 }
 
 pub fn resolve_signal_path(signal_meta: &SignalArtifactMeta) -> Option<std::path::PathBuf> {
@@ -656,5 +749,69 @@ pub fn write_report_bundle(
 
     println!("\n📄 Report saved: {}", txt_path.display());
     println!("🧾 Report JSON saved: {}", json_path.display());
-    Ok(ReportBundlePaths { txt_path, json_path })
+    Ok(ReportBundlePaths {
+        txt_path,
+        json_path,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drawdown_recovery_stays_empty_until_recovered() {
+        let mut stats = BacktestStats::default();
+
+        stats.update_drawdown(100.0, NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());
+        stats.update_drawdown(80.0, NaiveDate::from_ymd_opt(2026, 1, 2).unwrap());
+        stats.update_drawdown(90.0, NaiveDate::from_ymd_opt(2026, 1, 3).unwrap());
+
+        assert!((stats.max_drawdown - 0.2).abs() < 1e-9);
+        assert_eq!(
+            stats.max_drawdown_peak_date,
+            NaiveDate::from_ymd_opt(2026, 1, 1)
+        );
+        assert_eq!(
+            stats.max_drawdown_trough_date,
+            NaiveDate::from_ymd_opt(2026, 1, 2)
+        );
+        assert_eq!(stats.max_drawdown_recovery_date, None);
+    }
+
+    #[test]
+    fn drawdown_dates_update_after_recovery() {
+        let mut stats = BacktestStats::default();
+
+        stats.update_drawdown(100.0, NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());
+        stats.update_drawdown(80.0, NaiveDate::from_ymd_opt(2026, 1, 2).unwrap());
+        stats.update_drawdown(101.0, NaiveDate::from_ymd_opt(2026, 1, 3).unwrap());
+
+        assert!((stats.max_drawdown - 0.2).abs() < 1e-9);
+        assert_eq!(
+            stats.max_drawdown_peak_date,
+            NaiveDate::from_ymd_opt(2026, 1, 1)
+        );
+        assert_eq!(
+            stats.max_drawdown_trough_date,
+            NaiveDate::from_ymd_opt(2026, 1, 2)
+        );
+        assert_eq!(
+            stats.max_drawdown_recovery_date,
+            NaiveDate::from_ymd_opt(2026, 1, 3)
+        );
+    }
+
+    #[test]
+    fn price_limit_pct_supports_qmt_prefixed_codes() {
+        assert_eq!(price_limit_pct("sz.300750"), 0.20);
+        assert_eq!(price_limit_pct("sz.301001"), 0.20);
+        assert_eq!(price_limit_pct("sh.688981"), 0.20);
+        assert_eq!(price_limit_pct("sh.689009"), 0.20);
+        assert_eq!(price_limit_pct("sz.002415"), 0.10);
+        assert_eq!(price_limit_pct("sh.600000"), 0.10);
+
+        assert_eq!(price_limit_pct("300750"), 0.20);
+        assert_eq!(price_limit_pct("688981"), 0.20);
+    }
 }

@@ -44,6 +44,14 @@ pub fn process_buy_signals(
         }
     }
     let total_value = portfolio.cash + positions_value;
+    let mut running_total_asset = portfolio.cash;
+    for position in positions.iter() {
+        if let Some(prices) = market_data.prices.get(&position.code) {
+            if let Some(bar) = prices.get(&current_date) {
+                running_total_asset += position.shares as f64 * bar.open;
+            }
+        }
+    }
 
     let available_slots = (config.max_positions - current_positions).min(config.max_daily_buys);
     let mut bought_count = 0;
@@ -57,13 +65,13 @@ pub fn process_buy_signals(
         }
 
         let target_position_value = total_value * config.position_size_pct;
-        let ideal_shares = bt_core::round_to_lot(target_position_value / open_price);
+        let ideal_shares = bt_core::round_to_lot(code, target_position_value / open_price);
         if ideal_shares == 0 {
             continue;
         }
 
         let cost_per_share = open_price * (1.0 + config.commission_rate + config.slippage_pct);
-        let affordable_shares = bt_core::round_to_lot(portfolio.cash / cost_per_share);
+        let affordable_shares = bt_core::round_to_lot(code, portfolio.cash / cost_per_share);
         let shares = ideal_shares.min(affordable_shares);
 
         let min_shares = (ideal_shares as f64 * config.min_position_ratio) as u32;
@@ -81,6 +89,7 @@ pub fn process_buy_signals(
         }
 
         portfolio.cash -= cost;
+        running_total_asset -= commission + slippage;
         stats.record_costs(commission, 0.0, slippage);
 
         commands.spawn(Position {
@@ -97,7 +106,10 @@ pub fn process_buy_signals(
             trailing_stop_active: false,
         });
 
-        println!("[{}] [BUY] {} @ {:.2} x {} shares", current_date, code, open_price, shares);
+        println!(
+            "[{}] [BUY] {} @ {:.2} x {} shares | Total Asset: {:.2}",
+            current_date, code, open_price, shares, running_total_asset
+        );
         bought_count += 1;
     }
 }
@@ -116,6 +128,15 @@ pub fn check_sell_conditions(
         None => return,
     };
 
+    let mut running_total_asset = portfolio.cash;
+    for (_, position) in positions.iter_mut() {
+        if let Some(prices) = market_data.prices.get(&position.code) {
+            if let Some(bar) = prices.get(&current_date) {
+                running_total_asset += position.shares as f64 * bar.close;
+            }
+        }
+    }
+
     for (entity, mut position) in positions.iter_mut() {
         let bar = match market_data.prices.get(&position.code) {
             Some(prices) => match prices.get(&current_date) {
@@ -128,6 +149,10 @@ pub fn check_sell_conditions(
         position.update_high(bar.high);
 
         let hold_days = (current_date - position.entry_date).num_days() as i32;
+        // A 股 T+1: 当天开仓的仓位不允许在同日收盘触发任何卖出逻辑。
+        if hold_days <= 0 {
+            continue;
+        }
         let current_gain_pct = (bar.close - position.entry_price) / position.entry_price;
 
         // ── 激活移动止损 ──
@@ -138,7 +163,10 @@ pub fn check_sell_conditions(
             position.trailing_stop_active = true;
             println!(
                 "[{}] [TRAILING ACTIVATED] {} | Gain: +{:.1}% | High: {:.2}",
-                current_date, position.code, current_gain_pct * 100.0, position.high_since_entry
+                current_date,
+                position.code,
+                current_gain_pct * 100.0,
+                position.high_since_entry
             );
         }
 
@@ -159,12 +187,20 @@ pub fn check_sell_conditions(
                 position.cost -= sell_cost;
                 position.realized_pnl += pnl;
                 position.take_profit_stage = 1;
+                running_total_asset -= commission + stamp_duty + slippage;
                 stats.record_costs(commission, stamp_duty, slippage);
 
                 println!(
-                    "[{}] [TP1] {} @ {:.2} | +{:.1}% | Sold {}/{} shares | PnL: {:+.2}",
-                    current_date, position.code, bar.close, current_gain_pct * 100.0,
-                    sell_shares, position.initial_shares, pnl
+                    "[{}] [TP1] {} @ {:.2} | +{:.1}% | Sold {} shares | Remaining {}/{} | PnL: {:+.2} | Total Asset: {:.2}",
+                    current_date,
+                    position.code,
+                    bar.close,
+                    current_gain_pct * 100.0,
+                    sell_shares,
+                    position.shares,
+                    position.initial_shares,
+                    pnl,
+                    running_total_asset
                 );
             }
         } else if position.take_profit_stage == 1 && current_gain_pct >= config.tp2_pct {
@@ -183,12 +219,20 @@ pub fn check_sell_conditions(
                 position.cost -= sell_cost;
                 position.realized_pnl += pnl;
                 position.take_profit_stage = 2;
+                running_total_asset -= commission + stamp_duty + slippage;
                 stats.record_costs(commission, stamp_duty, slippage);
 
                 println!(
-                    "[{}] [TP2] {} @ {:.2} | +{:.1}% | Sold {}/{} shares | PnL: {:+.2}",
-                    current_date, position.code, bar.close, current_gain_pct * 100.0,
-                    sell_shares, position.initial_shares, pnl
+                    "[{}] [TP2] {} @ {:.2} | +{:.1}% | Sold {} shares | Remaining {}/{} | PnL: {:+.2} | Total Asset: {:.2}",
+                    current_date,
+                    position.code,
+                    bar.close,
+                    current_gain_pct * 100.0,
+                    sell_shares,
+                    position.shares,
+                    position.initial_shares,
+                    pnl,
+                    running_total_asset
                 );
             }
         }
@@ -228,23 +272,34 @@ pub fn check_sell_conditions(
             let slippage = gross * config.slippage_pct;
             let net = gross - commission - stamp_duty - slippage;
 
-            let pnl = net - position.cost + position.realized_pnl;
+            let exit_pnl = net - position.cost;
+            let trade_pnl = exit_pnl + position.realized_pnl;
             let total_initial_cost = position.initial_shares as f64 * position.entry_price;
-            let pnl_pct = pnl / total_initial_cost;
+            let trade_pnl_pct = trade_pnl / total_initial_cost;
 
             portfolio.cash += net;
-            stats.record_trade(pnl, commission, stamp_duty, slippage);
+            running_total_asset -= commission + stamp_duty + slippage;
+            stats.record_trade(trade_pnl, commission, stamp_duty, slippage);
 
-            let stage_info = match position.take_profit_stage {
-                0 => "",
-                1 => " (TP1)",
-                2 => " (TP2)",
-                _ => "",
+            let stage_label = match position.take_profit_stage {
+                0 => "None",
+                1 => "TP1",
+                2 => "TP2",
+                _ => "Unknown",
             };
 
             println!(
-                "[{}] [SELL] {} @ {:.2} | PnL: {:+.2}%{} | Hold: {} days | {}",
-                current_date, position.code, bar.close, pnl_pct * 100.0, stage_info, hold_days, exit_reason
+                "[{}] [SELL] {} @ {:.2} | ExitPnL: {:+.2} | TradePnL: {:+.2} ({:+.2}%) | Stage: {} | Hold: {}d | {} | Asset: {:.2}",
+                current_date,
+                position.code,
+                bar.close,
+                exit_pnl,
+                trade_pnl,
+                trade_pnl_pct * 100.0,
+                stage_label,
+                hold_days,
+                exit_reason,
+                running_total_asset
             );
 
             commands.entity(entity).insert(ClosedTrade {
@@ -254,8 +309,8 @@ pub fn check_sell_conditions(
                 entry_price: position.entry_price,
                 exit_price: bar.close,
                 shares: position.initial_shares,
-                pnl,
-                pnl_pct,
+                pnl: trade_pnl,
+                pnl_pct: trade_pnl_pct,
                 hold_days,
                 exit_reason,
             });
@@ -286,5 +341,132 @@ pub fn update_stats(
     }
 
     let total_value = portfolio.total_value(positions_value);
-    stats.update_drawdown(total_value);
+    stats.update_drawdown(total_value, current_date);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy_app::{App, Update};
+    use chrono::NaiveDate;
+    use std::collections::HashMap;
+
+    fn build_market_data_for_day(
+        code: &str,
+        date: NaiveDate,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+    ) -> MarketData {
+        let mut by_date = HashMap::new();
+        by_date.insert(
+            date,
+            crate::resources::PriceBar {
+                open,
+                high,
+                low,
+                close,
+                pre_close: open,
+                wl: close * 0.95,
+                yl: close * 0.90,
+                b1_signal: true,
+                pre_b1_signal: true,
+                is_loose: true,
+                sort_value: 1.0,
+            },
+        );
+
+        let mut prices = HashMap::new();
+        prices.insert(code.to_string(), by_date);
+        MarketData { prices }
+    }
+
+    #[test]
+    fn does_not_sell_on_entry_day_even_if_take_profit_hits() {
+        let trade_date = NaiveDate::from_ymd_opt(2026, 1, 22).unwrap();
+        let mut app = App::new();
+        let mut portfolio = Portfolio::new(100_000.0);
+        portfolio.current_date = Some(trade_date);
+
+        app.insert_resource(BacktestConfig::default());
+        app.insert_resource(portfolio);
+        app.insert_resource(BacktestStats::default());
+        app.insert_resource(build_market_data_for_day(
+            "sh.603778",
+            trade_date,
+            14.73,
+            18.50,
+            14.50,
+            18.01,
+        ));
+        app.add_systems(Update, check_sell_conditions);
+        app.world_mut().spawn(Position {
+            code: "sh.603778".to_string(),
+            entry_date: trade_date,
+            entry_price: 14.73,
+            stop_price: 14.00,
+            shares: 2700,
+            initial_shares: 2700,
+            cost: 2700.0 * 14.73,
+            realized_pnl: 0.0,
+            take_profit_stage: 0,
+            high_since_entry: 14.73,
+            trailing_stop_active: false,
+        });
+
+        app.update();
+
+        let world = app.world_mut();
+        let mut query = world.query::<&Position>();
+        let positions: Vec<Position> = query.iter(world).cloned().collect();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].shares, 2700);
+        assert_eq!(positions[0].take_profit_stage, 0);
+        assert_eq!(world.resource::<BacktestStats>().total_trades, 0);
+    }
+
+    #[test]
+    fn can_take_profit_after_entry_day() {
+        let entry_date = NaiveDate::from_ymd_opt(2026, 1, 21).unwrap();
+        let trade_date = NaiveDate::from_ymd_opt(2026, 1, 22).unwrap();
+        let mut app = App::new();
+        let mut portfolio = Portfolio::new(100_000.0);
+        portfolio.current_date = Some(trade_date);
+
+        app.insert_resource(BacktestConfig::default());
+        app.insert_resource(portfolio);
+        app.insert_resource(BacktestStats::default());
+        app.insert_resource(build_market_data_for_day(
+            "sh.603778",
+            trade_date,
+            14.73,
+            18.50,
+            14.50,
+            18.01,
+        ));
+        app.add_systems(Update, check_sell_conditions);
+        app.world_mut().spawn(Position {
+            code: "sh.603778".to_string(),
+            entry_date,
+            entry_price: 14.73,
+            stop_price: 14.00,
+            shares: 2700,
+            initial_shares: 2700,
+            cost: 2700.0 * 14.73,
+            realized_pnl: 0.0,
+            take_profit_stage: 0,
+            high_since_entry: 14.73,
+            trailing_stop_active: false,
+        });
+
+        app.update();
+
+        let world = app.world_mut();
+        let mut query = world.query::<&Position>();
+        let positions: Vec<Position> = query.iter(world).cloned().collect();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].shares, 1800);
+        assert_eq!(positions[0].take_profit_stage, 1);
+    }
 }

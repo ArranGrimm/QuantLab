@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.0"
 app = marimo.App(width="medium")
 
 
@@ -15,7 +15,8 @@ def _():
     from plotly.subplots import make_subplots
     from datetime import date
     from utils import load_daily_data_single, get_adj_factor_frame
-    return date, duckdb, go, load_daily_data_single, make_subplots, mo, os, pl
+
+    return date, duckdb, go, load_daily_data_single, make_subplots, mo, pl
 
 
 @app.cell
@@ -42,7 +43,7 @@ def _(mo):
     # 滑块：查看最近多少天
     input_days = mo.ui.slider(
         start=50, 
-        stop=800, 
+        stop=1500, 
         value=500, 
         step=10, 
         label="🕒 查看最近 N 天:",
@@ -234,7 +235,7 @@ def _(
 
     # 显示结果
     result_view
-    return (df,)
+    return
 
 
 @app.cell
@@ -252,71 +253,6 @@ def _(date, mo):
 
     # 将 UI 横向排列，美观一点
     mo.hstack([ui_buy_date, ui_sell_date], justify="start")
-    return ui_buy_date, ui_sell_date
-
-
-@app.cell
-def _(df, file_path, input_code, mo, os, pl, ui_buy_date, ui_sell_date):
-    code_val = input_code.value.strip()
-    buy_date_val = ui_buy_date.value
-    sell_date_val = ui_sell_date.value
-
-    profit_view = None
-
-    if not os.path.exists(file_path):
-        profit_view = mo.callout(f"❌ 找不到文件: {file_path}", kind="danger")
-    else:
-        try:
-            # 提取买卖数据
-            buy_row = df.filter(pl.col("date") == buy_date_val)
-            sell_row = df.filter(pl.col("date") == sell_date_val)
-
-            # 逻辑判定
-            if buy_row.height == 0:
-                profit_view = mo.callout(f"⚠️ 买入日期 {buy_date_val} 无数据 (可能是停牌或非交易日)", kind="warn")
-            elif sell_row.height == 0:
-                profit_view = mo.callout(f"⚠️ 卖出日期 {sell_date_val} 无数据 (可能是停牌或非交易日)", kind="warn")
-            else:
-                # 按照你的逻辑：买入按开盘价 (Open)，卖出按收盘价 (Close)
-                buy_price = buy_row["open_adj"][0]
-                sell_price = sell_row["close_adj"][0]
-
-                # 收益率计算
-                profit_amount = sell_price - buy_price
-                profit_pct = (profit_amount / buy_price) * 100
-
-                # 持仓天数计算 (自然交易日)
-                hold_days = df.filter(
-                    (pl.col("date") >= buy_date_val) & 
-                    (pl.col("date") <= sell_date_val)
-                ).height
-
-                # 判定盈亏颜色
-                color_style = "green" if profit_pct > 0 else "red" # 这里的颜色逻辑：红涨绿跌? 还是国际惯例? 
-                # A股习惯：红是赚，绿是亏。这里按 A 股习惯。
-                txt_color = "red" if profit_pct > 0 else "green"
-                emoji = "🚀" if profit_pct > 0 else "😭"
-
-                # 生成漂亮的 Markdown 报告
-                md_content = f"""
-                ## {emoji} 交易复盘: {code_val}
-
-                | 指标 | 数值 | 说明 |
-                | :--- | :--- | :--- |
-                | **买入** | `{buy_date_val}` | 价格: **{buy_price:.2f}** (Open) |
-                | **卖出** | `{sell_date_val}` | 价格: **{sell_price:.2f}** (Close) |
-                | **持仓** | **{hold_days}** 天 | 交易日数量 |
-                | **每股盈亏** | {profit_amount:+.2f} 元 | 差价 |
-                | **最终收益** | <span style="color:{txt_color}; font-size:24px; font-weight:bold">{profit_pct:+.2f}%</span> | {emoji} |
-                """
-
-                profit_view = mo.md(md_content)
-
-        except Exception as e:
-            profit_view = mo.callout(f"发生错误: {str(e)}", kind="danger")
-
-
-    profit_view
     return
 
 
@@ -324,11 +260,6 @@ def _(df, file_path, input_code, mo, os, pl, ui_buy_date, ui_sell_date):
 def _():
     import datetime
     datetime.datetime.now().weekday()
-    return
-
-
-@app.cell
-def _():
     return
 
 

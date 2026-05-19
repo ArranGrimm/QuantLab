@@ -17,14 +17,14 @@ def _code_to_baostock(code: str) -> str:
     return f"sz.{code}"
 
 
-def _load_cache() -> list[str] | None:
+def _load_cache(max_age_days: int | None = _CACHE_MAX_AGE_DAYS) -> list[str] | None:
     """读取本地缓存，过期则返回 None"""
     if not _ST_CACHE.exists():
         return None
     try:
         data = json.loads(_ST_CACHE.read_text())
         cached_date = datetime.date.fromisoformat(data["date"])
-        if (datetime.date.today() - cached_date).days <= _CACHE_MAX_AGE_DAYS:
+        if max_age_days is None or (datetime.date.today() - cached_date).days <= max_age_days:
             return data["codes"]
     except (json.JSONDecodeError, KeyError, ValueError):
         pass
@@ -64,7 +64,17 @@ def get_st_blacklist_pl(date_str=None) -> list[str]:
         print(f"[ST] AKShare 失败: {e}，尝试 Baostock...")
 
     # ── 方案 B: Baostock 兜底 ──
-    return _get_st_baostock(date_str)
+    codes = _get_st_baostock(date_str)
+    if codes:
+        return codes
+
+    # ── 方案 C: 网络不可用时允许使用过期缓存，避免回测 universe 漂移 ──
+    stale_cached = _load_cache(max_age_days=None)
+    if stale_cached is not None:
+        print(f"[ST] 实时源失败，使用过期本地缓存，共 {len(stale_cached)} 只")
+        return stale_cached
+
+    return []
 
 
 def _get_st_baostock(date_str=None) -> list[str]:

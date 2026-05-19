@@ -1,358 +1,279 @@
 # Project Status
 
-> 实验详情见 `experiments/` 目录，本文件仅跟踪当前状态和最优指标。
+> 本文件是“当前状态看板”，只保留当前结论、关键指标、归档路线和索引。实验流水账见 `progress.md`，长篇分析见 Canvas 与 `experiments/`。
 
 ---
 
-## 一、截面轮动策略
+## 当前决策摘要
 
-### 统一口径
-- `Rotation` 当前定位: **候选子策略**, 不再承担“单策略复刻博主完整体系”的目标
-- `Rotation` 默认对标对象: 博主**早期公开的日频截面基线**
-- 博主当前完整体系: 见 `experiments/target-strategy-evolution.md`, 应理解为系统级长期目标
-- `Rotation` 当前主线候选: `core_plus_alpha158(kbar_shape)`
-
-### 当前活跃路线
-- 主线候选: `core_plus_alpha158(kbar_shape)`
-- 比较锚点: `core_12 + fwd_ret_1d + EXPORT_EMA_ALPHA=0.30 + hold_buffer=50 + max_hold_days=10`
-- 当前优先工作:
-  - 压组合层成本 (`hold_buffer / min_score / top_n`)
-  - 继续按“三层解耦”架构推进 `Rotation` 研究流
-
-### 三层解耦现状
-- 分析层: `notebooks/rotation_factor_lab.py`
-  - 负责因子 IC、分组汇总、Alpha decay、Alpha158 top1 / 强子集筛选
-- 清单层: `manifests/rotation_feature_sets.py`
-  - 负责维护稳定特征集、状态标签 (`active / archived / experimental`) 与说明
-- 训练层: `notebooks/cross_section_rotation.py`
-  - 只消费 manifest 中冻结的特征集
-  - 负责训练集构造、Walk-forward 打分、raw score 导出与 artifact 落盘
-
-### 已收口路线
-- `46-all` / `36-pruned`: 不再作为主推版本
-- `fwd_ret_1d_rank_pct`: 首轮未证明优于当前主线, 仅后置观察
-- `rank_pct / rank_gauss` 截面归一化: 弱于 `zscore`, 当前收口
-- `alpha158(kbar_shape)` 单跑: 判定为交互增强器, 不作为独立主线
-- `core_plus_alpha158_top1`: 已验证失败, 不继续作为扩容主线
-
-### 已完成
-- `utils/rotation_factors.py`: 42 个日线截面因子 (动量/波动/成交量/技术/微观/A股T+1/处置效应)
-  - T 日数据版: 所有因子直接用当日 OHLCV, 与实盘 14:45 快照对齐
-  - 已新增分组注册表: `FACTOR_GROUPS / FACTOR_GROUP_LABELS / FACTOR_TO_GROUP`
-- `utils/duckdb_utils.py`: `add_price_limit_cols()` 涨跌停标记 (与 Rust bt-core 逻辑一致)
-- `utils/signal_export.py`: 信号导出 (B1 事件信号 + 截面轮动打分), Parquet 格式供 Rust 消费
-  - `Rotation` 已新增 artifact 追踪: `train.meta.json` / `signal.meta.json` / `raw_scores.parquet`
-  - `Rotation` 默认不再写 `data/signals/rotation_scores.parquet`, `artifacts/` 为唯一真源
-- `bt-core`: 已新增 artifact 追踪公共 I/O
-  - `SignalArtifactMeta`
-  - `load_signal_meta()`
-  - `build_report_stem()`
-  - `write_report_bundle()`
-  - `resolve_registry_path()`
-  - `append_jsonl_record()`
-- `notebooks/cross_section_rotation.py`: 训练入口 notebook
-  - Cell 1: 读取 `FEATURE_SET` 并从 manifest 加载稳定特征集
-  - Cell 2: 数据加载 + 因子计算 + 涨跌停标记 + 截面标准化 + 标签构造
-  - Cell 2: 仍支持 `zscore / rank_pct / rank_gauss` 与 `fwd_ret_{1/2/3/5}d_rank_pct`
-  - Cell 2b: 校验 `amount / volume` 单位口径, 防止 `vwap_raw` 误放大 100 倍
-  - Cell 3: 明确提示因子分析已迁移到 `rotation_factor_lab.py`
-  - Cell 6: LightGBM Walk-Forward 打分, 输出 `df_scores_raw + rotation_train_meta`
-  - Cell 6b: 导出 parquet, 独立控制 `EXPORT_EMA_ALPHA`, 写入 artifact 元数据, 无需重训模型
-  - Cell 7: 保留原始分数的 Signal Quality 诊断
-- `notebooks/rotation_factor_lab.py`: 独立分析 notebook
-  - 负责 Rotation / Alpha158 因子 IC、分组汇总、Alpha decay、相关性诊断与 core 候选筛查
-- `manifests/rotation_feature_sets.py`:
-  - 当前稳定训练入口: `core_12`, `core_plus_alpha158_kbar_shape`
-  - `core_plus_alpha158_top1` 与 `pruned_rotation` 已降级为 `analysis-only`
-- 新增 `utils/factor_analysis.py`:
-  - `build_ic_summary_frame`
-  - `summarize_factor_groups`
-  - `extract_group_top_factor_cols`
-  - `build_daily_ic_frame`
-  - `resolve_decay_factor_cols`
-  - `compute_factor_decay`
-- `utils/alpha158_factors.py`:
-  - 已按 `Qlib Alpha158` 默认模板本地复刻 `158` 因子
-  - 已可直接与现有 `Rotation` 因子合并训练
-  - `RANK / BETA / RSQR / RESI / IMAX / IMIN / IMXD` 已改为 Polars 原生实现, 不再依赖 `rolling_map`
-- Rust 回测引擎:
-  - `bt-core`: 涨跌停判定 (`price_limit_pct`, `is_limit_up`, `is_limit_down`)
-  - `bt-core`: artifact 追踪公共 I/O (报告 bundle / meta 读取 / registry append)
-  - `bt-rotation`: 涨停过滤 (买入) + 跌停锁仓 (卖出) + 过滤统计
-  - 报告自动保存到 signal 目录下的 `backtests/<backtest_timestamp_ms>/`
-  - 自动读取 `signal.meta.json`, 输出 `report.txt` / `report.json`, 并追加 `artifacts/rotation/<train_run_id>/backtest.jsonl`
-  - `run_rotation.bat` 现在是 `python scripts/rotation_backtest.py` 的 Windows 包装器
-  - 支持:
-    - 交互式选择 `train run -> signal`
-    - 或直接传 `signal.parquet / signal.meta.json / signal目录`
-    - CLI 覆盖 `top_n / hold_buffer / min_score / max_hold_days`
-    - 每次回测自动落盘 `effective.config.toml`, 避免手改 Git 追踪的基线 config
-
-### 我们的核心数据 (2026-03-31 更新, 排除涨停幻觉后的真实 alpha)
-| 指标 | 值 | 备注 |
-|---|---|---|
-| Gross Return (809天) | +48.12% | 约 15%/年, 真实 alpha |
-| Total Return | +10.51% | 0.1% 滑点 |
-| 最大回撤 | 21.34% | |
-| 胜率 | 45.6% | |
-| 总交易笔数 | 2,202 | 日均 2.7 笔 |
-| 信号 IC Mean | +0.0376 | t-stat = 8.81 ✅ |
-| ICIR | +0.3096 | |
-| L/S 年化 Sharpe | 1.65 | |
-| L/S 胜率 | 54.8% | |
-| Top-20 日均换手 | 62.5% | 年化 151x |
-| LABEL | fwd_ret_1d | |
-| 涨停过滤 (Rust) | 日均 2.0 只 | 模型残余偏好 |
-
-### 当前最新主线候选 (2026-04-03 更新, `core_plus_alpha158 + kbar_shape`)
-| 指标 | 值 | 备注 |
-|---|---|---|
-| Feature Mode | `core_plus_alpha158` | `core_12 + Alpha158(kbar_shape)` |
-| Feature Count | 21 | `12 + 9` |
-| Normalize | `zscore` | |
-| Export EMA | `0.30` | |
-| Target IC Mean | +0.0441 | `t-stat = +10.89` |
-| ICIR | +0.3827 | |
-| L/S Sharpe | 1.47 | 经济评估口径 `fwd_ret_1d` |
-| Gross Return | +59.79% | 810 天 |
-| Total Return | +18.61% | 当前已知优于旧主线 |
-| 最大回撤 | 14.45% | 较旧主线明显改善 |
-| 总交易笔数 | 2,457 | 日均 3.0 笔 |
-| 总成本 | 205,925 | 其中滑点占比最高 |
-| Top-20 日均双边换手 | 106.6% | notebook 诊断口径 |
-
-阶段判断:
-- `Alpha158` 首轮对照已出现明确正增益, 且不是只换来更高回撤的“虚胖 alpha”
-- 最有效的新增信息当前集中在 `kbar_shape` 组, 与特征重要性结果一致
-- 需要继续确认:
-  - uplift 是来自 `kbar_shape` 独立 alpha, 还是主要来自其与 `core_12` 的交互
-  - notebook 高换手诊断与 Rust 实际成交次数之间的差异, 是否还能通过组合层参数继续压缩成本
-
-### `alpha158(kbar_shape)` 单跑验证 (2026-04-03 更新)
-| 指标 | 值 | 备注 |
-|---|---|---|
-| Feature Mode | `alpha158` | 仅 `kbar_shape` 9 因子 |
-| Feature Count | 9 | |
-| Export EMA | `0.30` | |
-| Target IC Mean | +0.0438 | `t-stat = +12.10` |
-| ICIR | +0.4250 | 统计信号并不弱 |
-| L/S Sharpe | 1.45 | notebook 经济分层仍显著 |
-| Gross Return | +7.65% | 810 天 |
-| Total Return | -21.70% | 成本后明显失败 |
-| 最大回撤 | 28.68% | 高于当前主线 |
-| 总交易笔数 | 2,250 | 日均 2.8 笔 |
-| 总成本 | 146,736 | gross alpha 无法覆盖成本 |
-| Top-20 日均双边换手 | 124.0% | 高于 `core_plus_alpha158` |
-
-阶段判断更新:
-- `kbar_shape` 单跑时只体现出“统计上有信息量”, 但组合层不可兑现
-- 因此上一轮 uplift 不能再理解为“发现了可独立替代 `core_12` 的新主线”
-- 当前更合理的解释是:
-  - `kbar_shape` 对 `core_12` 更像高价值交互增强器
-  - 其独立排序能力不足以支撑当前 `Top-20 + hold_buffer=50 + min_score=0.002` 的组合约束
-- 后续主线应聚焦:
-  - `core_12 + kbar_shape`
-  - 以及该组合在组合层的成本压缩与兑现优化
-
-### `core_plus_alpha158_top1` 全组 top1 验证 (2026-04-03 更新)
-| 指标 | 值 | 备注 |
-|---|---|---|
-| Feature Mode | `core_plus_alpha158_top1` | `core_12 + Alpha158(all groups top1)` |
-| Feature Count | 21 | `12 + 9` |
-| Export EMA | `0.30` | |
-| Target IC Mean | +0.0322 | `t-stat = +8.50` |
-| ICIR | +0.2987 | 弱于 `kbar_shape` 组合 |
-| L/S Sharpe | 1.36 | notebook 经济分层仍为正 |
-| Gross Return | +10.40% | 810 天 |
-| Total Return | -49.33% | 成本后彻底失败 |
-| 最大回撤 | 50.38% | 明显不可接受 |
-| 总交易笔数 | 5,631 | 日均 7.0 笔 |
-| 总成本 | 298,619 | `slippage + stamp duty` 主导 |
-| Top-20 日均双边换手 | 121.4% | 明显高于 `kbar_shape` 组合 |
-
-阶段判断更新:
-- `Alpha158` 各组 `top1` 虽然统计上并非完全无效, 但组合层兑现严重失控
-- “每组保留 1 个”这个规则对训练入口过于机械, 会把弱组一起带入并稀释强组增量
-- 因此 `core_plus_alpha158_top1` 暂时退出主线, 当前 Alpha158 主线仍维持 `core_plus_alpha158(kbar_shape)`
-
-#### 失败实验记录
-- **涨停幻觉**: 旧模型 +586% 几乎全是虚假买入涨停股, 过滤后 Gross 仅 +5.7%
-- **超额收益标签** (fwd_ret_1d_excess): 五分位单调性崩塌, Top-20 选股退化为随机
-- **fwd_ret_2d 标签**: Gross +54% 但换手增加, 净效果不如 fwd_ret_1d
-- **128 天长周期因子** (42→55 因子): IC 下降, 回测净收益从 +82% 降至 +30%, 已回退
-- **EMA α=1.0** (无平滑): 日均 14.1 笔交易, 成本 > 本金, 净收益 -45%
-- **单因子 IC 剪枝** (55→50): 反而更差, 树模型非线性交互使单因子 IC 不适合做删减依据
-- **`core_plus_alpha158_top1`**: 虽有 `Gross +10.40%`, 但 `Net -49.33% / MDD 50.38% / 7.0 trades/day`, 属于高换手失控失败
-
-### 原策略关键参数 (2026-01 更新)
-| 指标 | 值 | 备注 |
-|---|---|---|
-| 年化收益率 | 50.42% | 纯日频, 不含日内 T+0 |
-| 最大回撤 | 9.13% | |
-| 胜率 | 54.01% | |
-| 盈亏比 | 3.04 : 2.02 | ≈ 1.5:1 |
-| 日收益偏度 | 0.90 | 正偏, 厚尾盈利 |
-| 总交易笔数 | 7475 | 5 年, 日均 ~6.2 笔 |
-| 最大持仓 | 20 只 | |
-| 平均仓位 | ~50% | 留现金给日内做 T |
-| **平均持仓天数** | **2.8 天** | **非严格 T+1 轮动** |
-| Alpha | 0.60 | |
-| Beta | 1.78 (R²=0.28) | 高 beta 暴露 |
-| **子策略数量** | **12 个** | **多策略组合, 非单模型** |
-| 日内 T+0 系统 | 1 分钟频率 | 实盘额外贡献 +10-20% 年化 |
-
-### 与目标策略的差距
-
-详见 `experiments/target-strategy-evolution.md`。当前应区分“博主早期公开的日频截面基线”与“后期多策略 rule-based 体系”。核心差距已不只是单策略指标, 还包括多策略集成、状态切换、分钟级 T+0 与混合数据源。
-
-### Rotation 后续方向
-
-详见 `experiments/rotation-next-phase.md`。
-
-当前下一阶段优先级:
-1. 将 `core_plus_alpha158(kbar_shape)` 作为当前最强主线候选, 与旧 `core_12` 基线并行对照
-2. `alpha158(kbar_shape)` 单跑已验证不适合作为独立主线, 暂不继续深挖
-3. 先讨论并设计“因子挖掘分析/因子选择”与“主训练/导出/回测”更彻底解耦的架构, 再决定下一轮 notebook 改造
-4. 若继续扩 Alpha158, 优先看更强子集而非 `top1_all`, 避免弱组稀释与高换手失控
-5. 围绕 `core_plus_alpha158(kbar_shape)` 做组合层兑现优化: 优先看 `hold_buffer / min_score / Top-N` 对成本的压缩空间
-6. `fwd_ret_1d_rank_pct` 仍可保留观察, 但继续后置于组合层优化
-7. 暂不急于上全量 `158` 因子, 继续按小分组渐进扩容
-
-备注:
-- `Rotation` 当前标的池已经是 **80~500 亿**, 这不是下一阶段待修正项
-- 导出侧 EMA 扫描已完成, `0.30` 为当前净收益最佳点, `0.28` 为次优平衡点
-- `cross_section_rotation.py` 已修复 Cell 6 的 `LABEL` 动态过滤 bug, 后续切换标签不会再误用写死的 `fwd_ret_1d`
-- `cross_section_rotation.py` 已新增 `fwd_ret_{1/2/3/5}d_rank_pct`，可在不改模型结构的前提下直接验证排序化标签
-- `cross_section_rotation.py` 已新增 `NORMALIZE_MODE`，可直接对照 `zscore / rank_pct / rank_gauss` 三种特征截面归一化
-- `utils/signal_export.py` 已把 `normalize_mode` 写入 artifact 元数据，后续导出可直接区分不同归一化实验
-- `cross_section_rotation.py` 的 Cell 7 现已采用双口径评估: `Target IC` 跟随 `LABEL`, 经济分层固定按 `fwd_ret_1d`
-- `cross_section_rotation.py` 的 Cell 6 现已支持 `core_plus_alpha158_top1`, 可直接消费 `Cell 3` 产出的各组 `top1` 因子清单
-- `core_plus_alpha158_top1` 首轮验证已失败, 说明当前不宜把“各组 top1 全并入训练”作为默认扩容路径
-- `fwd_ret_1d_rank_pct` 首轮观察未显示优于当前 `fwd_ret_1d` 主线, 尤其经济分层与最终回测暂未改善
-- `NORMALIZE_MODE = rank_pct / rank_gauss` 两轮实验均显著弱于 `zscore`, 当前不再作为主线优化方向
-- 组合参数扫描显示 `max_hold_days=15` 的纯净收益更高, 但当前不升格为“早期日频对标锚点”, 以免偏离博主早期公开基线“平均持仓 2.8 天”的节奏特征
-- `stock_daily.volume` 单位已验证为“手”, 因此 `vwap_raw` 与 `turnover_rate` 现统一按 `volume * 100` 还原股数后再计算
-- `Alpha158` 已完成本地 Polars 复刻并接入 `Rotation` notebook, 下一步进入首轮基线对照
-- `Alpha158` 最重的 `35` 个窗口因子现已去除 Python 回调, 与旧 `rolling_map` 版本数值对齐
-- `alpha158` 单跑实验现会自动跳过 `Rotation` 因子分析 Cell, 以缩短实验等待时间
-- `Alpha158(kbar_shape)` 首轮 `core_plus_alpha158` 对照已给出当前更优净收益: `Gross +59.79% / Net +18.61% / MDD 14.45%`
-- 从当前特征重要性看, 新增 `kbar_shape` 因子里 `KUP2 / KLOW2 / KUP / KLOW / KMID2 / KSFT / KMID / KSFT2 / KLEN` 整体贡献突出
-- `alpha158(kbar_shape)` 单跑虽有较高 `IC / ICIR`, 但 Rust 回测仅 `Gross +7.65% / Net -21.70% / MDD 28.68%`
-- 这说明 `kbar_shape` 当前更像是 `core_12` 的交互增强器, 而非可单独替代主线的独立特征集
+- 当前主策略底座: `manual_p2_k0p5_r0_6td`
+  - 修正买入手数口径后，净收益更新为 `+170.80%`
+  - 最大回撤 `15.30%`
+  - 当前仍是 AMV bull pool 下最强可交易基线
+- 最新 P/K/M 验证: `amv-pkm-sleeve-rust-backtest.canvas.tsx`
+  - 标签侧动量增强没有兑现为更好的 Rust 主基线
+  - 新手数口径下 `P3/K1/M2` 最好，净收益 `+103.58%`，但仍弱于主基线 `+170.80%`
+  - `P1/K0.5/M1 / P3/K1/M2` 明显改善 2025，但 MaxDD 仍约 `48%`
+  - `1td` 到 `7td` 持仓周期扫描后，P/K/M 最佳仍是 `6td`；`4td / 5td / 7td` 也没有改善结论
+  - 2026 YTD 亏损比当前主基线更深，因此 P/K/M 不作为默认替代
+- 待验证 rolling cohort 口径:
+  - 已完成第一版真实组合测试: `5td rolling18` 与 `6td rolling21`
+  - manual 最好为 `6td rolling21`: net `+23.61%`, MaxDD `9.33%`
+  - P/K/M rolling 未兑现标签侧优势，最好仅 `P2/K0.5/M0.5 6td rolling21`: net `+0.21%`
+  - 当前 rolling 实现会跳过已持有代码，因此是“不重复加仓”的真实账户口径
+  - 买入手数已修正为普通 A 股 `100` 股整数倍、科创板 `sh.688*` 最少 `200` 股后按 1 股递增
+- close-to-close 诊断:
+  - 新增 `bt-amv-cohort-diagnostic`，用于定位 Python rolling NAV 与真实 Rust rolling cohort 的损耗断点
+  - 第一版 B 口径: close-to-close、no repeat、with costs、资金/手数约束、close 涨停不可买、默认 `max_open_gap_pct = 0.098`
+  - 配套新增 unshifted 诊断信号导出脚本，避免和 `T+1 open` 真实交易信号混用
+  - B 口径 `6td rolling21`: manual `+20.88%`; P/K/M 最好 `P2/K0.5/M0.5 +15.31%`
+  - P/K/M close 涨停不可买过滤很重: `P1 812 / P2 602 / P3 856` 条，说明 Python rolling NAV 高收益大量来自不可成交信号
+- Python refill rolling NAV 诊断:
+  - 新增 `scripts/amv_limit_refill_rolling_nav.py`，用于验证“Top3 涨停则顺位补位”的标签侧上限
+  - `6d` 原始 Top3 NAV -> 跳过 close 涨停并补满 Top3: manual `+248.54% -> +90.33%`; P1 `+1054.55% -> +55.71%`; P2 `+768.74% -> +53.72%`; P3 `+1045.97% -> +31.32%`
+  - 结论: P/K/M 的千百分比级 rolling NAV 主要来自 close 涨停不可买样本；补位后仍有正 alpha，但不再超过 manual，且仍不是可交易口径
+- Executable-aware 权重网格 v2:
+  - 新增 `scripts/amv_executable_weight_grid.py`，重开早期 AMV 因子/组合/权重探索
+  - Canvas: `reports/canvases/amv-executable-weight-grid-v2.canvas.tsx`
+  - 主评估改为 `D+1 open -> D+7 close`，辅助保留 `D close -> D+6 close`
+  - 首轮 `6d` 全量 `90` 个 ranker: `P3/K0.5/R0` exec NAV `+160.14%`, 当前 reference `P2/K0.5/R0` exec NAV `+152.21%`
+  - 带动量 P/K/M 的 close-to-close NAV 仍为 `+768% ~ +1055%`，但 executable NAV 仅 `+29% ~ +33%`，且 close 涨停覆盖 `59.7% ~ 76.4%` 天
+  - 当前判断: 早期“高位 + K 线确认、低/无动量”结构在可执行口径下仍最可信；`P3/K0.5/R0` 可列入 Rust 真实回测候选，但主基线暂不变
+- Executable-aware 早期全因子扫描:
+  - 新增 `scripts/amv_executable_factor_scan.py`，重跑早期 `RANKERS + COMBO_RANKERS` 共 `47` 个 ranker
+  - Canvas: `reports/canvases/amv-executable-factor-scan.canvas.tsx`
+  - 低污染强候选: `ma_bias_20_asc` exec NAV `+231.03%`, `disp_bias_20_asc` `+187.54%`, `KSFT_asc` `+178.36%`
+  - 这些候选 close 涨停覆盖仅 `0.0% ~ 0.7%` 天，且跳过 close 涨停补位后几乎不衰减
+  - `ret_5d_desc` exec NAV `+264.07%` 最高，但 MaxDD `47.11%`、close 涨停覆盖 `69.0%` 天，仍归类为 attack/event archetype
+  - 当前判断: 下一轮组合探索应优先围绕“回调/成本线下回归/收盘偏低”与现有 P/K 结构组合，而不是继续加动量权重
+- Executable-aware pullback combo grid v1:
+  - 新增 `scripts/amv_executable_pullback_grid.py`
+  - Canvas: `reports/canvases/amv-executable-pullback-grid.canvas.tsx`
+  - focused grid `164` 个 ranker 已跑通；full grid `618` 个 ranker 已在当前 Mac 复跑完成
+  - full grid 产物: `artifacts/amv_executable_pullback_grid/20260519_213813/summary.json`
+  - 最强低污染组合 `pullback_p0_k0_b1_c0_r0`: exec NAV `+245.37%`, MaxDD `23.29%`, close 涨停覆盖 `0.5%`
+  - `pullback_p0_k0_b3_c1_r0`: exec NAV `+215.37%`, MaxDD `20.29%`, close 涨停覆盖 `0.0%`
+  - full grid 新增折中候选 `pullback_p0_k0_b2_c0p5_r0`: exec NAV `+210.37%`, MaxDD `21.89%`, close 涨停覆盖 `0.0%`
+  - refill 场景低回撤混合候选 `pullback_p2_k0_b0_c0p5_r0p5`: exec NAV `+167.31%`, MaxDD `5.73%`, rank q95 `4`
+  - `P/K + C` 候选如 `pullback_p2_k0_b0_c1_r0` refill exec NAV `+155.87%`, MaxDD `10.14%`, rank q95 `5`
+  - 当前判断: pullback sleeve 成立，但回撤深于主基线；应作为独立 sleeve / 互补 sleeve 候选接 Rust 真实回测，不直接替换 `manual_p2_k0p5_r0_6td`
+- 当前理论锚点: `amv-constrained-oracle.canvas.tsx`
+  - 后续讨论 sleeve switching、降仓、进攻切换时优先从“AMV 受约束 Oracle”出发
+  - 不再回到完整 hindsight oracle 或 8 类 sleeve selector 重新推导
+- 当前不继续主线深挖:
+  - 直接 LTR 选 Top3: 标签错配和执行口径塌缩，暂不接交易
+  - `attack_ok` 第一版: 当前状态特征未证明可稳定学习进攻切换
+  - B3 TDX 接力: 已归档为事件型补充候选，不作为主线继续优化
+- 文档约定:
+  - `project-status.md`: 当前状态、最终决策、关键指标
+  - `progress.md`: 按日期倒序的实验日志
+  - `experiments/` / Canvas: 长篇分析、历史归档、可视化结果
 
 ---
 
-## 二、B1 超跌反转策略
+## 当前主线
 
-### 已完成
-- `utils/b1_factors_opt.py`: B1 信号计算 (V3.0 + 周线 MACD 过滤)
-- `utils/signal_export.py`: B1 事件信号导出, `export_for_rust()` 支持 `extra_sort_cols`
-- `notebooks/b1_ml_explore.py`: 全市场 ML 打分 → B1 排序 (56 因子, MFE-10)
-- `notebooks/b1_ml_dedicated.py`: B1 专属模型 (仅 B1 信号日训练, 38 因子)
-- Rust `bt-b1` 回测引擎: 止损/止盈/弱势出场/追踪止损/WL 跌破
+### AMV Bull Pool TopN
 
-### B1 排序方案对比 (2026-03-25)
+- 当前策略底座: `manual_p2_k0p5_r0_6td`
+- Rust 口径:
+  - 引擎: `bt-amv-topn`
+  - 执行: `T+1 open`
+  - 持有: `6td`，当前已明确为 `max_hold_trading_days = 6` 的交易日口径
+  - TopN: `3`
+  - 固定止损: 当前主基线为 no-stop
+- 修正后核心指标:
+  - `1td`: 净收益 `-51.03%`
+  - `2td`: 净收益 `-37.33%`
+  - `3td`: 净收益 `+38.11%`
+  - `6td`: 净收益 `+170.80%`, 最大回撤 `15.30%`
+- 当前判断:
+  - `manual_p2_k0p5_r0_6td` 是当前最强底座
+  - 主要问题不是继续找新单策略，而是识别什么时候该避开底座、什么时候可以进攻
+  - 2024 大赢家来自 AMV bull 叠加高弹性行情窗口；2026 亏损段主要是入场后上冲空间不足
 
-| 排序方式 | 近期收益 (290天) | 长周期收益 (774天) | 最大回撤 |
-|---|---|---|---|
-| 手搓 `rw_dif_pct` | +30.49% | **+81.05%** | ~9.3% |
-| **全市场 ML** | **+36.63%** | +78.36% | ~13% |
-| B1 专属 ML | +21.38% | +43.83% | ~8% |
+### 下一步候选
 
-### 当前最优方案
-
-**全市场 ML 模型排序** (`b1_ml_explore.py`):
-- 近期跑赢手搓 +6pp, 长周期基本持平
-- IC +0.1373, L/S +3.95% — 信号质量远强于 B1 专属模型
-- 回撤偏大 (13% vs 9%), 但整体收益更高
-
-### B1 后续方向
-
-1. **全市场模型迭代**: 特征工程和标签优化, 收益同时辐射 B1 和 rotation 两个策略
-2. **降低回撤**: 可能需要对 B1 出场逻辑做调参 (止损比例、弱势天数)
-3. **活跃市值择时**: 当前依赖手工标注 `LOOSE_PERIODS`, 后续自动化
-
----
-
-## 三、Renko 短线策略
-
-### 当前状态
-- `notebooks/renko_ml_explore.py`: 已启动时间线重构, 统一为 `T 日收盘确认 → T+1 开盘买入`
-- Renko 专属 `rk_*` 因子已统一为 **T 日收盘可得**
-- 标签已改为 **`buy_open_t1` 基准**:
-  - `fwd_mfe_5d = max(high[T+1:T+5]) / open[T+1] - 1`
-  - `fwd_ret_1d = close[T+1] / open[T+1] - 1`
-- 已新增可切换标签入口:
-  - `fwd_ret_open_2d`
-  - `fwd_ret_close_2d`
-  - `fwd_ret_close_3d`
-- 已新增 notebook 实验面板:
-  - EMA 平滑实验
-  - Top-N 扩大实验
-  - 高分阈值过滤实验
-- 导出侧已支持独立 `EXPORT_EMA_ALPHA`, 且参数位于 Cell 6 本地, 可单独重跑 Cell 6 生成不同平滑版本 parquet
-- 导出侧“raw score → export EMA”模式后续可迁移到 `cross_section_rotation.py`, 便于只调导出平滑而不重训
-- Rust 导出 / 回测格式 **暂不继续深入调整**
-- 当前结论: `fwd_ret_open_2d` 在 notebook 层有一定统计信号, 但组合回测对 EMA 过于敏感, 且成本后净收益持续为负, **Renko 方向暂时暂停**
-
-### 当前待办
-1. 保留当前 notebook / 导出 / Rust 代码, 作为后续重启 Renko 研究的基线
-2. 若未来重启, 优先重新审视 label 语义、分钟级数据与事件驱动回测框架
-3. 将导出侧独立 EMA 的模式择机复用到截面轮动导出链路
+- 第一优先: `cash_ok` / 降仓标签
+  - 目标是识别是否应该避开 `manual_p2_k0p5_r0_6td` 的亏损日
+  - 理论依据来自 AMV 受约束 Oracle 中的 cash 上限
+- 第二优先: executable-aware 权重网格 v2 后续验证
+  - 先把 `P3/K0.5/R0` 等可执行口径高分候选导出为静态 sleeve，接 Rust `T+1 open / 6td / Top3 / no-stop`
+  - 后续所有因子/权重探索必须同时输出 executable 主指标、close-to-close 辅助指标和涨停/高开污染归因
+- 第三优先: executable-aware 回调因子组合
+  - 基于全因子扫描，把 `ma_bias_20_asc / disp_bias_20_asc / KSFT_asc` 与现有 P/K 结构组合
+  - 目标是检验“高位强势”和“回调后反弹”能否形成互补 sleeve，而非继续强化涨停动量
+  - full pullback grid 已证明低污染 pullback sleeve 成立；下一步导出 3-6 个候选做 Rust 静态 sleeve 回测
+- 第四优先: rolling cohort 真实组合口径
+  - 第一版结果显示 rolling cohort 没有帮助 P/K/M 追上 manual
+  - 后续若继续，应先分析为什么 rolling 后收益被摊薄: 重复代码跳过、现金利用率、买入失败、分散化稀释
+  - 在该诊断前，不把 rolling cohort 作为默认替代
+- 第五优先: close-to-close cohort diagnostic
+  - B 口径已证明 close 涨停不可买会大幅压低 P/K/M 的 close-to-close 上限
+  - Python refill 诊断进一步证明，即使顺位补满 Top3，P/K/M 标签侧收益也从千百分比级降至几十个百分点
+  - 若继续，需要做过滤归因: close 涨停过滤、重复代码跳过、账户分散、T+1 open 损耗分别贡献多少
+  - 暂不急着做 A 口径，除非要精确复刻 Python rolling NAV 并拆解其不可成交成分
+- 第六优先: 回到主策略入场/环境确认
+  - 2026 亏损段主要是入场后上冲空间不足，P/K/M 排序权重没有解决
+  - 关注执行日是否明显收弱、AMV bull 中短期市场宽度、赚钱效应、涨停阻塞率等可观测变量
+- 第七优先: 收紧 `attack_ok`
+  - 第一版 `attack_ok` 太抽象，且 future-best attack sleeve 噪声较高
+  - 后续如继续，应固定单一进攻袖子或提高标签门槛，追求更高 precision
 
 ---
 
-## 四、共享基础设施
+## 理论锚点
 
-### 当前架构
+### AMV 受约束 Oracle
 
-```
-Python (信号层)                    Rust (回测/执行层)
-┌────────────────────┐            ┌──────────────────────────────┐
-│ rotation_factors   │            │ Cargo Workspace              │
-│   42 通用因子 (T日) │            │ ├─ bt-core (共享)             │
-│ add_price_limit    │            │ │  涨跌停判定 / Portfolio     │
-│   涨跌停标记        │            │ ├─ bt-b1   (B1 超跌反转)     │
-│ LightGBM 1d/1d    │──Parquet──→│ └─ bt-rotation (截面轮动)     │
-│   排除涨停训练      │            │    涨停过滤 / 跌停锁仓       │
-│ signal_export      │            │ report.json + backtest.jsonl │
-│ b1_factors_opt     │            │ 报告: signal/backtests/ 目录  │
-└────────────────────┘            └──────────────────────────────┘
-```
+- Canvas: `amv-constrained-oracle.canvas.tsx`
+- 脚本: `scripts/amv_constrained_oracle_lab.py`
+- 关键设定:
+  - base: `manual_p2_k0p5_r0_6td`
+  - attack: `ret_5d_6td / ret_20d_6td / ret_20d_2td / kmid2_6td`
+  - cash: base 和 attack 都差时允许空仓
+- 关键结论:
+  - “主策略 + 例外切换”有足够理论空间
+  - 按持有期总收益训练会变成高频 attack，不像少数例外
+  - 按日化收益并设置 `3% margin` 后，attack 频率明显下降，更像可学习 gating 目标
+  - 完整 oracle 继续只作为上限诊断，不作为直接训练目标
 
-### Artifact 追踪约定
-- `Rotation` 训练 artifact:
-  - `artifacts/rotation/<train_run_id>/train.meta.json`
-  - `artifacts/rotation/<train_run_id>/raw_scores.parquet`
-- `Rotation` 导出 artifact:
-  - `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/signal.parquet`
-  - `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/signal.meta.json`
-  - 所有路径尽量使用相对路径, 方便 Windows / macOS 双设备共用
-- `Rotation` 回测 artifact:
-  - `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/backtests/<backtest_timestamp_ms>/report.txt`
-  - `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/backtests/<backtest_timestamp_ms>/report.json`
-  - `artifacts/rotation/<train_run_id>/signals/<signal_timestamp_ms>/backtests/<backtest_timestamp_ms>/effective.config.toml`
-- 全局索引:
-  - `artifacts/rotation/<train_run_id>/signals.jsonl`
-  - `artifacts/rotation/<train_run_id>/backtest.jsonl`
-  - 可按 `signal_id / label / feature_hash / EXPORT_EMA_ALPHA / 回测参数` 检索
-- 设计原则:
-  - 公共部分下沉到 `bt-core`
-  - 策略专属统计和配置结构仍留在各自 crate
-  - 避免为统一而统一, 兼顾复用性与策略个性
-  - Git 追踪的 `config.toml` 只保存稳定基线, 实验参数优先通过脚本 CLI 覆盖
-- `signals/<signal_timestamp_ms>/` 目录采用纯时间戳:
-  - 目录只负责唯一性与顺序
-  - 真正的导出参数统一记录在 `signal.meta.json` / `signals.jsonl`
-- 后续待办:
-  - 将 `bt-renko`
-  - 将 `bt-b1`
-  - 逐步接入同一套 `bt-core` artifact/report bundle I/O, 但保留各策略独立配置与额外统计
+### Oracle Explainability
 
-### 实验记录
+- Canvas:
+  - `amv-horizon-aware-oracle.canvas.tsx`
+  - `amv-horizon-oracle-explainability.canvas.tsx`
+  - `amv-constrained-oracle.canvas.tsx`
+- 关键结论:
+  - 完整 8 类 sleeve selector 当前不可直接学习
+  - 状态特征对完整 oracle class 的区分度偏弱
+  - 更合理入口是低维 gating: `base_ok / cash_ok / attack_ok`
 
-详见 `experiments/` 目录:
-- `target-strategy-evolution.md` — 博主策略演化与多策略全景
-- `rotation-factors.md` — Rotation 因子实验 (128d 失败、处置效应、EMA)
-- `b1-ml-fullmarket.md` — B1 全市场 ML 排序实验
-- `b1-ml-dedicated.md` — B1 专属模型实验 (结论: 不如全市场)
+---
+
+## 归档路线
+
+### Direct LTR Top3
+
+- 状态: 已归档，暂不接交易
+- 核心原因:
+  - 训练标签与真实执行口径错配
+  - `close-to-close` 高收益无法兑现到 `T+1 open -> T+N close`
+  - Rust 真实回测显著弱于 `manual_p2_k0p5_r0_6td`
+- 关键结果:
+  - `kbar_momentum_old_state` Rust `6td`: `-66.97%`
+  - `no_risk_old_state` Rust `6td`: `-0.01%`
+- 后续回看条件:
+  - 只在重新定义 executable label、固定更窄问题、或作为状态特征辅助时回看
+
+### `attack_ok` 第一版
+
+- 状态: 已归档为第一版失败实验
+- 脚本: `scripts/amv_attack_ok_lab.py`
+- Canvas: `amv-attack-ok-lab.canvas.tsx`
+- 关键结果:
+  - 2023/2024 AUC 接近随机
+  - 2025 仅略高
+  - 2026 样本太少，不足以证明有效
+  - 验证集 F1 阈值退化为接近 `always_attack`
+- 当前判断:
+  - 当前状态特征未证明可稳定学习“什么时候进攻”
+  - 后续如果继续，应收紧标签或固定单一进攻袖子
+
+### B3 TDX / AMV Bull 接力
+
+- 状态: 已归档为事件型补充候选，不作为主线继续深挖
+- 保留资产:
+  - `scripts/b3_tdx_signal_export.py`
+  - `scripts/b3_candidate_ranking_lab.py`
+  - `backtest-engine/crates/b3`
+  - `b3-tdx-signal-backtest.canvas.tsx`
+  - `b3-candidate-ranking-lab.canvas.tsx`
+  - `b3-all-signal-payoff.canvas.tsx`
+- 收口依据:
+  - 固定 `6td`: 净收益 `+22.61%`, 最大回撤 `42.20%`
+  - 波段 v0: 净收益 `+18.49%`, 最大回撤 `43.39%`
+  - B1 `rw_dif_pct` 排序迁移: 净收益 `-28.32%`, 最大回撤 `56.31%`
+  - 全量候选 `6td`: 平均收益 `+1.02%`, 胜率 `49.87%`, 平均盈亏比 `1.50`
+  - 单字段 Top3 排序均未跑赢全部候选平均
+- 最终判断:
+  - B3 有一定事件型 edge，但收益依赖少数大涨票
+  - 不像稳定可反复交易的主策略 alpha
+  - 后续只在组合/低重合度补充时回看
+
+### Rotation 旧路线
+
+- 状态: 候选子策略，不作为当前主线
+- 当前主线候选仍是 `core_plus_alpha158(kbar_shape)`，但 AMV 方向已经优先级更高
+- 旧路线收口:
+  - `46-all / 36-pruned`: 不再主推
+  - `core_plus_alpha158_top1`: 已验证失败
+  - `rank_pct / rank_gauss`: 弱于 `zscore`
+  - `alpha158(kbar_shape)` 单跑: 是交互增强器，不是独立主线
+- 后续回看条件:
+  - 当需要横截面多策略组合或非 AMV 子策略时再回看
+
+### B1 专属模型
+
+- 状态: 已归档
+- 结论:
+  - B1 专属 ML 不如全市场 ML / 手搓基线稳定
+  - B1 的部分字段可作为其它策略的诊断字段，但不能直接迁移为排序字段
+- 相关文档:
+  - `experiments/b1-ml-fullmarket.md`
+  - `experiments/b1-ml-dedicated.md`
+  - `experiments/b1-next-phase.md`
+
+---
+
+## 关键基线
+
+### AMV Static Sleeve
+
+- 主要可保留候选:
+  - `manual_p2_k0p5_r0_6td`: 当前主策略底座
+  - `ret_5d_6td`: 有正收益但回撤大
+  - `ret_20d_2td`: 资金效率角度可观察，但不是 6td 主基线
+- 关键 Canvas:
+  - `amv-static-sleeve-backtest.canvas.tsx`
+  - `amv-bull-pool-factor-regime.canvas.tsx`
+  - `amv-bull-pool-yearly-factor.canvas.tsx`
+
+### Price Limit 口径
+
+- `bt_core::price_limit_pct` 已修复，支持 `sz.300xxx / sh.688xxx` 等 QMT 前缀代码
+- `cargo test -p bt-core` 已通过
+- 影响:
+  - B3 结果受影响较明显
+  - `manual_p2_k0p5_r0_6td` 基线基本不受影响
+
+---
+
+## 文档索引
+
+### 当前必读
+
+- `progress.md`: 实验流水账，按日期倒序
+- `experiments/archive-index.md`: 已归档路线索引
+- `experiments/target-strategy-evolution.md`: 博主策略演化与多策略全景
+
+### 关键 Canvas
+
+- `amv-pkm-sleeve-rust-backtest.canvas.tsx`: P/K/M 动量增强袖子 Rust 真实回测
+- `amv-yearly-weight-grid.canvas.tsx`: 年度权重网格与 P/K/M 动量增强诊断
+- `amv-constrained-oracle.canvas.tsx`: 当前理论锚点
+- `amv-static-sleeve-backtest.canvas.tsx`: 静态袖子 Rust 对比
+- `amv-bull-pool-factor-regime.canvas.tsx`: 因子分年份 / 分 regime 标签分析
+- `amv-topn-6td-trade-analysis.canvas.tsx`: 6td 交易归因
+- `amv-topn-segment-attribution.canvas.tsx`: 分段归因
+- `amv-attack-ok-lab.canvas.tsx`: attack_ok 第一版失败实验
+- `b3-all-signal-payoff.canvas.tsx`: B3 收口依据
+
+---
+
+## 维护规则
+
+- 新实验先写入 `progress.md`
+- 只有形成稳定结论后才同步到本文件
+- 已归档路线只保留最终判断、关键指标和回看条件
+- 不在本文件保留完整实验过程、长表格或逐轮参数记录

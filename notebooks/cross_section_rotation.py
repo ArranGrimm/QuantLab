@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.22.0"
+__generated_with = "0.23.4"
 app = marimo.App(width="full")
 
 
@@ -16,8 +16,8 @@ def _():
     from utils import load_daily_data_full, add_price_limit_cols
     from utils import get_st_blacklist_pl
     from manifests.rotation_feature_sets import (
-        describe_rotation_feature_set,
-        get_rotation_feature_set,
+        describe_rotation_feature_set_spec,
+        resolve_rotation_feature_set,
     )
     from utils.rotation_factors import (
         calc_rotation_factors,
@@ -43,12 +43,44 @@ def _():
     NORMALIZE_MODE = "zscore"  # 可选: zscore / rank_pct / rank_gauss
     LABEL = "fwd_ret_1d"  # 可选: fwd_ret_{1/2/3/5}d / fwd_ret_{1/2/3/5}d_excess / fwd_ret_{1/2/3/5}d_rank_pct
     FEATURE_SET = "core_plus_alpha158_kbar_shape"
-    selected_feature_set = get_rotation_feature_set(FEATURE_SET)
-    ALPHA158_GROUP_MODE = selected_feature_set.alpha158_group_mode
+    CUSTOM_FEATURE_SET_NAME = "custom20"
+    CUSTOM_FEATURE_COLS = (
+        "ret_max_5d",
+        "vol_60d",
+        "turnover_rate",
+        "atr_14_pct",
+        "amplitude",
+        "intraday_ret_ma5",
+        "disp_bias_20",
+        "high_open_pct",
+        "vol_std_20d",
+        "abnormal_vol",
+        "intraday_pos",
+        "vol_price_corr_20d",
+        "KMID",
+        "KLEN",
+        # "KMID2",
+        "KUP",
+        # "KUP2",
+        "KLOW",
+        "KLOW2",
+        "KSFT",
+        "KSFT2",
+    )
+    selected_feature_set = resolve_rotation_feature_set(
+        FEATURE_SET,
+        custom_feature_cols=CUSTOM_FEATURE_COLS,
+        custom_name=CUSTOM_FEATURE_SET_NAME,
+        custom_description="训练层临时自定义因子组合。",
+        custom_note="由 Cell 1 显式指定，不依赖分析 notebook 的现场产物。",
+    )
 
     print("🚀 [Step 1] 加载全量日线数据...")
     st_blacklist = get_st_blacklist_pl("2026-03-31")
-    st_blacklist_df = pl.DataFrame({"code": st_blacklist}).lazy()
+    st_blacklist_df = pl.DataFrame(
+        {"code": st_blacklist},
+        schema={"code": pl.Utf8},
+    ).lazy()
 
     q_full = (
         load_daily_data_full(conn)
@@ -57,9 +89,8 @@ def _():
     )
 
     print(f"✅ 参数: 流通市值 {MV_MIN}~{MV_MAX} 亿, 上市>{MIN_LIST_DAYS}天, 起始={START_DATE}")
-    print(f"✅ Feature Set: {describe_rotation_feature_set(FEATURE_SET)}")
+    print(f"✅ Feature Set: {describe_rotation_feature_set_spec(selected_feature_set)}")
     return (
-        ALPHA158_GROUP_MODE,
         FACTOR_COLS,
         FEATURE_SET,
         LABEL,
@@ -84,7 +115,6 @@ def _():
 
 @app.cell
 def _(
-    ALPHA158_GROUP_MODE,
     FACTOR_COLS,
     FEATURE_SET,
     MIN_LIST_DAYS,
@@ -125,7 +155,8 @@ def _(
     need_rotation_factors = any(
         factor_name in rotation_factor_set for factor_name in requested_feature_cols
     )
-    need_alpha158_factors = bool(ALPHA158_GROUP_MODE)
+    alpha158_group_mode = selected_feature_set.alpha158_group_mode
+    need_alpha158_factors = bool(alpha158_group_mode)
 
     df_factors = q_full
     active_alpha158_factor_cols = []
@@ -141,8 +172,8 @@ def _(
     else:
         print("   跳过 Rotation 因子计算")
 
-    if need_alpha158_factors and ALPHA158_GROUP_MODE:
-        alpha158_train_config = resolve_alpha158_group_config(ALPHA158_GROUP_MODE)
+    if need_alpha158_factors and alpha158_group_mode:
+        alpha158_train_config = resolve_alpha158_group_config(alpha158_group_mode)
         active_alpha158_factor_cols = list(alpha158_train_config["factor_cols"])
         available_feature_cols.update(active_alpha158_factor_cols)
         print(f"   Alpha158 分组: {alpha158_train_config['group_mode_label']}")
@@ -327,18 +358,12 @@ def _(FEATURE_SET, selected_feature_set):
     print("   当前 notebook 只负责训练入口、raw score 导出与 artifact 落盘。")
     print(f"   当前训练特征集: {FEATURE_SET} ({selected_feature_set.feature_count} 个因子)")
     print(f"   特征集状态: {selected_feature_set.status}")
-    return
-
-
-@app.cell
-def _():
-    # Cell 5: (已移除 — 旧可视化依赖线性回测, 回测逻辑已迁移至 Rust)
+    print(f"   说明: {selected_feature_set.note}")
     return
 
 
 @app.cell
 def _(
-    ALPHA158_GROUP_MODE,
     FEATURE_SET,
     LABEL,
     MIN_LIST_DAYS,
@@ -366,6 +391,12 @@ def _(
         TRAIN_WINDOW = 480
         RETRAIN_FREQ = 20
         TOP_N = 20
+        TRAIN_REGIME_MODE = "all"  # 可选: all / amv_weighted / amv_bull_only
+        AMV_BULL_SAMPLE_WEIGHT = 2.0
+        AMV_BULL_TRIGGER_PCT = 4.0
+        AMV_BULL_LOOKBACK_DAYS = 2
+        AMV_BEAR_TRIGGER_1D_PCT = -2.3
+        AMV_EFFECTIVE_LAG_DAYS = 1
         feature_cols = list(selected_feature_set.feature_cols or ())
         if not feature_cols:
             raise ValueError(
@@ -373,8 +404,10 @@ def _(
             )
 
         alpha158_group_config = None
-        if ALPHA158_GROUP_MODE:
-            alpha158_group_config = resolve_alpha158_group_config(ALPHA158_GROUP_MODE)
+        if selected_feature_set.alpha158_group_mode:
+            alpha158_group_config = resolve_alpha158_group_config(
+                selected_feature_set.alpha158_group_mode
+            )
 
         lgb_params = {
             "n_estimators": 200,
@@ -401,9 +434,37 @@ def _(
         if alpha158_group_config is not None:
             print(f"   Alpha158 分组: {alpha158_group_config['group_mode_label']}", flush=True)
         print(f"   截面归一化: {NORMALIZE_MODE}", flush=True)
+        print(
+            f"   AMV 训练口径: {TRAIN_REGIME_MODE}, "
+            f"bull_weight={AMV_BULL_SAMPLE_WEIGHT}, "
+            f"bull=max_1d{AMV_BULL_LOOKBACK_DAYS}d>={AMV_BULL_TRIGGER_PCT}, "
+            f"bear_1d<={AMV_BEAR_TRIGGER_1D_PCT}, lag={AMV_EFFECTIVE_LAG_DAYS}",
+            flush=True,
+        )
+
+        if TRAIN_REGIME_MODE not in {"all", "amv_weighted", "amv_bull_only"}:
+            raise ValueError(f"未知 TRAIN_REGIME_MODE: {TRAIN_REGIME_MODE}")
+
+        if TRAIN_REGIME_MODE == "all":
+            df_all_for_train = df_all.with_columns(pl.lit(False).alias("is_amv_bull_regime"))
+        else:
+            from utils.active_market_value_regime import build_active_market_value_regime_frame
+
+            df_amv_regime = build_active_market_value_regime_frame(
+                date_col="date",
+                bull_trigger_pct=AMV_BULL_TRIGGER_PCT,
+                bull_lookback_days=AMV_BULL_LOOKBACK_DAYS,
+                bear_trigger_1d_pct=AMV_BEAR_TRIGGER_1D_PCT,
+                effective_lag_days=AMV_EFFECTIVE_LAG_DAYS,
+            ).select(["date", pl.col("is_bull_regime").alias("is_amv_bull_regime")])
+            df_all_for_train = (
+                df_all
+                .join(df_amv_regime, on="date", how="left")
+                .with_columns(pl.col("is_amv_bull_regime").fill_null(False))
+            )
 
         df_valid_ml = (
-            df_all
+            df_all_for_train
             .filter(pl.col(LABEL).is_not_null() & pl.col(LABEL).is_not_nan())
             .sort("date")
         )
@@ -413,6 +474,7 @@ def _(
         dates_np = df_valid_ml["date"].to_numpy()
         codes_np = df_valid_ml["code"].to_numpy()
         is_limit_up_np = df_valid_ml["is_limit_up"].fill_null(False).to_numpy()
+        is_amv_bull_np = df_valid_ml["is_amv_bull_regime"].fill_null(False).to_numpy()
 
         unique_dates_ml = np.unique(dates_np)
         unique_dates_ml.sort()
@@ -437,15 +499,39 @@ def _(
                 y_tr = y_all_np[ts:te]
 
                 valid = np.isfinite(y_tr) & ~is_limit_up_np[ts:te]
+                if TRAIN_REGIME_MODE == "amv_bull_only":
+                    valid = valid & is_amv_bull_np[ts:te]
                 if valid.sum() < 1000:
                     continue
 
+                sample_weight = None
+                if TRAIN_REGIME_MODE == "amv_weighted":
+                    sample_weight_all = np.where(
+                        is_amv_bull_np[ts:te],
+                        AMV_BULL_SAMPLE_WEIGHT,
+                        1.0,
+                    ).astype(np.float32)
+                    sample_weight = sample_weight_all[valid]
+
                 model = lgb.LGBMRegressor(**lgb_params)
-                model.fit(X_tr[valid], y_tr[valid], feature_name=feature_cols)
+                model.fit(
+                    X_tr[valid],
+                    y_tr[valid],
+                    sample_weight=sample_weight,
+                    feature_name=feature_cols,
+                )
                 last_train_idx = i
 
                 pct = (i - TRAIN_WINDOW) / (n_dates - TRAIN_WINDOW) * 100
-                print(f"   [{cur_date}] 重训 ({pct:.0f}%), 样本: {valid.sum():,}", flush=True)
+                bull_train_rows = int((valid & is_amv_bull_np[ts:te]).sum())
+                if TRAIN_REGIME_MODE == "all":
+                    print(f"   [{cur_date}] 重训 ({pct:.0f}%), 样本: {valid.sum():,}", flush=True)
+                else:
+                    print(
+                        f"   [{cur_date}] 重训 ({pct:.0f}%), 样本: {valid.sum():,}, "
+                        f"AMV bull 样本: {bull_train_rows:,}",
+                        flush=True,
+                    )
 
             if model is None:
                 continue
@@ -498,6 +584,7 @@ def _(
             "strategy": "rotation",
             "label": LABEL,
             "model_name": "lightgbm",
+            "feature_set_name": selected_feature_set.name,
             "feature_mode": selected_feature_set.feature_mode,
             "alpha158_group_mode": alpha158_group_config["group_mode_label"]
             if alpha158_group_config is not None
@@ -518,6 +605,12 @@ def _(
             "model_params": lgb_params,
             "train_window": TRAIN_WINDOW,
             "retrain_freq": RETRAIN_FREQ,
+            "train_regime_mode": TRAIN_REGIME_MODE,
+            "amv_bull_sample_weight": AMV_BULL_SAMPLE_WEIGHT,
+            "amv_bull_trigger_pct": AMV_BULL_TRIGGER_PCT,
+            "amv_bull_lookback_days": AMV_BULL_LOOKBACK_DAYS,
+            "amv_bear_trigger_1d_pct": AMV_BEAR_TRIGGER_1D_PCT,
+            "amv_effective_lag_days": AMV_EFFECTIVE_LAG_DAYS,
             "universe": {
                 "mv_min": MV_MIN,
                 "mv_max": MV_MAX,
@@ -542,12 +635,28 @@ def _(df_scores_raw, pl, q_full, rotation_train_meta):
     # 关键: Parquet 必须包含所有"曾被评分"股票在整个回测期间的价格数据,
     # 即使某天该股票不在 universe 内 (市值越界等), 也要保留价格行,
     # 否则 Rust 引擎无法对该仓位执行止损/排名退出等检查 → "幽灵仓位"
+    #
+    # 多头区间 timing 列 (is_bull_regime):
+    #   - 市场层 daily flag, 同一天对所有股票相同
+    #   - 可选择旧手工 LOOSE_PERIODS 或机械 AMV regime
+    #   - Rust engine 在 [entry] require_bull_regime = true 时会用此列做开仓 gate
+    #   - 卖出逻辑完全不受影响, 字段未启用时跟原行为字节级一致
     # ==============================================================================
+    from utils.active_market_value_regime import build_active_market_value_regime_frame
     from utils.signal_export import export_rotation_scores
+    from utils.manual_bull_periods import (
+        ROTATION_BULL_REGIME,
+        is_in_bull_regime_expr,
+    )
 
     def run_export():
         EXPORT_TOP_N = 20
-        EXPORT_EMA_ALPHA = 0.30  # 导出 parquet 用的分数平滑; 改这里仅需重跑本 Cell
+        EXPORT_EMA_ALPHA = 0.3  # 导出 parquet 用的分数平滑; 改这里仅需重跑本 Cell
+        BULL_REGIME_SOURCE = "mechanical_amv"  # 可选: manual / mechanical_amv
+        AMV_BULL_TRIGGER_PCT = 4.0
+        AMV_BULL_LOOKBACK_DAYS = 2
+        AMV_BEAR_TRIGGER_1D_PCT = -2.3
+        AMV_EFFECTIVE_LAG_DAYS = 1
 
         df_scores_export = df_scores_raw
 
@@ -592,15 +701,62 @@ def _(df_scores_raw, pl, q_full, rotation_train_meta):
             pl.col("score").fill_null(-999.0),
         )
 
+        if BULL_REGIME_SOURCE == "manual":
+            df_expanded = df_expanded.with_columns(
+                is_in_bull_regime_expr(
+                    date_col="date",
+                    periods=ROTATION_BULL_REGIME,
+                ).alias("is_bull_regime"),
+            )
+            bull_regime_meta = {
+                "bull_regime_source": BULL_REGIME_SOURCE,
+                "bull_regime_periods_count": len(ROTATION_BULL_REGIME),
+            }
+        elif BULL_REGIME_SOURCE == "mechanical_amv":
+            df_amv_regime = build_active_market_value_regime_frame(
+                date_col="date",
+                bull_trigger_pct=AMV_BULL_TRIGGER_PCT,
+                bull_lookback_days=AMV_BULL_LOOKBACK_DAYS,
+                bear_trigger_1d_pct=AMV_BEAR_TRIGGER_1D_PCT,
+                effective_lag_days=AMV_EFFECTIVE_LAG_DAYS,
+            )
+            df_expanded = (
+                df_expanded
+                .join(
+                    df_amv_regime.select(["date", "is_bull_regime"]),
+                    on="date",
+                    how="left",
+                )
+                .with_columns(pl.col("is_bull_regime").fill_null(False))
+            )
+            bull_regime_meta = {
+                "bull_regime_source": BULL_REGIME_SOURCE,
+                "amv_bull_trigger_pct": AMV_BULL_TRIGGER_PCT,
+                "amv_bull_lookback_days": AMV_BULL_LOOKBACK_DAYS,
+                "amv_bear_trigger_1d_pct": AMV_BEAR_TRIGGER_1D_PCT,
+                "amv_effective_lag_days": AMV_EFFECTIVE_LAG_DAYS,
+            }
+        else:
+            raise ValueError(f"未知 BULL_REGIME_SOURCE: {BULL_REGIME_SOURCE}")
+
         n_scored = df_scores_export.height
         n_total = df_expanded.height
         n_padded = n_total - n_scored
+        bull_rows = int(df_expanded["is_bull_regime"].sum())
+        bull_pct = bull_rows / max(n_total, 1) * 100
         print(f"   评分行: {n_scored:,}, 补全行: {n_padded:,}, 总计: {n_total:,}", flush=True)
+        print(
+            f"   🐂 多头区间标记 is_bull_regime: {bull_rows:,} 行 ({bull_pct:.2f}%) / "
+            f"source={BULL_REGIME_SOURCE}",
+            flush=True,
+        )
 
         export_meta = {
             **rotation_train_meta,
             "export_ema_alpha": EXPORT_EMA_ALPHA,
             "export_token": f"e{str(EXPORT_EMA_ALPHA).replace('.', 'p')}_t{EXPORT_TOP_N}",
+            "bull_regime_rows_pct": round(bull_pct, 4),
+            **bull_regime_meta,
         }
         scores_path = export_rotation_scores(
             df_expanded,
@@ -934,6 +1090,249 @@ def _(LABEL, df_all, df_scores_raw, go, make_subplots, np, pl, stats):
         }
 
     run_signal_quality()
+    return
+
+
+@app.cell
+def _(df_all, df_scores_raw, go, make_subplots, np, pl):
+    # ==============================================================================
+    # Cell 8: Top-20 Tail Diagnostics
+    #
+    # 目标: 专门检查“Top-20 是否被提纯到位”，避免只看整体 IC / Quintile。
+    # 口径与 Cell 7 保持一致:
+    #   - 基于 Cell 6 的原始分数
+    #   - 诊断侧单独做 EMA 平滑
+    #   - 经济评估固定使用 fwd_ret_1d
+    # ==============================================================================
+    def run_top20_tail_diagnostics():
+        _ema_alpha = 1.0
+        _top_n = 20
+        _next_n = 20
+        _eval_label_col = "fwd_ret_1d"
+
+        _df_top20 = (
+            df_scores_raw
+            .select(["date", "code", "score"])
+            .join(
+                df_all.select(["date", "code", _eval_label_col]),
+                on=["date", "code"],
+                how="inner",
+            )
+            .filter(
+                pl.col(_eval_label_col).is_not_null()
+                & pl.col(_eval_label_col).is_not_nan()
+            )
+            .sort(["date", "code"])
+        )
+
+        if _ema_alpha < 1.0:
+            _df_top20 = (
+                _df_top20
+                .sort(["code", "date"])
+                .with_columns(
+                    pl.col("score")
+                      .ewm_mean(alpha=_ema_alpha)
+                      .over("code")
+                      .alias("score")
+                )
+                .sort(["date", "code"])
+            )
+            print(f"   ⚡ Top-20 诊断 Score EMA 平滑: α={_ema_alpha}")
+        else:
+            print("   ⚡ Top-20 诊断使用原始分数 (无 EMA)")
+
+        _dates_np = _df_top20["date"].to_numpy()
+        _scores_np = _df_top20["score"].to_numpy().astype(np.float64)
+        _eval_rets_np = _df_top20[_eval_label_col].to_numpy().astype(np.float64)
+
+        _unique_dates = np.unique(_dates_np)
+        _unique_dates.sort()
+        _n_days = len(_unique_dates)
+        _date_start = np.searchsorted(_dates_np, _unique_dates, side="left")
+        _date_end = np.searchsorted(_dates_np, _unique_dates, side="right")
+
+        _top20_daily_mean = []
+        _top20_daily_median = []
+        _top20_daily_hit = []
+        _next20_daily_mean = []
+        _edge_spread_daily = []
+        _boundary_gap_raw = []
+        _boundary_gap_norm = []
+        _worst1_daily = []
+        _worst3_daily = []
+        _rank_daily_returns = [[] for _ in range(_top_n)]
+
+        for _day_idx in range(_n_days):
+            _s, _e = _date_start[_day_idx], _date_end[_day_idx]
+            _sc = _scores_np[_s:_e]
+            _rt = _eval_rets_np[_s:_e]
+            _mask = np.isfinite(_sc) & np.isfinite(_rt)
+            if _mask.sum() < _top_n:
+                continue
+
+            _sc_v = _sc[_mask]
+            _rt_v = _rt[_mask]
+            _order = np.argsort(-_sc_v)
+            _top_idx = _order[:_top_n]
+            _top_scores = _sc_v[_top_idx]
+            _top_rets = _rt_v[_top_idx]
+
+            _top20_daily_mean.append(float(np.mean(_top_rets)))
+            _top20_daily_median.append(float(np.median(_top_rets)))
+            _top20_daily_hit.append(float(np.mean(_top_rets > 0)))
+            _worst1_daily.append(float(np.min(_top_rets)))
+            _worst3_daily.append(float(np.mean(np.sort(_top_rets)[:3])))
+
+            for _rank_idx in range(_top_n):
+                _rank_daily_returns[_rank_idx].append(float(_top_rets[_rank_idx]))
+
+            if len(_order) >= (_top_n + _next_n):
+                _next_idx = _order[_top_n:_top_n + _next_n]
+                _next_rets = _rt_v[_next_idx]
+                _next20_daily_mean.append(float(np.mean(_next_rets)))
+                _edge_spread_daily.append(float(np.mean(_top_rets) - np.mean(_next_rets)))
+
+                _gap_raw = float(_top_scores[-1] - _sc_v[_order[_top_n]])
+                _boundary_gap_raw.append(_gap_raw)
+                _boundary_gap_norm.append(
+                    float(_gap_raw / max(float(np.std(_top_scores)), 1e-8))
+                )
+
+        _top20_arr = np.asarray(_top20_daily_mean, dtype=np.float64)
+        _top20_med_arr = np.asarray(_top20_daily_median, dtype=np.float64)
+        _top20_hit_arr = np.asarray(_top20_daily_hit, dtype=np.float64)
+        _next20_arr = np.asarray(_next20_daily_mean, dtype=np.float64)
+        _edge_arr = np.asarray(_edge_spread_daily, dtype=np.float64)
+        _gap_raw_arr = np.asarray(_boundary_gap_raw, dtype=np.float64)
+        _gap_norm_arr = np.asarray(_boundary_gap_norm, dtype=np.float64)
+        _worst1_arr = np.asarray(_worst1_daily, dtype=np.float64)
+        _worst3_arr = np.asarray(_worst3_daily, dtype=np.float64)
+
+        _rank_means = [
+            float(np.mean(_rank_daily_returns[_rank_idx])) if _rank_daily_returns[_rank_idx] else 0.0
+            for _rank_idx in range(_top_n)
+        ]
+        _bucket_specs = [(1, 5), (6, 10), (11, 15), (16, 20)]
+        _bucket_means = []
+        for _bucket_start, _bucket_end in _bucket_specs:
+            _bucket_vals = _rank_means[_bucket_start - 1:_bucket_end]
+            _bucket_means.append(float(np.mean(_bucket_vals)) if _bucket_vals else 0.0)
+
+        print("\n" + "=" * 70)
+        print("  8. Top-20 Tail Diagnostics")
+        print("=" * 70)
+        print(f"  经济评估标签:            {_eval_label_col}")
+        print(f"  覆盖交易日:              {len(_top20_arr)} / {_n_days}")
+        print(f"  Top-20 日均收益:         {np.mean(_top20_arr) * 100:+.4f}%")
+        print(f"  Top-20 日收益中位数:     {np.median(_top20_med_arr) * 100:+.4f}%")
+        print(f"  Top-20 单票胜率(日均):   {np.mean(_top20_hit_arr) * 100:.1f}%")
+        if len(_next20_arr) > 0:
+            print(f"  Rank21-40 日均收益:      {np.mean(_next20_arr) * 100:+.4f}%")
+            print(f"  Top20 vs 21-40 Spread:   {np.mean(_edge_arr) * 100:+.4f}%")
+            print(f"  Rank20-21 原始分数 gap:  {np.mean(_gap_raw_arr):+.6f}")
+            print(f"  Rank20-21 标准化 gap:    {np.mean(_gap_norm_arr):+.4f}")
+        print(f"  Top-20 最差1只日均收益:  {np.mean(_worst1_arr) * 100:+.4f}%")
+        print(f"  Top-20 最差3只日均收益:  {np.mean(_worst3_arr) * 100:+.4f}%")
+        print("-" * 70)
+        for (_bucket_start, _bucket_end), _bucket_mean in zip(_bucket_specs, _bucket_means):
+            print(
+                f"  Rank {_bucket_start:>2}-{_bucket_end:<2} 日均收益:  {_bucket_mean * 100:+.4f}%"
+            )
+        print("-" * 70)
+
+        _fig = make_subplots(
+            rows=2,
+            cols=2,
+            subplot_titles=[
+                "Top-20 Rank-by-Rank 日均收益",
+                "Top-20 分层收益桶",
+                "Top-20 vs Rank21-40 累积收益",
+                "Rank20-21 边界分数 gap (20日均)",
+            ],
+            vertical_spacing=0.12,
+            horizontal_spacing=0.10,
+        )
+
+        _fig.add_trace(
+            go.Bar(
+                x=list(range(1, _top_n + 1)),
+                y=[_rank_mean * 100 for _rank_mean in _rank_means],
+                name="Rank收益",
+                marker_color="#00d4aa",
+            ),
+            row=1,
+            col=1,
+        )
+
+        _fig.add_trace(
+            go.Bar(
+                x=[f"{_bucket_start}-{_bucket_end}" for _bucket_start, _bucket_end in _bucket_specs],
+                y=[_bucket_mean * 100 for _bucket_mean in _bucket_means],
+                name="分层收益",
+                marker_color="#ffa500",
+            ),
+            row=1,
+            col=2,
+        )
+
+        if len(_next20_arr) > 0:
+            _cum_top20 = np.cumsum(_top20_arr)
+            _cum_next20 = np.cumsum(_next20_arr)
+            _fig.add_trace(
+                go.Scatter(
+                    y=(_cum_top20 * 100).tolist(),
+                    name="Top-20 累积收益",
+                    line=dict(color="#00d4aa"),
+                ),
+                row=2,
+                col=1,
+            )
+            _fig.add_trace(
+                go.Scatter(
+                    y=(_cum_next20 * 100).tolist(),
+                    name="Rank21-40 累积收益",
+                    line=dict(color="#ff6b6b"),
+                ),
+                row=2,
+                col=1,
+            )
+
+        if len(_gap_norm_arr) >= 20:
+            _gap_roll = np.convolve(_gap_norm_arr, np.ones(20) / 20, mode="valid")
+            _fig.add_trace(
+                go.Scatter(
+                    y=_gap_roll.tolist(),
+                    name="标准化 gap(20日均)",
+                    line=dict(color="#9b59b6"),
+                ),
+                row=2,
+                col=2,
+            )
+
+        _fig.update_layout(
+            height=760,
+            template="plotly_dark",
+            showlegend=False,
+            yaxis_title="日均收益(%)",
+            yaxis2_title="日均收益(%)",
+            yaxis3_title="累积收益(%)",
+            yaxis4_title="标准化 gap",
+        )
+        _fig.show()
+
+        return {
+            "top20_mean": float(np.mean(_top20_arr)) if len(_top20_arr) else 0.0,
+            "top20_median": float(np.median(_top20_med_arr)) if len(_top20_med_arr) else 0.0,
+            "top20_hit": float(np.mean(_top20_hit_arr)) if len(_top20_hit_arr) else 0.0,
+            "next20_mean": float(np.mean(_next20_arr)) if len(_next20_arr) else 0.0,
+            "edge_spread": float(np.mean(_edge_arr)) if len(_edge_arr) else 0.0,
+            "score_gap_raw": float(np.mean(_gap_raw_arr)) if len(_gap_raw_arr) else 0.0,
+            "score_gap_norm": float(np.mean(_gap_norm_arr)) if len(_gap_norm_arr) else 0.0,
+            "worst1_mean": float(np.mean(_worst1_arr)) if len(_worst1_arr) else 0.0,
+            "worst3_mean": float(np.mean(_worst3_arr)) if len(_worst3_arr) else 0.0,
+        }
+
+    top20_tail_stats = run_top20_tail_diagnostics()
     return
 
 

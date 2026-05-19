@@ -25,6 +25,8 @@ pub struct ConfigFile {
 pub struct BacktestSection {
     pub initial_capital: f64,
     pub max_positions: usize,
+    #[serde(default)]
+    pub max_daily_buys: Option<usize>,
     pub position_size_pct: f64,
     pub max_hold_days: i32,
     #[serde(default)]
@@ -35,14 +37,23 @@ pub struct BacktestSection {
     pub min_position_ratio: f64,
 }
 
-fn default_min_position_ratio() -> f64 { 0.5 }
+fn default_min_position_ratio() -> f64 {
+    0.5
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct EntrySection {
     pub top_n: usize,
     pub hold_buffer: usize,
     #[serde(default)]
+    pub entry_rank_limit: Option<usize>,
+    #[serde(default)]
     pub min_score: f64,
+    /// 仅在市场处于多头区间 (PriceBar.is_bull_regime = true) 时允许新开仓.
+    /// 默认 false: 行为与未启用此开关时字节级一致.
+    /// 卖出逻辑 (排名退出/止损/移动止损/max_hold_days) 完全不受此开关影响.
+    #[serde(default)]
+    pub require_bull_regime: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -62,8 +73,7 @@ impl ConfigFile {
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let content = fs::read_to_string(path.as_ref())
             .map_err(|e| format!("Failed to read config file: {}", e))?;
-        toml::from_str(&content)
-            .map_err(|e| format!("Failed to parse config: {}", e))
+        toml::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))
     }
 }
 
@@ -75,6 +85,7 @@ impl ConfigFile {
 pub struct RotationConfig {
     pub initial_capital: f64,
     pub max_positions: usize,
+    pub max_daily_buys: usize,
     pub position_size_pct: f64,
     pub max_hold_days: i32,
     pub start_date: Option<NaiveDate>,
@@ -83,7 +94,9 @@ pub struct RotationConfig {
 
     pub top_n: usize,
     pub hold_buffer: usize,
+    pub entry_rank_limit: usize,
     pub min_score: f64,
+    pub require_bull_regime: bool,
 
     pub stop_loss_enabled: bool,
     pub stop_loss_pct: f64,
@@ -100,6 +113,7 @@ impl Default for RotationConfig {
         Self {
             initial_capital: 100_000.0,
             max_positions: 20,
+            max_daily_buys: 20,
             position_size_pct: 0.05,
             max_hold_days: 30,
             start_date: None,
@@ -107,7 +121,9 @@ impl Default for RotationConfig {
             min_position_ratio: 0.5,
             top_n: 20,
             hold_buffer: 50,
+            entry_rank_limit: 20,
             min_score: 0.0,
+            require_bull_regime: false,
             stop_loss_enabled: true,
             stop_loss_pct: 0.05,
             trailing_enabled: false,
@@ -120,9 +136,20 @@ impl Default for RotationConfig {
 
 impl From<ConfigFile> for RotationConfig {
     fn from(cfg: ConfigFile) -> Self {
+        let max_daily_buys = cfg
+            .backtest
+            .max_daily_buys
+            .unwrap_or(cfg.backtest.max_positions)
+            .min(cfg.backtest.max_positions);
+        let entry_rank_limit = cfg
+            .entry
+            .entry_rank_limit
+            .unwrap_or(cfg.entry.top_n)
+            .min(cfg.entry.top_n);
         Self {
             initial_capital: cfg.backtest.initial_capital,
             max_positions: cfg.backtest.max_positions,
+            max_daily_buys,
             position_size_pct: cfg.backtest.position_size_pct,
             max_hold_days: cfg.backtest.max_hold_days,
             start_date: bt_core::parse_date_opt(&cfg.backtest.start_date),
@@ -130,7 +157,9 @@ impl From<ConfigFile> for RotationConfig {
             min_position_ratio: cfg.backtest.min_position_ratio,
             top_n: cfg.entry.top_n,
             hold_buffer: cfg.entry.hold_buffer,
+            entry_rank_limit,
             min_score: cfg.entry.min_score,
+            require_bull_regime: cfg.entry.require_bull_regime,
             stop_loss_enabled: cfg.stop_loss.enabled,
             stop_loss_pct: cfg.stop_loss.pct,
             trailing_enabled: cfg.trailing_stop.enabled,
@@ -155,6 +184,10 @@ pub struct PriceBar {
     pub score: f64,
     pub rank: u32,
     pub is_top_n: bool,
+    /// 市场层多头区间标记 (同一日期对所有股票相同).
+    /// 仅当 RotationConfig.require_bull_regime = true 时影响 entry filter.
+    /// 老 parquet 不带此列时, build_market_data 会默认设为 false.
+    pub is_bull_regime: bool,
 }
 
 /// code → date → PriceBar

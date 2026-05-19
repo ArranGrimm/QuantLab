@@ -165,7 +165,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !args.output_dir.is_empty() {
         let config = app.world().resource::<RenkoConfig>();
         let config_text = format_config(config, trading_dates.len());
-        bt_core::write_report("renko", &config_text, stats, portfolio, trading_dates.len(), &args.output_dir)?;
+        bt_core::write_report(
+            "renko",
+            &config_text,
+            stats,
+            portfolio,
+            trading_dates.len(),
+            &args.output_dir,
+        )?;
     }
 
     Ok(())
@@ -177,15 +184,28 @@ fn print_config(config: &RenkoConfig) {
     println!("Max Positions: {}", config.max_positions);
     println!("Position Size: {:.1}%", config.position_size_pct * 100.0);
     println!("Max Hold Days: {}", config.max_hold_days);
-    let start_str = config.start_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".to_string());
-    let end_str = config.end_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".to_string());
+    let start_str = config
+        .start_date
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| "auto".to_string());
+    let end_str = config
+        .end_date
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| "auto".to_string());
     println!("Date Range: {} ~ {}", start_str, end_str);
-    println!("Top-N: {} (Hold Buffer: {})", config.top_n, config.hold_buffer);
+    println!(
+        "Top-N: {} (Hold Buffer: {})",
+        config.top_n, config.hold_buffer
+    );
     println!("Min Score: {}", config.min_score);
     println!(
         "Stop Loss: {:.1}% ({})",
         config.stop_loss_pct * 100.0,
-        if config.stop_loss_enabled { "ON" } else { "OFF" }
+        if config.stop_loss_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
     );
     println!(
         "Trailing Stop: Activate={:.0}%, Trail={:.0}% ({})",
@@ -265,10 +285,21 @@ fn format_config(config: &RenkoConfig, trading_days: usize) -> String {
     writeln!(s, "--- Configuration ---").unwrap();
     writeln!(s, "Initial Capital:  {:.0}", config.initial_capital).unwrap();
     writeln!(s, "Max Positions:    {}", config.max_positions).unwrap();
-    writeln!(s, "Position Size:    {:.1}%", config.position_size_pct * 100.0).unwrap();
+    writeln!(
+        s,
+        "Position Size:    {:.1}%",
+        config.position_size_pct * 100.0
+    )
+    .unwrap();
     writeln!(s, "Max Hold Days:    {}", config.max_hold_days).unwrap();
-    let start_str = config.start_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".into());
-    let end_str = config.end_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".into());
+    let start_str = config
+        .start_date
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| "auto".into());
+    let end_str = config
+        .end_date
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| "auto".into());
     writeln!(s, "Date Range:       {} ~ {}", start_str, end_str).unwrap();
     writeln!(s, "Trading Days:     {}", trading_days).unwrap();
     writeln!(s, "Top-N:            {}", config.top_n).unwrap();
@@ -278,7 +309,11 @@ fn format_config(config: &RenkoConfig, trading_days: usize) -> String {
         s,
         "Stop Loss:        {:.1}% ({})",
         config.stop_loss_pct * 100.0,
-        if config.stop_loss_enabled { "ON" } else { "OFF" }
+        if config.stop_loss_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
     )
     .unwrap();
     writeln!(
@@ -340,7 +375,11 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
 
         println!(
             "[{}] [CLOSE] {} @ {:.2} | PnL: {:+.1}% | Hold: {}d",
-            end_date, position.code, exit_price, pnl_pct * 100.0, hold_days
+            end_date,
+            position.code,
+            exit_price,
+            pnl_pct * 100.0,
+            hold_days
         );
 
         world.entity_mut(entity).insert(ClosedTrade {

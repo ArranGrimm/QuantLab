@@ -40,11 +40,19 @@ pub struct BacktestSection {
     pub sort_ascending: bool,
     #[serde(default = "default_min_position_ratio")]
     pub min_position_ratio: f64,
+    #[serde(default)]
+    pub min_score: f64,
 }
 
-fn default_sort_field() -> String { "vol_ratio".to_string() }
-fn default_sort_ascending() -> bool { true }
-fn default_min_position_ratio() -> f64 { 0.5 }
+fn default_sort_field() -> String {
+    "vol_ratio".to_string()
+}
+fn default_sort_ascending() -> bool {
+    true
+}
+fn default_min_position_ratio() -> f64 {
+    0.5
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct StopLossSection {
@@ -86,8 +94,7 @@ impl ConfigFile {
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let content = fs::read_to_string(path.as_ref())
             .map_err(|e| format!("Failed to read config file: {}", e))?;
-        toml::from_str(&content)
-            .map_err(|e| format!("Failed to parse config: {}", e))
+        toml::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))
     }
 }
 
@@ -107,6 +114,7 @@ pub struct BacktestConfig {
     pub sort_field: String,
     pub sort_ascending: bool,
     pub min_position_ratio: f64,
+    pub min_score: f64,
 
     pub stop_loss_enabled: bool,
     pub stop_loss_pct: f64,
@@ -143,6 +151,7 @@ impl Default for BacktestConfig {
             sort_field: "vol_ratio".to_string(),
             sort_ascending: true,
             min_position_ratio: 0.5,
+            min_score: 0.0,
             stop_loss_enabled: true,
             stop_loss_pct: 0.03,
             tp1_pct: 0.15,
@@ -176,6 +185,7 @@ impl From<ConfigFile> for BacktestConfig {
             sort_field: cfg.backtest.sort_field,
             sort_ascending: cfg.backtest.sort_ascending,
             min_position_ratio: cfg.backtest.min_position_ratio,
+            min_score: cfg.backtest.min_score,
             stop_loss_enabled: cfg.stop_loss.enabled,
             stop_loss_pct: cfg.stop_loss.pct,
             tp1_pct: cfg.take_profit.tp1_pct,

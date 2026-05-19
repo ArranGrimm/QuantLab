@@ -96,12 +96,29 @@ def build_rotation_train_run_id(label: str, model_name: str, train_timestamp_tok
     return f"rot_{_slug_token(label)}_{_slug_token(model_name)}_{train_timestamp_token}_{feature_hash}"
 
 
+def build_b1_train_run_id(
+    label: str,
+    seed_col: str,
+    model_name: str,
+    train_timestamp_token: str,
+    feature_hash: str,
+) -> str:
+    return (
+        f"b1_{_slug_token(seed_col)}_{_slug_token(label)}_"
+        f"{_slug_token(model_name)}_{train_timestamp_token}_{feature_hash}"
+    )
+
+
 def export_for_rust(
     df_full: pl.LazyFrame,
     output_path: str = "data/signals/market_data.parquet",
     loose_periods: list = None,
     start_date: str = None,
     extra_sort_cols: list = None,
+    raw_scores: pl.DataFrame | None = None,
+    artifact_metadata: dict | None = None,
+    artifact_root: str = "artifacts/b1",
+    write_latest_alias: bool = False,
 ) -> str:
     """
     Export complete market data with B1 signals for Rust backtesting
@@ -192,22 +209,195 @@ def export_for_rust(
 
     df_final = df_collected.select(available_cols)
 
-    # Write to parquet
-    df_final.write_parquet(output_file)
-
-    # Print summary
     total_rows = df_final.height
     signal_rows = df_final.filter(pl.col("b1_signal")).height
     loose_signal_rows = df_final.filter(pl.col("b1_signal") & pl.col("is_loose")).height
     unique_codes = df_final.select(pl.col("code").n_unique()).item()
+    unique_dates = df_final.select(pl.col("date").n_unique()).item()
     date_range = (
         df_final.select(pl.col("date").min()).item(),
         df_final.select(pl.col("date").max()).item(),
     )
 
+    if artifact_metadata:
+        train_run_id = artifact_metadata.get("train_run_id")
+        if not train_run_id:
+            raise ValueError("artifact_metadata must contain train_run_id")
+
+        artifact_root_path = Path(artifact_root).resolve()
+        train_run_dir = (artifact_root_path / train_run_id).resolve()
+        signal_id = artifact_metadata.get("signal_id") or _timestamp_ms_token()
+        signal_run_id = f"{train_run_id}_{signal_id}"
+        signal_dir = train_run_dir / "signals" / signal_id
+        signal_path = signal_dir / "signal.parquet"
+        train_meta_path = train_run_dir / "train.meta.json"
+        signal_meta_path = signal_dir / "signal.meta.json"
+        raw_scores_path = train_run_dir / "raw_scores.parquet"
+        signals_index_path = train_run_dir / "signals.jsonl"
+        backtest_index_path = train_run_dir / "backtest.jsonl"
+        latest_alias_path = None
+
+        train_run_dir.mkdir(parents=True, exist_ok=True)
+        signal_dir.mkdir(parents=True, exist_ok=True)
+        signal_path = signal_path.resolve()
+        train_meta_path = train_meta_path.resolve()
+        signal_meta_path = signal_meta_path.resolve()
+        raw_scores_path = raw_scores_path.resolve()
+        signals_index_path = signals_index_path.resolve()
+        backtest_index_path = backtest_index_path.resolve()
+
+        if write_latest_alias:
+            latest_alias_path = Path(output_path).resolve()
+            latest_alias_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if raw_scores is not None and not raw_scores_path.exists():
+            raw_scores.write_parquet(raw_scores_path)
+
+        label = artifact_metadata.get("label")
+        model_name = artifact_metadata.get("model_name")
+        feature_mode = (
+            artifact_metadata.get("feature_mode")
+            or artifact_metadata.get("feature_set_name")
+        )
+        features = list(artifact_metadata.get("features", []))
+        feature_hash = artifact_metadata.get("feature_hash") or build_feature_hash(features)
+        signal_source = artifact_metadata.get("signal_source")
+        seed_col = artifact_metadata.get("seed_col")
+        sort_field = artifact_metadata.get("sort_field")
+        sort_ascending = artifact_metadata.get("sort_ascending")
+
+        train_meta = {
+            "artifact_version": 2,
+            "artifact_kind": "train_run",
+            "strategy": "b1",
+            "train_run_id": train_run_id,
+            "label": label,
+            "model_name": model_name,
+            "feature_mode": feature_mode,
+            "feature_set_name": artifact_metadata.get("feature_set_name"),
+            "feature_hash": feature_hash,
+            "feature_count": len(features),
+            "features": features,
+            "trained_at": artifact_metadata.get("trained_at"),
+            "train_timestamp_token": artifact_metadata.get("train_timestamp_token"),
+            "git_commit": artifact_metadata.get("git_commit"),
+            "notebook": artifact_metadata.get("notebook"),
+            "model_params": artifact_metadata.get("model_params"),
+            "train_window": artifact_metadata.get("train_window"),
+            "retrain_freq": artifact_metadata.get("retrain_freq"),
+            "seed_col": seed_col,
+            "use_bull_only": artifact_metadata.get("use_bull_only"),
+            "signal_source": signal_source,
+            "sort_field": sort_field,
+            "sort_ascending": sort_ascending,
+            "universe": artifact_metadata.get("universe"),
+            "raw_scores_path": "raw_scores.parquet",
+            "signals_index_path": "signals.jsonl",
+            "backtest_index_path": "backtest.jsonl",
+        }
+        signal_meta = {
+            "artifact_version": 2,
+            "artifact_kind": "signal_export",
+            "strategy": "b1",
+            "train_run_id": train_run_id,
+            "signal_id": signal_id,
+            "signal_run_id": signal_run_id,
+            "label": label,
+            "model_name": model_name,
+            "feature_mode": feature_mode,
+            "feature_set_name": artifact_metadata.get("feature_set_name"),
+            "feature_hash": feature_hash,
+            "feature_count": len(features),
+            "features": features,
+            "seed_col": seed_col,
+            "use_bull_only": artifact_metadata.get("use_bull_only"),
+            "signal_source": signal_source,
+            "sort_field": sort_field,
+            "sort_ascending": sort_ascending,
+            "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "signal_timestamp": signal_id,
+            "export_ema_alpha": artifact_metadata.get("export_ema_alpha"),
+            "signal_rows": signal_rows,
+            "trading_days": unique_dates,
+            "unique_codes": unique_codes,
+            "date_min": str(date_range[0]),
+            "date_max": str(date_range[1]),
+            "signal_path": "signal.parquet",
+            "canonical_signal_path": "signal.parquet",
+            "backtests_dir": "backtests",
+            "latest_alias_path": _rel_path(latest_alias_path, signal_dir) if latest_alias_path else None,
+            "train_meta_path": _rel_path(train_meta_path, signal_dir),
+            "raw_scores_path": _rel_path(raw_scores_path, signal_dir),
+            "signals_index_path": _rel_path(signals_index_path, signal_dir),
+            "backtest_index_path": _rel_path(backtest_index_path, signal_dir),
+            "git_commit": artifact_metadata.get("git_commit"),
+            "notebook": artifact_metadata.get("notebook"),
+        }
+
+        df_final.write_parquet(signal_path)
+        _write_json(train_meta_path, train_meta)
+        _write_json(signal_meta_path, signal_meta)
+        _append_jsonl(
+            signals_index_path,
+            {
+                "record_type": "signal_export",
+                "exported_at": signal_meta["exported_at"],
+                "strategy": "b1",
+                "train_run_id": train_run_id,
+                "signal_id": signal_id,
+                "signal_run_id": signal_run_id,
+                "label": label,
+                "model_name": model_name,
+                "feature_mode": feature_mode,
+                "feature_set_name": artifact_metadata.get("feature_set_name"),
+                "feature_hash": feature_hash,
+                "feature_count": len(features),
+                "seed_col": seed_col,
+                "use_bull_only": artifact_metadata.get("use_bull_only"),
+                "signal_source": signal_source,
+                "sort_field": sort_field,
+                "sort_ascending": sort_ascending,
+                "signal_dir": _rel_path(signal_dir, train_run_dir),
+                "signal_path": _rel_path(signal_path, train_run_dir),
+                "signal_meta_path": _rel_path(signal_meta_path, train_run_dir),
+                "train_meta_path": _rel_path(train_meta_path, train_run_dir),
+                "git_commit": artifact_metadata.get("git_commit"),
+            },
+        )
+
+        if latest_alias_path:
+            df_final.write_parquet(latest_alias_path)
+            latest_meta = dict(signal_meta)
+            latest_meta["artifact_kind"] = "signal_alias"
+            latest_meta["canonical_signal_meta_path"] = str(signal_meta_path)
+            _write_json(_sidecar_meta_path(latest_alias_path), latest_meta)
+
+        print("\n=== B1 Signals Export ===")
+        print(f"Run ID: {signal_run_id}")
+        print(f"Canonical File: {signal_path}")
+        print(f"Train Meta: {train_meta_path}")
+        print(f"Signal Meta: {signal_meta_path}")
+        print(f"Signals Index: {signals_index_path}")
+        print(f"Backtest Index: {backtest_index_path}")
+        if latest_alias_path:
+            print(f"Latest Alias: {latest_alias_path}")
+        print(f"Total rows: {total_rows:,}")
+        print(f"Trading days: {unique_dates}")
+        print(f"Unique stocks: {unique_codes}")
+        print(f"Date range: {date_range[0]} ~ {date_range[1]}")
+        print(f"B1 signals: {signal_rows}")
+        print(f"B1 signals in loose periods: {loose_signal_rows}")
+        print("Rust 回测示例:")
+        print(f"  backtest-engine\\run_b1.bat \"{signal_meta_path}\"")
+        return str(signal_path)
+
+    # Write to parquet
+    df_final.write_parquet(output_file)
+
     print("\n=== Export Summary ===")
     print(f"File: {output_file}")
     print(f"Total rows: {total_rows:,}")
+    print(f"Trading days: {unique_dates}")
     print(f"Unique stocks: {unique_codes}")
     print(f"Date range: {date_range[0]} ~ {date_range[1]}")
     print(f"B1 signals: {signal_rows}")
@@ -283,7 +473,9 @@ def export_rotation_scores(
         "date", "code", "score", "rank", "is_top_n",
         "open_adj", "high_adj", "low_adj", "close_adj", "pre_close_adj",
     ]
-    for opt_col in ["volume", "market_cap_100m"]:
+    # 可选 passthrough 列: 上游若提供则带入 parquet, 不提供则跳过 (向后兼容).
+    # is_bull_regime: 市场层 timing 信号, 供 Rust engine 的 require_bull_regime 开仓 gate 使用.
+    for opt_col in ["volume", "market_cap_100m", "is_bull_regime"]:
         if opt_col in df_scores.columns:
             out_cols.append(opt_col)
 
@@ -359,6 +551,12 @@ def export_rotation_scores(
             "model_params": artifact_metadata.get("model_params"),
             "train_window": artifact_metadata.get("train_window"),
             "retrain_freq": artifact_metadata.get("retrain_freq"),
+            "train_regime_mode": artifact_metadata.get("train_regime_mode"),
+            "amv_bull_sample_weight": artifact_metadata.get("amv_bull_sample_weight"),
+            "amv_bull_trigger_pct": artifact_metadata.get("amv_bull_trigger_pct"),
+            "amv_bull_lookback_days": artifact_metadata.get("amv_bull_lookback_days"),
+            "amv_bear_trigger_1d_pct": artifact_metadata.get("amv_bear_trigger_1d_pct"),
+            "amv_effective_lag_days": artifact_metadata.get("amv_effective_lag_days"),
             "universe": artifact_metadata.get("universe"),
             "raw_scores_path": "raw_scores.parquet",
             "signals_index_path": "signals.jsonl",
@@ -387,6 +585,12 @@ def export_rotation_scores(
             "unique_codes": unique_codes,
             "date_min": str(date_range[0]),
             "date_max": str(date_range[1]),
+            "bull_regime_source": artifact_metadata.get("bull_regime_source"),
+            "bull_regime_rows_pct": artifact_metadata.get("bull_regime_rows_pct"),
+            "amv_bull_trigger_pct": artifact_metadata.get("amv_bull_trigger_pct"),
+            "amv_bull_lookback_days": artifact_metadata.get("amv_bull_lookback_days"),
+            "amv_bear_trigger_1d_pct": artifact_metadata.get("amv_bear_trigger_1d_pct"),
+            "amv_effective_lag_days": artifact_metadata.get("amv_effective_lag_days"),
             "signal_path": "signal.parquet",
             "canonical_signal_path": "signal.parquet",
             "backtests_dir": "backtests",

@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Sequence
 
-from utils.alpha158_factors import resolve_alpha158_group_config
+from utils.alpha158_factors import (
+    ALPHA158_FACTOR_COLS,
+    ALPHA158_FACTOR_TO_GROUP,
+    resolve_alpha158_group_config,
+)
 from utils.rotation_factors import FACTOR_COLS
 
 FeatureSetStatus = Literal["active", "archived", "experimental"]
+_ROTATION_FACTOR_COL_SET = frozenset(FACTOR_COLS)
+_ALPHA158_FACTOR_COL_SET = frozenset(ALPHA158_FACTOR_COLS)
 
 CORE_12_FEATURES: tuple[str, ...] = (
     "ret_max_5d",
@@ -41,8 +47,89 @@ class RotationFeatureSetSpec:
         return len(self.feature_cols or ())
 
 
-def _tuple_unique(values: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+def _tuple_unique(values: Sequence[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(values))
+
+
+def split_rotation_feature_cols(
+    feature_cols: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    ordered_cols = _tuple_unique(feature_cols)
+    rotation_cols = tuple(
+        factor_name for factor_name in ordered_cols if factor_name in _ROTATION_FACTOR_COL_SET
+    )
+    alpha158_cols = tuple(
+        factor_name for factor_name in ordered_cols if factor_name in _ALPHA158_FACTOR_COL_SET
+    )
+    unknown_cols = tuple(
+        factor_name
+        for factor_name in ordered_cols
+        if factor_name not in _ROTATION_FACTOR_COL_SET
+        and factor_name not in _ALPHA158_FACTOR_COL_SET
+    )
+    return rotation_cols, alpha158_cols, unknown_cols
+
+
+def infer_alpha158_group_mode_from_features(
+    feature_cols: Sequence[str],
+) -> str | tuple[str, ...] | None:
+    _, alpha158_cols, unknown_cols = split_rotation_feature_cols(feature_cols)
+    if unknown_cols:
+        raise ValueError(
+            "自定义特征集包含未知因子: "
+            + ", ".join(unknown_cols)
+        )
+
+    if not alpha158_cols:
+        return None
+
+    alpha158_group_keys = tuple(
+        dict.fromkeys(ALPHA158_FACTOR_TO_GROUP[factor_name] for factor_name in alpha158_cols)
+    )
+    if len(alpha158_group_keys) == 1:
+        return alpha158_group_keys[0]
+    return alpha158_group_keys
+
+
+def build_custom_rotation_feature_set(
+    feature_cols: Sequence[str],
+    *,
+    name: str = "custom",
+    status: FeatureSetStatus = "experimental",
+    description: str = "任意自定义 Rotation/Alpha158 因子组合。",
+    note: str = "运行时动态指定，仅用于当前实验。",
+    selectable: bool = True,
+) -> RotationFeatureSetSpec:
+    ordered_cols = _tuple_unique(feature_cols)
+    if not ordered_cols:
+        raise ValueError("自定义特征集不能为空，请至少提供一个因子。")
+
+    rotation_cols, alpha158_cols, unknown_cols = split_rotation_feature_cols(ordered_cols)
+    if unknown_cols:
+        raise ValueError(
+            "自定义特征集包含未知因子: "
+            + ", ".join(unknown_cols)
+        )
+
+    if rotation_cols and alpha158_cols:
+        feature_mode = "custom"
+    elif rotation_cols:
+        feature_mode = "core" if ordered_cols == CORE_12_FEATURES else "custom"
+    elif alpha158_cols:
+        feature_mode = "alpha158"
+    else:
+        raise ValueError("自定义特征集未识别到任何可训练因子。")
+
+    return RotationFeatureSetSpec(
+        name=name,
+        status=status,
+        feature_mode=feature_mode,
+        feature_cols=ordered_cols,
+        description=description,
+        note=note,
+        alpha158_group_mode=infer_alpha158_group_mode_from_features(ordered_cols),
+        selectable=selectable,
+    )
 
 
 def _build_registry() -> dict[str, RotationFeatureSetSpec]:
@@ -140,15 +227,36 @@ def list_rotation_feature_sets(
     return specs
 
 
-def get_rotation_feature_set(
+def resolve_rotation_feature_set(
     name: str,
     *,
     require_selectable: bool = True,
+    custom_feature_cols: Sequence[str] | None = None,
+    custom_name: str = "custom",
+    custom_status: FeatureSetStatus = "experimental",
+    custom_description: str = "任意自定义 Rotation/Alpha158 因子组合。",
+    custom_note: str = "运行时动态指定，仅用于当前实验。",
 ) -> RotationFeatureSetSpec:
+    if name == "custom":
+        spec = build_custom_rotation_feature_set(
+            custom_feature_cols or (),
+            name=custom_name,
+            status=custom_status,
+            description=custom_description,
+            note=custom_note,
+            selectable=True,
+        )
+        if require_selectable and not spec.selectable:
+            raise ValueError(
+                f"Rotation feature set '{name}' 不是稳定训练入口。"
+                f"请改用 manifest 中 selectable=True 的集合。"
+            )
+        return spec
+
     try:
         spec = ROTATION_FEATURE_SET_REGISTRY[name]
     except KeyError as exc:
-        valid_names = ", ".join(ROTATION_FEATURE_SET_REGISTRY)
+        valid_names = ", ".join([*ROTATION_FEATURE_SET_REGISTRY, "custom"])
         raise ValueError(
             f"Unsupported Rotation feature set: {name}. Expected one of: {valid_names}"
         ) from exc
@@ -161,8 +269,15 @@ def get_rotation_feature_set(
     return spec
 
 
-def describe_rotation_feature_set(name: str) -> str:
-    spec = get_rotation_feature_set(name, require_selectable=False)
+def get_rotation_feature_set(
+    name: str,
+    *,
+    require_selectable: bool = True,
+) -> RotationFeatureSetSpec:
+    return resolve_rotation_feature_set(name, require_selectable=require_selectable)
+
+
+def describe_rotation_feature_set_spec(spec: RotationFeatureSetSpec) -> str:
     parts = [
         f"name={spec.name}",
         f"status={spec.status}",
@@ -174,3 +289,8 @@ def describe_rotation_feature_set(name: str) -> str:
     if spec.alpha158_analysis_group_mode:
         parts.append(f"alpha158_analysis_group_mode={spec.alpha158_analysis_group_mode}")
     return ", ".join(parts)
+
+
+def describe_rotation_feature_set(name: str) -> str:
+    spec = get_rotation_feature_set(name, require_selectable=False)
+    return describe_rotation_feature_set_spec(spec)

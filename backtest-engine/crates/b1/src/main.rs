@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! B1 超跌反转策略回测引擎
 //!
 //! Usage:
@@ -13,10 +15,11 @@ use bevy_ecs::prelude::*;
 use chrono::NaiveDate;
 use clap::Parser;
 use polars::prelude::*;
+use serde_json::json;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use bt_core::{BacktestStats, Portfolio};
+use bt_core::{BacktestStats, Portfolio, SignalArtifactMeta};
 use components::Position;
 use resources::{BacktestConfig, ConfigFile, DailyData, MarketData, PriceBar};
 use systems::{check_sell_conditions, process_buy_signals, update_stats};
@@ -37,6 +40,7 @@ struct Args {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    let signal_meta = bt_core::load_signal_meta(&args.data);
 
     println!("========================================");
     println!("   B1 Backtest Engine (Bevy ECS)");
@@ -57,6 +61,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     print_config(&config);
 
     println!("\nLoading data from: {:?}", args.data);
+    if let Some(meta) = &signal_meta {
+        if let Some(signal_run_id) = &meta.signal_run_id {
+            println!("Signal Run ID: {}", signal_run_id);
+        }
+    }
 
     // 2. Load market data
     let df = LazyFrame::scan_parquet(&args.data, Default::default())?.collect()?;
@@ -97,7 +106,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 6. Run backtest
-    println!("\nRunning backtest over {} trading days...\n", trading_dates.len());
+    println!(
+        "\nRunning backtest over {} trading days...\n",
+        trading_dates.len()
+    );
 
     for date in &trading_dates {
         let world = app.world_mut();
@@ -107,13 +119,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = world.resource::<BacktestConfig>();
         let sort_ascending = config.sort_ascending;
         let stop_loss_pct = config.stop_loss_pct;
+        let min_score = config.min_score;
 
         let mut candidates: Vec<_> = market_data
             .prices
             .iter()
             .filter_map(|(code, dates)| {
                 dates.get(date).and_then(|bar| {
-                    if bar.pre_b1_signal && bar.is_loose {
+                    if bar.pre_b1_signal && bar.is_loose && bar.sort_value >= min_score {
                         let stop_price = bar.low * (1.0 - stop_loss_pct);
                         Some((code.clone(), bar.sort_value, bar.open, stop_price))
                     } else {
@@ -147,7 +160,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !args.output_dir.is_empty() {
         let config = app.world().resource::<BacktestConfig>();
         let config_text = format_config(config, trading_dates.len());
-        bt_core::write_report("b1", &config_text, stats, portfolio, trading_dates.len(), &args.output_dir)?;
+        let report_paths = bt_core::write_report_bundle(
+            &args.output_dir,
+            "b1",
+            &args.data,
+            signal_meta.as_ref(),
+            &config_text,
+            json!({
+                "initial_capital": config.initial_capital,
+                "max_positions": config.max_positions,
+                "max_daily_buys": config.max_daily_buys,
+                "position_size_pct": config.position_size_pct,
+                "max_hold_days": config.max_hold_days,
+                "start_date": config.start_date.map(|d| d.to_string()),
+                "end_date": config.end_date.map(|d| d.to_string()),
+                "sort_field": config.sort_field,
+                "sort_ascending": config.sort_ascending,
+                "min_position_ratio": config.min_position_ratio,
+                "min_score": config.min_score,
+                "stop_loss_enabled": config.stop_loss_enabled,
+                "stop_loss_pct": config.stop_loss_pct,
+                "tp1_pct": config.tp1_pct,
+                "tp2_pct": config.tp2_pct,
+                "tp_sell_ratio": config.tp_sell_ratio,
+                "sell_on_break_wl": config.sell_on_break_wl,
+                "sell_on_break_yl": config.sell_on_break_yl,
+                "weak_enabled": config.weak_enabled,
+                "weak_days": config.weak_days,
+                "weak_min_gain_pct": config.weak_min_gain_pct,
+                "trailing_enabled": config.trailing_enabled,
+                "trailing_activation_pct": config.trailing_activation_pct,
+                "trailing_pct": config.trailing_pct,
+                "commission_rate": config.commission_rate,
+                "stamp_duty_rate": config.stamp_duty_rate,
+                "slippage_pct": config.slippage_pct,
+            }),
+            None,
+            None,
+            stats,
+            portfolio,
+            trading_dates.len(),
+        )?;
+        append_b1_registry_entry(
+            signal_meta.as_ref(),
+            &args.data,
+            config,
+            stats,
+            portfolio,
+            trading_dates.len(),
+            &report_paths.txt_path,
+            &report_paths.json_path,
+        )?;
     }
 
     Ok(())
@@ -156,22 +219,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn print_config(config: &BacktestConfig) {
     println!("\n--- B1 Configuration ---");
     println!("Initial Capital: {:.0}", config.initial_capital);
-    println!("Max Positions: {} (Daily: {})", config.max_positions, config.max_daily_buys);
+    println!(
+        "Max Positions: {} (Daily: {})",
+        config.max_positions, config.max_daily_buys
+    );
     println!("Position Size: {:.0}%", config.position_size_pct * 100.0);
     println!("Max Hold Days: {}", config.max_hold_days);
-    let start_str = config.start_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".to_string());
-    let end_str = config.end_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".to_string());
+    let start_str = config
+        .start_date
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| "auto".to_string());
+    let end_str = config
+        .end_date
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| "auto".to_string());
     println!("Date Range: {} ~ {}", start_str, end_str);
-    println!("Sort Field: {} ({})", config.sort_field, if config.sort_ascending { "ASC" } else { "DESC" });
-    println!("Stop Loss: {:.1}% ({})", config.stop_loss_pct * 100.0, if config.stop_loss_enabled { "ON" } else { "OFF" });
-    println!("Take Profit: TP1={:.0}%, TP2={:.0}%", config.tp1_pct * 100.0, config.tp2_pct * 100.0);
-    println!("Weak Filter: {} days @ {:.0}% ({})", config.weak_days, config.weak_min_gain_pct * 100.0, if config.weak_enabled { "ON" } else { "OFF" });
-    println!("Trailing Stop: Activate={:.0}%, Trail={:.0}% ({})",
+    println!(
+        "Sort Field: {} ({})",
+        config.sort_field,
+        if config.sort_ascending { "ASC" } else { "DESC" }
+    );
+    println!(
+        "Min Score: {} ({})",
+        config.min_score,
+        if config.min_score > 0.0 { "ON" } else { "OFF" }
+    );
+    println!(
+        "Stop Loss: {:.1}% ({})",
+        config.stop_loss_pct * 100.0,
+        if config.stop_loss_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
+    );
+    println!(
+        "Take Profit: TP1={:.0}%, TP2={:.0}%",
+        config.tp1_pct * 100.0,
+        config.tp2_pct * 100.0
+    );
+    println!(
+        "Weak Filter: {} days @ {:.0}% ({})",
+        config.weak_days,
+        config.weak_min_gain_pct * 100.0,
+        if config.weak_enabled { "ON" } else { "OFF" }
+    );
+    println!(
+        "Trailing Stop: Activate={:.0}%, Trail={:.0}% ({})",
         config.trailing_activation_pct * 100.0,
         config.trailing_pct * 100.0,
         if config.trailing_enabled { "ON" } else { "OFF" }
     );
-    println!("Costs: Commission={:.4}%, Stamp={:.3}%, Slippage={:.2}%",
+    println!(
+        "Costs: Commission={:.4}%, Stamp={:.3}%, Slippage={:.2}%",
         config.commission_rate * 100.0,
         config.stamp_duty_rate * 100.0,
         config.slippage_pct * 100.0
@@ -185,39 +285,190 @@ fn format_config(config: &BacktestConfig, trading_days: usize) -> String {
 
     writeln!(s, "--- Configuration ---").unwrap();
     writeln!(s, "Initial Capital:  {:.0}", config.initial_capital).unwrap();
-    writeln!(s, "Max Positions:    {} (Daily: {})", config.max_positions, config.max_daily_buys).unwrap();
-    writeln!(s, "Position Size:    {:.0}%", config.position_size_pct * 100.0).unwrap();
+    writeln!(
+        s,
+        "Max Positions:    {} (Daily: {})",
+        config.max_positions, config.max_daily_buys
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Position Size:    {:.0}%",
+        config.position_size_pct * 100.0
+    )
+    .unwrap();
     writeln!(s, "Max Hold Days:    {}", config.max_hold_days).unwrap();
-    let start_str = config.start_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".into());
-    let end_str = config.end_date.map(|d| d.to_string()).unwrap_or_else(|| "auto".into());
+    let start_str = config
+        .start_date
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| "auto".into());
+    let end_str = config
+        .end_date
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| "auto".into());
     writeln!(s, "Date Range:       {} ~ {}", start_str, end_str).unwrap();
     writeln!(s, "Trading Days:     {}", trading_days).unwrap();
-    writeln!(s, "Sort Field:       {} ({})", config.sort_field, if config.sort_ascending { "ASC" } else { "DESC" }).unwrap();
-    writeln!(s, "Stop Loss:        {:.1}% ({})",
+    writeln!(
+        s,
+        "Sort Field:       {} ({})",
+        config.sort_field,
+        if config.sort_ascending { "ASC" } else { "DESC" }
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Min Score:        {} ({})",
+        config.min_score,
+        if config.min_score > 0.0 { "ON" } else { "OFF" }
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Stop Loss:        {:.1}% ({})",
         config.stop_loss_pct * 100.0,
-        if config.stop_loss_enabled { "ON" } else { "OFF" }
-    ).unwrap();
-    writeln!(s, "Take Profit:      TP1={:.0}%, TP2={:.0}%, Sell Ratio={:.1}%",
-        config.tp1_pct * 100.0, config.tp2_pct * 100.0, config.tp_sell_ratio * 100.0
-    ).unwrap();
-    writeln!(s, "Break WL/YL:      WL={}, YL={}",
+        if config.stop_loss_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Take Profit:      TP1={:.0}%, TP2={:.0}%, Sell Ratio={:.1}%",
+        config.tp1_pct * 100.0,
+        config.tp2_pct * 100.0,
+        config.tp_sell_ratio * 100.0
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Break WL/YL:      WL={}, YL={}",
         if config.sell_on_break_wl { "ON" } else { "OFF" },
         if config.sell_on_break_yl { "ON" } else { "OFF" }
-    ).unwrap();
-    writeln!(s, "Weak Filter:      {} days @ {:.0}% ({})",
-        config.weak_days, config.weak_min_gain_pct * 100.0,
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Weak Filter:      {} days @ {:.0}% ({})",
+        config.weak_days,
+        config.weak_min_gain_pct * 100.0,
         if config.weak_enabled { "ON" } else { "OFF" }
-    ).unwrap();
-    writeln!(s, "Trailing Stop:    Activate={:.0}%, Trail={:.0}% ({})",
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Trailing Stop:    Activate={:.0}%, Trail={:.0}% ({})",
         config.trailing_activation_pct * 100.0,
         config.trailing_pct * 100.0,
         if config.trailing_enabled { "ON" } else { "OFF" }
-    ).unwrap();
-    writeln!(s, "Commission:       {:.4}%", config.commission_rate * 100.0).unwrap();
-    writeln!(s, "Stamp Duty:       {:.3}%", config.stamp_duty_rate * 100.0).unwrap();
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Commission:       {:.4}%",
+        config.commission_rate * 100.0
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Stamp Duty:       {:.3}%",
+        config.stamp_duty_rate * 100.0
+    )
+    .unwrap();
     writeln!(s, "Slippage:         {:.2}%", config.slippage_pct * 100.0).unwrap();
 
     s
+}
+
+fn append_b1_registry_entry(
+    signal_meta: Option<&SignalArtifactMeta>,
+    data_path: &Path,
+    config: &BacktestConfig,
+    stats: &BacktestStats,
+    portfolio: &Portfolio,
+    trading_days: usize,
+    report_txt_path: &Path,
+    report_json_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use chrono::Local;
+
+    let registry_path =
+        bt_core::resolve_registry_path(signal_meta, "../artifacts/b1/backtest.jsonl");
+    let derived = bt_core::calc_derived_metrics(stats, portfolio, trading_days);
+    let train_run_dir = registry_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let signal_path_resolved = signal_meta.and_then(bt_core::resolve_signal_path);
+    let signal_meta_resolved = signal_meta.and_then(|meta| {
+        bt_core::resolve_meta_relative_path(meta, meta.signal_meta_path.as_deref())
+    });
+    let report_dir = report_json_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let backtest_id = report_dir
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| Local::now().format("%Y%m%d_%H%M%S_%3f").to_string());
+
+    let record = json!({
+        "record_type": "backtest_run",
+        "recorded_at": Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        "strategy": "b1",
+        "train_run_id": signal_meta.and_then(|meta| meta.train_run_id.clone()),
+        "signal_id": signal_meta.and_then(|meta| meta.signal_id.clone()),
+        "signal_run_id": signal_meta.and_then(|meta| meta.signal_run_id.clone()),
+        "label": signal_meta.and_then(|meta| meta.label.clone()),
+        "model_name": signal_meta.and_then(|meta| meta.model_name.clone()),
+        "feature_mode": signal_meta.and_then(|meta| meta.feature_mode.clone()),
+        "feature_hash": signal_meta.and_then(|meta| meta.feature_hash.clone()),
+        "feature_count": signal_meta.and_then(|meta| meta.feature_count),
+        "export_ema_alpha": signal_meta.and_then(|meta| meta.export_ema_alpha),
+        "backtest_id": backtest_id,
+        "input_signal_file": bt_core::relative_portable_path(&train_run_dir, data_path),
+        "signal_path": signal_path_resolved.as_ref().map(|p| bt_core::relative_portable_path(&train_run_dir, p)),
+        "signal_meta_path": signal_meta_resolved.as_ref().map(|p| bt_core::relative_portable_path(&train_run_dir, p)),
+        "backtest_dir": bt_core::relative_portable_path(&train_run_dir, &report_dir),
+        "git_commit": signal_meta.and_then(|meta| meta.git_commit.clone()),
+        "max_positions": config.max_positions,
+        "max_daily_buys": config.max_daily_buys,
+        "position_size_pct": config.position_size_pct,
+        "max_hold_days": config.max_hold_days,
+        "sort_field": config.sort_field,
+        "sort_ascending": config.sort_ascending,
+        "min_position_ratio": config.min_position_ratio,
+        "min_score": config.min_score,
+        "stop_loss_enabled": config.stop_loss_enabled,
+        "stop_loss_pct": config.stop_loss_pct,
+        "tp1_pct": config.tp1_pct,
+        "tp2_pct": config.tp2_pct,
+        "tp_sell_ratio": config.tp_sell_ratio,
+        "sell_on_break_wl": config.sell_on_break_wl,
+        "sell_on_break_yl": config.sell_on_break_yl,
+        "weak_enabled": config.weak_enabled,
+        "weak_days": config.weak_days,
+        "weak_min_gain_pct": config.weak_min_gain_pct,
+        "trailing_enabled": config.trailing_enabled,
+        "trailing_activation_pct": config.trailing_activation_pct,
+        "trailing_pct": config.trailing_pct,
+        "commission_rate": config.commission_rate,
+        "stamp_duty_rate": config.stamp_duty_rate,
+        "slippage_pct": config.slippage_pct,
+        "gross_return_pct": derived.gross_return_pct,
+        "net_return_pct": derived.total_return_pct,
+        "max_drawdown_pct": stats.max_drawdown * 100.0,
+        "win_rate_pct": stats.win_rate() * 100.0,
+        "avg_trades_per_day": derived.avg_trades_per_day,
+        "total_trades": stats.total_trades,
+        "report_txt_path": bt_core::relative_portable_path(&train_run_dir, report_txt_path),
+        "report_json_path": bt_core::relative_portable_path(&train_run_dir, report_json_path),
+    });
+
+    bt_core::append_jsonl_record(&registry_path, &record)?;
+    println!("🗂️ Registry appended: {}", registry_path.display());
+    Ok(())
 }
 
 fn build_market_data(
@@ -239,7 +490,8 @@ fn build_market_data(
     let b1_signal = df.column("b1_signal")?.bool()?;
     let pre_b1_signal = df.column("pre_b1_signal")?.bool()?;
     let is_loose = df.column("is_loose")?.bool()?;
-    let sort_col = df.column(sort_field)
+    let sort_col = df
+        .column(sort_field)
         .map_err(|_| format!("Sort field '{}' not found in parquet", sort_field))?
         .f64()?;
 
@@ -300,6 +552,11 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
         }
     }
 
+    let mut running_total_asset = world.resource::<Portfolio>().cash;
+    for (_, position, exit_price) in &to_close {
+        running_total_asset += position.shares as f64 * exit_price;
+    }
+
     for (entity, position, exit_price) in to_close {
         let gross = position.shares as f64 * exit_price;
         let commission = gross * config.commission_rate;
@@ -307,26 +564,36 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
         let slippage = gross * config.slippage_pct;
         let net = gross - commission - stamp_duty - slippage;
 
-        let pnl = (net - position.cost) + position.realized_pnl;
+        let exit_pnl = net - position.cost;
+        let trade_pnl = exit_pnl + position.realized_pnl;
         let total_initial_cost = position.initial_shares as f64 * position.entry_price;
-        let pnl_pct = pnl / total_initial_cost;
+        let trade_pnl_pct = trade_pnl / total_initial_cost;
         let hold_days = (end_date - position.entry_date).num_days() as i32;
 
         world.resource_mut::<Portfolio>().cash += net;
+        running_total_asset -= commission + stamp_duty + slippage;
         {
             let mut stats = world.resource_mut::<BacktestStats>();
-            stats.record_trade(pnl, commission, stamp_duty, slippage);
+            stats.record_trade(trade_pnl, commission, stamp_duty, slippage);
         }
 
-        let stage_info = match position.take_profit_stage {
-            0 => "",
-            1 => " (TP1)",
-            2 => " (TP2)",
-            _ => "",
+        let stage_label = match position.take_profit_stage {
+            0 => "None",
+            1 => "TP1",
+            2 => "TP2",
+            _ => "Unknown",
         };
         println!(
-            "[{}] [CLOSE] {} @ {:.2} | PnL: {:+.2}%{} | Hold: {} days",
-            end_date, position.code, exit_price, pnl_pct * 100.0, stage_info, hold_days
+            "[{}] [CLOSE] {} @ {:.2} | ExitPnL: {:+.2} | TradePnL: {:+.2} ({:+.2}%) | Stage: {} | Hold: {}d | EndOfBacktest | Asset: {:.2}",
+            end_date,
+            position.code,
+            exit_price,
+            exit_pnl,
+            trade_pnl,
+            trade_pnl_pct * 100.0,
+            stage_label,
+            hold_days,
+            running_total_asset
         );
 
         world.entity_mut(entity).insert(ClosedTrade {
@@ -336,8 +603,8 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
             entry_price: position.entry_price,
             exit_price,
             shares: position.initial_shares,
-            pnl,
-            pnl_pct,
+            pnl: trade_pnl,
+            pnl_pct: trade_pnl_pct,
             hold_days,
             exit_reason: ExitReason::EndOfBacktest,
         });

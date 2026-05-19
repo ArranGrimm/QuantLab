@@ -1,0 +1,23 @@
+# AMV close-to-close diagnostic 6td rolling cohort config.
+
+[backtest]
+initial_capital = 500000.0
+max_positions = 21
+max_daily_buys = 3
+position_size_pct = 0.047619047619
+max_hold_trading_days = 6
+start_date = "2021-01-01"
+end_date = ""
+min_position_ratio = 0.5
+
+[entry]
+top_n = 3
+entry_rank_limit = 3
+min_score = 0.0
+require_bull_regime = true
+max_open_gap_pct = 0.098
+
+[costs]
+commission_rate = 0.00025
+stamp_duty_rate = 0.001
+slippage_pct = 0.001

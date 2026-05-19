@@ -1,6 +1,21 @@
 # B1 选股因子模块
 from .b1_factors import calc_b1_factors_tg
 from .b1_factors_opt import calc_b1_factors_base, calc_b1_factors_opt, calc_b1_factors_dynamic_j, calc_b1_factors_wmacd, DEFAULT_CONFIG
+from .b1_feature_pool import (
+    B1_FEATURE_GROUPS,
+    B1_FEATURE_GROUP_LABELS,
+    B1_FEATURE_SET_REGISTRY,
+    B1_FEATURE_TO_GROUP,
+    B1_MINING_CORE_FEATURE_COLS,
+    B1_MINING_FEATURE_COLS,
+    B1_MINING_SECOND_BATCH_FEATURE_COLS,
+    B1_SELECTED_FEATURE_COLS,
+    B1_SELECTED_ROTATION_HYBRID_V1_FEATURE_COLS,
+    b1_feature_set_requires_rotation_kbar,
+    build_b1_research_frame,
+    describe_b1_feature_set,
+    resolve_b1_feature_set,
+)
 
 # 砖型图反转因子模块
 from .renko_factors import calc_renko_factors_base, calc_renko_factors, calc_renko_factors_wmacd
@@ -66,6 +81,19 @@ __all__ = [
     "calc_b1_factors_dynamic_j",
     "calc_b1_factors_wmacd",
     "DEFAULT_CONFIG",
+    "B1_FEATURE_GROUPS",
+    "B1_FEATURE_GROUP_LABELS",
+    "B1_FEATURE_SET_REGISTRY",
+    "B1_FEATURE_TO_GROUP",
+    "B1_MINING_CORE_FEATURE_COLS",
+    "B1_MINING_FEATURE_COLS",
+    "B1_MINING_SECOND_BATCH_FEATURE_COLS",
+    "B1_SELECTED_FEATURE_COLS",
+    "B1_SELECTED_ROTATION_HYBRID_V1_FEATURE_COLS",
+    "b1_feature_set_requires_rotation_kbar",
+    "build_b1_research_frame",
+    "describe_b1_feature_set",
+    "resolve_b1_feature_set",
     # 砖型图反转因子
     "calc_renko_factors_base",
     "calc_renko_factors",
