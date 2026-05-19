@@ -49,9 +49,12 @@
 - Executable-aware pullback combo grid v1:
   - 新增 `scripts/amv_executable_pullback_grid.py`
   - Canvas: `reports/canvases/amv-executable-pullback-grid.canvas.tsx`
-  - focused grid `164` 个 ranker；full grid `618` 个 ranker 暂不作为默认首轮
+  - focused grid `164` 个 ranker 已跑通；full grid `618` 个 ranker 已在当前 Mac 复跑完成
+  - full grid 产物: `artifacts/amv_executable_pullback_grid/20260519_213813/summary.json`
   - 最强低污染组合 `pullback_p0_k0_b1_c0_r0`: exec NAV `+245.37%`, MaxDD `23.29%`, close 涨停覆盖 `0.5%`
   - `pullback_p0_k0_b3_c1_r0`: exec NAV `+215.37%`, MaxDD `20.29%`, close 涨停覆盖 `0.0%`
+  - full grid 新增折中候选 `pullback_p0_k0_b2_c0p5_r0`: exec NAV `+210.37%`, MaxDD `21.89%`, close 涨停覆盖 `0.0%`
+  - refill 场景低回撤混合候选 `pullback_p2_k0_b0_c0p5_r0p5`: exec NAV `+167.31%`, MaxDD `5.73%`, rank q95 `4`
   - `P/K + C` 候选如 `pullback_p2_k0_b0_c1_r0` refill exec NAV `+155.87%`, MaxDD `10.14%`, rank q95 `5`
   - 当前判断: pullback sleeve 成立，但回撤深于主基线；应作为独立 sleeve / 互补 sleeve 候选接 Rust 真实回测，不直接替换 `manual_p2_k0p5_r0_6td`
 - 当前理论锚点: `amv-constrained-oracle.canvas.tsx`
@@ -100,7 +103,7 @@
 - 第三优先: executable-aware 回调因子组合
   - 基于全因子扫描，把 `ma_bias_20_asc / disp_bias_20_asc / KSFT_asc` 与现有 P/K 结构组合
   - 目标是检验“高位强势”和“回调后反弹”能否形成互补 sleeve，而非继续强化涨停动量
-  - 首轮 pullback grid 已证明低污染 pullback sleeve 成立；下一步导出 2-4 个候选做 Rust 静态 sleeve 回测
+  - full pullback grid 已证明低污染 pullback sleeve 成立；下一步导出 3-6 个候选做 Rust 静态 sleeve 回测
 - 第四优先: rolling cohort 真实组合口径
   - 第一版结果显示 rolling cohort 没有帮助 P/K/M 追上 manual
   - 后续若继续，应先分析为什么 rolling 后收益被摊薄: 重复代码跳过、现金利用率、买入失败、分散化稀释

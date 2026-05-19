@@ -20,6 +20,40 @@
 
 ## 2026-05-19
 
+### [AMV] Executable-aware pullback full grid Mac 复跑
+
+- 背景:
+  - 白天另一台设备上 full grid `618` 个 ranker 运行过久且没有落产物
+  - 晚上在当前 Mac 上复跑 `--grid-preset full`，验证 full grid 是否能正常跑完
+- 运行:
+  - `PYTHONUNBUFFERED=1 uv run python scripts/amv_executable_pullback_grid.py --grid-preset full`
+  - 识别 ranker 数量: `618`
+  - 构建数据集: `632,608` 行，`2,321` 只股票，日期 `2021-04-20 -> 2026-04-24`
+  - 实时 ST 源失败后自动使用本地缓存，共 `263` 只 ST；运行完成，无 Traceback
+  - 耗时约 `295s`
+- 产物:
+  - `artifacts/amv_executable_pullback_grid/20260519_213813/summary.json`
+- `original_top3` 关键结果:
+  - `pullback_p0_k0_b1_c0_r0`: exec NAV `+245.37%`, MaxDD `23.29%`, CTC NAV `+124.33%`, close 涨停覆盖 `0.5%`
+  - `pullback_p0_k0_b3_c1_r0`: exec NAV `+215.37%`, MaxDD `20.29%`, CTC NAV `+110.09%`, close 涨停覆盖 `0.0%`
+  - `pullback_p0_k0_b2_c0p5_r0`: exec NAV `+210.37%`, MaxDD `21.89%`, CTC NAV `+98.82%`, close 涨停覆盖 `0.0%`
+  - `pullback_p1_k0_b3_c1_r0`: exec NAV `+179.37%`, MaxDD `18.70%`, CTC NAV `+105.12%`, close 涨停覆盖 `0.0%`
+  - `candidate_p3_k0p5_b0_c0_r0`: exec NAV `+160.14%`, MaxDD `5.58%`, CTC NAV `+278.93%`, close 涨停覆盖 `20.2%`
+  - `reference_p2_k0p5_b0_c0_r0`: exec NAV `+152.21%`, MaxDD `5.27%`, CTC NAV `+248.54%`, close 涨停覆盖 `16.8%`
+- `skip_close_limit_refill_top3` 关键结果:
+  - `pullback_p0_k0_b1_c0_r0`: exec NAV `+242.58%`, MaxDD `23.29%`, rank q95 `3`
+  - `pullback_p0_k0_b3_c1_r0`: exec NAV `+215.37%`, MaxDD `20.29%`, rank q95 `3`
+  - `pullback_p0_k0_b2_c0p5_r0`: exec NAV `+210.37%`, MaxDD `21.89%`, rank q95 `3`
+  - `pullback_p2_k0_b0_c0p5_r0p5`: exec NAV `+167.31%`, MaxDD `5.73%`, CTC NAV `+147.75%`, rank q95 `4`
+  - `pullback_p2_k0_b0_c0p5_r1`: exec NAV `+154.31%`, MaxDD `5.36%`, CTC NAV `+131.02%`, rank q95 `3`
+- 当前判断:
+  - full grid 跑通，且没有推翻 focused grid 结论
+  - 纯 pullback 最强仍是 `B1/C0/R0` 与 `B3/C1/R0`，说明 `ma_bias_20 + disp_bias_20` 回调线索稳定
+  - full grid 新增值得关注的折中候选:
+    - `pullback_p0_k0_b2_c0p5_r0`: 纯 pullback 中介于 B1 与 B3/C1 之间，收益高但回撤仍深
+    - `pullback_p2_k0_b0_c0p5_r0p5`: refill 场景下收益 `+167.31%`、MaxDD `5.73%`，更像低回撤混合候选
+  - 下一步 Rust 静态 sleeve 候选可从 4 个扩展到 5-6 个，但优先级仍是先验证 `B1/C0/R0`、`B3/C1/R0`、`P2/C0.5/R0.5` 这三类 archetype
+
 ### [AMV] Executable-aware pullback combo grid v1
 
 - 背景:
