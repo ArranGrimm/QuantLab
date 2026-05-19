@@ -10,8 +10,10 @@ use bevy_ecs::prelude::*;
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
-/// A-share lot size (每手 300 股，科创板/北交所除外)
-pub const LOT_SIZE: u32 = 300;
+/// Standard A-share buy lot size.
+pub const A_SHARE_LOT_SIZE: u32 = 100;
+/// STAR Market buy orders require at least 200 shares, then can increase by 1 share.
+pub const STAR_MARKET_MIN_BUY_SHARES: u32 = 200;
 
 // ============================================================================
 // Portfolio
@@ -220,7 +222,10 @@ pub struct ReportBundlePaths {
 /// 根据股票代码判断涨跌幅限制
 /// 主板 (60/00) → 10%, 创业板 (300/301) → 20%, 科创板 (688/689) → 20%
 pub fn price_limit_pct(code: &str) -> f64 {
-    let normalized = code.strip_prefix("sz.").or_else(|| code.strip_prefix("sh.")).unwrap_or(code);
+    let normalized = code
+        .strip_prefix("sz.")
+        .or_else(|| code.strip_prefix("sh."))
+        .unwrap_or(code);
     if normalized.starts_with("300")
         || normalized.starts_with("301")
         || normalized.starts_with("688")
@@ -267,9 +272,31 @@ pub fn epoch_days_to_date(days: i32) -> Option<NaiveDate> {
     NaiveDate::from_num_days_from_ce_opt(days + 719163)
 }
 
-/// Round down to A-share lot size
-pub fn round_to_lot(shares_f64: f64) -> u32 {
-    ((shares_f64 / LOT_SIZE as f64).floor() as u32) * LOT_SIZE
+/// Whether a code belongs to the STAR Market (科创板).
+pub fn is_star_market_code(code: &str) -> bool {
+    let normalized = code
+        .strip_prefix("sh.")
+        .or_else(|| code.strip_prefix("SH."))
+        .unwrap_or(code);
+    normalized.starts_with("688")
+}
+
+/// Round down to the valid A-share buy quantity for a code.
+pub fn round_to_lot(code: &str, shares_f64: f64) -> u32 {
+    if !shares_f64.is_finite() || shares_f64 <= 0.0 {
+        return 0;
+    }
+
+    let shares = shares_f64.floor() as u32;
+    if is_star_market_code(code) {
+        if shares >= STAR_MARKET_MIN_BUY_SHARES {
+            shares
+        } else {
+            0
+        }
+    } else {
+        (shares / A_SHARE_LOT_SIZE) * A_SHARE_LOT_SIZE
+    }
 }
 
 /// Format backtest results as text (strategy-agnostic)
@@ -316,7 +343,12 @@ pub fn format_results(stats: &BacktestStats, portfolio: &Portfolio, trading_days
     writeln!(s, "--- Derived ---").unwrap();
     writeln!(s, "Gross PnL:        {:+.2}", gross_pnl).unwrap();
     writeln!(s, "Gross Return:     {:+.2}%", gross_return).unwrap();
-    writeln!(s, "Avg Trades/Day:   {:.1}", stats.total_trades as f64 / trading_days.max(1) as f64).unwrap();
+    writeln!(
+        s,
+        "Avg Trades/Day:   {:.1}",
+        stats.total_trades as f64 / trading_days.max(1) as f64
+    )
+    .unwrap();
 
     s
 }
@@ -551,7 +583,10 @@ pub fn resolve_meta_relative_path(
     if rel_path_obj.is_absolute() {
         return Some(rel_path_obj);
     }
-    signal_meta.meta_dir.as_ref().map(|base| base.join(rel_path_obj))
+    signal_meta
+        .meta_dir
+        .as_ref()
+        .map(|base| base.join(rel_path_obj))
 }
 
 pub fn resolve_signal_path(signal_meta: &SignalArtifactMeta) -> Option<std::path::PathBuf> {
@@ -714,7 +749,10 @@ pub fn write_report_bundle(
 
     println!("\n📄 Report saved: {}", txt_path.display());
     println!("🧾 Report JSON saved: {}", json_path.display());
-    Ok(ReportBundlePaths { txt_path, json_path })
+    Ok(ReportBundlePaths {
+        txt_path,
+        json_path,
+    })
 }
 
 #[cfg(test)]

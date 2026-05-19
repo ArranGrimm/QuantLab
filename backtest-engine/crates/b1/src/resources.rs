@@ -44,9 +44,15 @@ pub struct BacktestSection {
     pub min_score: f64,
 }
 
-fn default_sort_field() -> String { "vol_ratio".to_string() }
-fn default_sort_ascending() -> bool { true }
-fn default_min_position_ratio() -> f64 { 0.5 }
+fn default_sort_field() -> String {
+    "vol_ratio".to_string()
+}
+fn default_sort_ascending() -> bool {
+    true
+}
+fn default_min_position_ratio() -> f64 {
+    0.5
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct StopLossSection {
@@ -88,8 +94,7 @@ impl ConfigFile {
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let content = fs::read_to_string(path.as_ref())
             .map_err(|e| format!("Failed to read config file: {}", e))?;
-        toml::from_str(&content)
-            .map_err(|e| format!("Failed to parse config: {}", e))
+        toml::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))
     }
 }
 

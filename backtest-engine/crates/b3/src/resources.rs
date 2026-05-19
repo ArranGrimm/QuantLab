@@ -40,11 +40,21 @@ pub struct BacktestSection {
     pub sort_ascending: bool,
 }
 
-fn default_entry_rank_limit() -> u32 { 3 }
-fn default_require_bull_regime() -> bool { true }
-fn default_min_position_ratio() -> f64 { 0.5 }
-fn default_sort_field() -> String { "score".to_string() }
-fn default_sort_ascending() -> bool { false }
+fn default_entry_rank_limit() -> u32 {
+    3
+}
+fn default_require_bull_regime() -> bool {
+    true
+}
+fn default_min_position_ratio() -> f64 {
+    0.5
+}
+fn default_sort_field() -> String {
+    "score".to_string()
+}
+fn default_sort_ascending() -> bool {
+    false
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ExitSection {

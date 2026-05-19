@@ -7,19 +7,53 @@
 ## 当前决策摘要
 
 - 当前主策略底座: `manual_p2_k0p5_r0_6td`
-  - 修正涨跌停口径后仍为净收益 `+168.01%`
-  - 最大回撤 `14.97%`
+  - 修正买入手数口径后，净收益更新为 `+170.80%`
+  - 最大回撤 `15.30%`
   - 当前仍是 AMV bull pool 下最强可交易基线
 - 最新 P/K/M 验证: `amv-pkm-sleeve-rust-backtest.canvas.tsx`
   - 标签侧动量增强没有兑现为更好的 Rust 主基线
-  - `P1/K0.5/M1 / P3/K1/M2` 明显改善 2025，但总收益约为主基线一半，MaxDD 接近 `49%`
+  - 新手数口径下 `P3/K1/M2` 最好，净收益 `+103.58%`，但仍弱于主基线 `+170.80%`
+  - `P1/K0.5/M1 / P3/K1/M2` 明显改善 2025，但 MaxDD 仍约 `48%`
   - `1td` 到 `7td` 持仓周期扫描后，P/K/M 最佳仍是 `6td`；`4td / 5td / 7td` 也没有改善结论
   - 2026 YTD 亏损比当前主基线更深，因此 P/K/M 不作为默认替代
 - 待验证 rolling cohort 口径:
-  - 当前 `max_positions = 3` 只允许一组 Top3 在场，可能压低每日 Top3 信号的资金利用
-  - 可用 `max_positions / max_daily_buys / position_size_pct` 测试每天买 Top3、多组 cohort 同时持有的真实组合
-  - 当前执行顺序为开盘先买、收盘再卖；`6td` rolling cohort 完整槽位约为 `21`
-  - 当前手数口径为 `LOT_SIZE = 300`，rolling cohort 前需决定是否改为更贴近 A 股主板的 `100`
+  - 已完成第一版真实组合测试: `5td rolling18` 与 `6td rolling21`
+  - manual 最好为 `6td rolling21`: net `+23.61%`, MaxDD `9.33%`
+  - P/K/M rolling 未兑现标签侧优势，最好仅 `P2/K0.5/M0.5 6td rolling21`: net `+0.21%`
+  - 当前 rolling 实现会跳过已持有代码，因此是“不重复加仓”的真实账户口径
+  - 买入手数已修正为普通 A 股 `100` 股整数倍、科创板 `sh.688*` 最少 `200` 股后按 1 股递增
+- close-to-close 诊断:
+  - 新增 `bt-amv-cohort-diagnostic`，用于定位 Python rolling NAV 与真实 Rust rolling cohort 的损耗断点
+  - 第一版 B 口径: close-to-close、no repeat、with costs、资金/手数约束、close 涨停不可买、默认 `max_open_gap_pct = 0.098`
+  - 配套新增 unshifted 诊断信号导出脚本，避免和 `T+1 open` 真实交易信号混用
+  - B 口径 `6td rolling21`: manual `+20.88%`; P/K/M 最好 `P2/K0.5/M0.5 +15.31%`
+  - P/K/M close 涨停不可买过滤很重: `P1 812 / P2 602 / P3 856` 条，说明 Python rolling NAV 高收益大量来自不可成交信号
+- Python refill rolling NAV 诊断:
+  - 新增 `scripts/amv_limit_refill_rolling_nav.py`，用于验证“Top3 涨停则顺位补位”的标签侧上限
+  - `6d` 原始 Top3 NAV -> 跳过 close 涨停并补满 Top3: manual `+248.54% -> +90.33%`; P1 `+1054.55% -> +55.71%`; P2 `+768.74% -> +53.72%`; P3 `+1045.97% -> +31.32%`
+  - 结论: P/K/M 的千百分比级 rolling NAV 主要来自 close 涨停不可买样本；补位后仍有正 alpha，但不再超过 manual，且仍不是可交易口径
+- Executable-aware 权重网格 v2:
+  - 新增 `scripts/amv_executable_weight_grid.py`，重开早期 AMV 因子/组合/权重探索
+  - Canvas: `reports/canvases/amv-executable-weight-grid-v2.canvas.tsx`
+  - 主评估改为 `D+1 open -> D+7 close`，辅助保留 `D close -> D+6 close`
+  - 首轮 `6d` 全量 `90` 个 ranker: `P3/K0.5/R0` exec NAV `+160.14%`, 当前 reference `P2/K0.5/R0` exec NAV `+152.21%`
+  - 带动量 P/K/M 的 close-to-close NAV 仍为 `+768% ~ +1055%`，但 executable NAV 仅 `+29% ~ +33%`，且 close 涨停覆盖 `59.7% ~ 76.4%` 天
+  - 当前判断: 早期“高位 + K 线确认、低/无动量”结构在可执行口径下仍最可信；`P3/K0.5/R0` 可列入 Rust 真实回测候选，但主基线暂不变
+- Executable-aware 早期全因子扫描:
+  - 新增 `scripts/amv_executable_factor_scan.py`，重跑早期 `RANKERS + COMBO_RANKERS` 共 `47` 个 ranker
+  - Canvas: `reports/canvases/amv-executable-factor-scan.canvas.tsx`
+  - 低污染强候选: `ma_bias_20_asc` exec NAV `+231.03%`, `disp_bias_20_asc` `+187.54%`, `KSFT_asc` `+178.36%`
+  - 这些候选 close 涨停覆盖仅 `0.0% ~ 0.7%` 天，且跳过 close 涨停补位后几乎不衰减
+  - `ret_5d_desc` exec NAV `+264.07%` 最高，但 MaxDD `47.11%`、close 涨停覆盖 `69.0%` 天，仍归类为 attack/event archetype
+  - 当前判断: 下一轮组合探索应优先围绕“回调/成本线下回归/收盘偏低”与现有 P/K 结构组合，而不是继续加动量权重
+- Executable-aware pullback combo grid v1:
+  - 新增 `scripts/amv_executable_pullback_grid.py`
+  - Canvas: `reports/canvases/amv-executable-pullback-grid.canvas.tsx`
+  - focused grid `164` 个 ranker；full grid `618` 个 ranker 暂不作为默认首轮
+  - 最强低污染组合 `pullback_p0_k0_b1_c0_r0`: exec NAV `+245.37%`, MaxDD `23.29%`, close 涨停覆盖 `0.5%`
+  - `pullback_p0_k0_b3_c1_r0`: exec NAV `+215.37%`, MaxDD `20.29%`, close 涨停覆盖 `0.0%`
+  - `P/K + C` 候选如 `pullback_p2_k0_b0_c1_r0` refill exec NAV `+155.87%`, MaxDD `10.14%`, rank q95 `5`
+  - 当前判断: pullback sleeve 成立，但回撤深于主基线；应作为独立 sleeve / 互补 sleeve 候选接 Rust 真实回测，不直接替换 `manual_p2_k0p5_r0_6td`
 - 当前理论锚点: `amv-constrained-oracle.canvas.tsx`
   - 后续讨论 sleeve switching、降仓、进攻切换时优先从“AMV 受约束 Oracle”出发
   - 不再回到完整 hindsight oracle 或 8 类 sleeve selector 重新推导
@@ -49,7 +83,7 @@
   - `1td`: 净收益 `-51.03%`
   - `2td`: 净收益 `-37.33%`
   - `3td`: 净收益 `+38.11%`
-  - `6td`: 净收益 `+168.01%`, 最大回撤 `14.97%`
+  - `6td`: 净收益 `+170.80%`, 最大回撤 `15.30%`
 - 当前判断:
   - `manual_p2_k0p5_r0_6td` 是当前最强底座
   - 主要问题不是继续找新单策略，而是识别什么时候该避开底座、什么时候可以进攻
@@ -60,14 +94,26 @@
 - 第一优先: `cash_ok` / 降仓标签
   - 目标是识别是否应该避开 `manual_p2_k0p5_r0_6td` 的亏损日
   - 理论依据来自 AMV 受约束 Oracle 中的 cash 上限
-- 第二优先: rolling cohort 真实组合口径
-  - 测试 `max_positions = 21 / 18`、`max_daily_buys = 3`、`position_size_pct = 1 / max_positions`
-  - 同时扫 `5td / 6td`，判断每日 Top3 信号滚动持有后是否改变最佳持仓期
-  - 先明确 `LOT_SIZE = 300` 是否继续作为保守手数假设
-- 第三优先: 回到主策略入场/环境确认
+- 第二优先: executable-aware 权重网格 v2 后续验证
+  - 先把 `P3/K0.5/R0` 等可执行口径高分候选导出为静态 sleeve，接 Rust `T+1 open / 6td / Top3 / no-stop`
+  - 后续所有因子/权重探索必须同时输出 executable 主指标、close-to-close 辅助指标和涨停/高开污染归因
+- 第三优先: executable-aware 回调因子组合
+  - 基于全因子扫描，把 `ma_bias_20_asc / disp_bias_20_asc / KSFT_asc` 与现有 P/K 结构组合
+  - 目标是检验“高位强势”和“回调后反弹”能否形成互补 sleeve，而非继续强化涨停动量
+  - 首轮 pullback grid 已证明低污染 pullback sleeve 成立；下一步导出 2-4 个候选做 Rust 静态 sleeve 回测
+- 第四优先: rolling cohort 真实组合口径
+  - 第一版结果显示 rolling cohort 没有帮助 P/K/M 追上 manual
+  - 后续若继续，应先分析为什么 rolling 后收益被摊薄: 重复代码跳过、现金利用率、买入失败、分散化稀释
+  - 在该诊断前，不把 rolling cohort 作为默认替代
+- 第五优先: close-to-close cohort diagnostic
+  - B 口径已证明 close 涨停不可买会大幅压低 P/K/M 的 close-to-close 上限
+  - Python refill 诊断进一步证明，即使顺位补满 Top3，P/K/M 标签侧收益也从千百分比级降至几十个百分点
+  - 若继续，需要做过滤归因: close 涨停过滤、重复代码跳过、账户分散、T+1 open 损耗分别贡献多少
+  - 暂不急着做 A 口径，除非要精确复刻 Python rolling NAV 并拆解其不可成交成分
+- 第六优先: 回到主策略入场/环境确认
   - 2026 亏损段主要是入场后上冲空间不足，P/K/M 排序权重没有解决
   - 关注执行日是否明显收弱、AMV bull 中短期市场宽度、赚钱效应、涨停阻塞率等可观测变量
-- 第四优先: 收紧 `attack_ok`
+- 第七优先: 收紧 `attack_ok`
   - 第一版 `attack_ok` 太抽象，且 future-best attack sleeve 噪声较高
   - 后续如继续，应固定单一进攻袖子或提高标签门槛，追求更高 precision
 

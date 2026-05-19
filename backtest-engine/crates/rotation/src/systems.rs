@@ -101,8 +101,13 @@ pub fn check_exit_conditions(
 
             println!(
                 "[{}] [SELL] {} @ {:.2} | PnL: {:+.1}% | Rank: {} | Hold: {}d | {}",
-                current_date, position.code, bar.close,
-                pnl_pct * 100.0, bar.rank, hold_days, exit_reason
+                current_date,
+                position.code,
+                bar.close,
+                pnl_pct * 100.0,
+                bar.rank,
+                hold_days,
+                exit_reason
             );
 
             commands.entity(entity).insert(ClosedTrade {
@@ -168,13 +173,14 @@ pub fn fill_positions(
         }
 
         let target_value = total_value * config.position_size_pct;
-        let ideal_shares = bt_core::round_to_lot(target_value / close_price);
+        let ideal_shares = bt_core::round_to_lot(code, target_value / close_price);
         if ideal_shares == 0 {
             continue;
         }
 
-        let cost_per_share = close_price * (1.0 + cost_model.commission_rate + cost_model.slippage_pct);
-        let affordable_shares = bt_core::round_to_lot(portfolio.cash / cost_per_share);
+        let cost_per_share =
+            close_price * (1.0 + cost_model.commission_rate + cost_model.slippage_pct);
+        let affordable_shares = bt_core::round_to_lot(code, portfolio.cash / cost_per_share);
         let shares = ideal_shares.min(affordable_shares);
 
         let min_shares = (ideal_shares as f64 * config.min_position_ratio) as u32;
@@ -204,7 +210,10 @@ pub fn fill_positions(
             trailing_stop_active: false,
         });
 
-        println!("[{}] [BUY] {} @ {:.2} x {} shares", current_date, code, close_price, shares);
+        println!(
+            "[{}] [BUY] {} @ {:.2} x {} shares",
+            current_date, code, close_price, shares
+        );
         bought_count += 1;
     }
 }

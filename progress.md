@@ -11,11 +11,397 @@
 
 - AMV P/K/M Rust 验证: 标签侧动量增强未兑现为更好主基线；可解释为 2025 补充袖子，但未解决 2026。
 - AMV 年度权重网格: 2025/2026 弱势更像旧 `P2/K0.5/R0` 缺少动量项，但该结论已被 Rust 验证降级为标签侧线索。
+- AMV 手数修正后主基线: `manual_p2_k0p5_r0_6td` 更新为净收益 `+170.80%`, MaxDD `15.30%`。
 - B3 TDX: 已归档为事件型补充候选，不作为当前主线继续深挖。
 - Direct LTR Top3: 因 executable label 与真实执行口径错配，暂不接交易。
 - `attack_ok` 第一版: 当前状态特征未证明可稳定学习进攻切换，需收紧标签后再回看。
 - AMV 受约束 Oracle: 仍是当前 sleeve switching / gating 的理论锚点。
 - `manual_p2_k0p5_r0_6td`: 仍是当前 AMV bull pool 主策略底座。
+
+## 2026-05-19
+
+### [AMV] Executable-aware pullback combo grid v1
+
+- 背景:
+  - 全因子 executable 扫描发现低污染强候选集中在 `ma_bias_20_asc / disp_bias_20_asc / KSFT_asc`
+  - 用户同意把这些新发现的回调因子纳入新一轮组合权重探索
+- 新增:
+  - `scripts/amv_executable_pullback_grid.py`
+- 因子组定义:
+  - `P`: `price_pos_20d` 高 + `close_to_high_20d` 低
+  - `K`: `KLEN` 低 + `KMID2` 高
+  - `B`: `ma_bias_20` 低 + `disp_bias_20` 低
+  - `C`: `KSFT` 低 + `intraday_pos` 低
+  - `R`: `atr_14_pct` 低 + `panic_vol_ratio_20d` 低
+  - 本轮不加入 `M` 动量
+- 执行过程:
+  - 首次 full grid `618` 个 ranker 运行过久且没有落产物，已停止
+  - 脚本改为默认 `--grid-preset focused`，focused grid `164` 个 ranker；保留 `--grid-preset full` 供后续局部展开
+  - `uv run python scripts/amv_executable_pullback_grid.py`
+- 产物:
+  - smoke: `artifacts/amv_executable_pullback_grid/20260519_153907/summary.json`
+  - focused full: `artifacts/amv_executable_pullback_grid/20260519_160017/summary.json`
+  - compact: `artifacts/amv_executable_pullback_grid/20260519_160017/compact.csv`
+- Canvas:
+  - tracked: `reports/canvases/amv-executable-pullback-grid.canvas.tsx`
+  - renderable: `amv-executable-pullback-grid.canvas.tsx`
+- `original_top3` 核心结果:
+  - `pullback_p0_k0_b1_c0_r0`: exec NAV `+245.37%`, MaxDD `23.29%`, close-to-close NAV `+124.33%`, close 涨停覆盖 `0.5%`
+  - `pullback_p0_k0_b3_c1_r0`: exec NAV `+215.37%`, MaxDD `20.29%`, close-to-close NAV `+110.09%`, close 涨停覆盖 `0.0%`
+  - `pullback_p1_k0_b3_c1_r0`: exec NAV `+179.37%`, MaxDD `18.70%`, close-to-close NAV `+105.12%`, close 涨停覆盖 `0.0%`
+  - `pullback_p0_k0_b2_c1_r0`: exec NAV `+176.51%`, MaxDD `19.39%`, close-to-close NAV `+90.94%`, close 涨停覆盖 `0.0%`
+  - `candidate_p3_k0p5_b0_c0_r0`: exec NAV `+160.14%`, MaxDD `5.58%`, close-to-close NAV `+278.93%`, close 涨停覆盖 `20.2%`
+  - `reference_p2_k0p5_b0_c0_r0`: exec NAV `+152.21%`, MaxDD `5.27%`, close-to-close NAV `+248.54%`, close 涨停覆盖 `16.8%`
+- `skip_close_limit_refill_top3` 核心结果:
+  - `pullback_p0_k0_b1_c0_r0`: exec NAV `+242.58%`, MaxDD `23.29%`, close-to-close NAV `+124.83%`, rank q95 `3`
+  - `pullback_p0_k0_b3_c1_r0`: exec NAV `+215.37%`, MaxDD `20.29%`, close-to-close NAV `+110.09%`, rank q95 `3`
+  - `pullback_p1_k0_b3_c1_r0`: exec NAV `+179.37%`, MaxDD `18.70%`, close-to-close NAV `+105.12%`, rank q95 `3`
+  - `pullback_p0_k0_b2_c1_r0`: exec NAV `+176.51%`, MaxDD `19.39%`, close-to-close NAV `+90.94%`, rank q95 `3`
+  - `pullback_p3_k0_b0_c1_r0`: exec NAV `+157.93%`, MaxDD `11.05%`, close-to-close NAV `+150.89%`, rank q95 `5`
+  - `pullback_p2_k0_b0_c1_r0`: exec NAV `+155.87%`, MaxDD `10.14%`, close-to-close NAV `+149.99%`, rank q95 `5`
+- 当前判断:
+  - pullback sleeve 成立，且不是涨停污染产物；最强 `B1/C0/R0` 基本等价于 `ma_bias_20 + disp_bias_20` 回调组合
+  - 纯 pullback 收益高于现有 P/K reference，但回撤也明显更深，定位更像独立 sleeve 或 attack/counter-trend sleeve，不应直接替换主基线
+  - `P/K + C` 组合收益略低但回撤更可控，值得作为 Rust 静态 sleeve 候选
+  - 下一步应挑 2-4 个候选导出 Rust 回测:
+    - `pullback_p0_k0_b1_c0_r0`
+    - `pullback_p0_k0_b3_c1_r0`
+    - `pullback_p2_k0_b0_c1_r0`
+    - `pullback_p3_k0_b0_c1_r0`
+
+### [AMV] Executable-aware 早期全因子扫描
+
+- 背景:
+  - 用户指出当前 executable-aware 权重网格只覆盖少数解释因子，需要把早期全因子扫描也按新口径重跑
+  - 新口径沿用:
+    - 主评估: `D+1 open -> D+7 close`
+    - 辅助诊断: `D close -> D+6 close`
+    - 归因: close 涨停、`T+1 open` 涨停、`T+1` 高开、跳过 close 涨停补位
+- 新增:
+  - `scripts/amv_executable_factor_scan.py`
+- 修正:
+  - smoke test 发现 `scripts/amv_executable_weight_grid.py` 的单因子 `descending=False` 方向在通用评估函数里没有正确反映到排序 score
+  - 已改为显式构造 `score = factor` 或 `score = -factor` 后统一按 `score` 降序排序
+  - 该问题影响单因子 asc/desc 对照；此前 P/K/R、P/K/M 组合结论不受影响，因为组合 score 已是 higher-is-better
+- 范围:
+  - 早期 `RANKERS + COMBO_RANKERS`，共 `47` 个 ranker
+  - AMV bull LF2, Top3, `horizon = 6`
+- 校验:
+  - `uv run python -m py_compile scripts/amv_executable_weight_grid.py scripts/amv_executable_factor_scan.py`
+  - `uv run python scripts/amv_executable_factor_scan.py --max-rankers 8`
+  - `uv run python scripts/amv_executable_factor_scan.py`
+- 产物:
+  - full: `artifacts/amv_executable_factor_scan/20260519_151529/summary.json`
+  - compact: `artifacts/amv_executable_factor_scan/20260519_151529/compact.csv`
+- Canvas:
+  - tracked: `reports/canvases/amv-executable-factor-scan.canvas.tsx`
+  - renderable: `amv-executable-factor-scan.canvas.tsx`
+- `original_top3` 核心结果:
+  - `ret_5d_desc`: exec NAV `+264.07%`, MaxDD `47.11%`, close-to-close NAV `+365.43%`, close 涨停覆盖 `69.0%` 天, `T+1` 高开覆盖 `14.1%` 天
+  - `ma_bias_20_asc`: exec NAV `+231.03%`, MaxDD `23.19%`, close-to-close NAV `+132.19%`, close 涨停覆盖 `0.7%` 天
+  - `disp_bias_20_asc`: exec NAV `+187.54%`, MaxDD `22.68%`, close-to-close NAV `+94.73%`, close 涨停覆盖 `0.4%` 天
+  - `KSFT_asc`: exec NAV `+178.36%`, MaxDD `24.50%`, close-to-close NAV `+2.59%`, close 涨停覆盖 `0.0%` 天
+  - `combo_high_pos_kmid2_lowrisk`: exec NAV `+157.02%`, MaxDD `11.44%`, close-to-close NAV `+152.69%`, close 涨停覆盖 `10.3%` 天
+  - `combo_high_pos_kbar_confirm`: exec NAV `+140.77%`, MaxDD `5.07%`, close-to-close NAV `+191.25%`, close 涨停覆盖 `13.7%` 天
+  - `far_from_high_20d`: exec NAV `+126.72%`, MaxDD `26.88%`, close-to-close NAV `+62.51%`, close 涨停覆盖 `2.0%` 天
+  - `ret_20d_asc`: exec NAV `+114.83%`, MaxDD `25.73%`, close-to-close NAV `+73.80%`, close 涨停覆盖 `1.4%` 天
+- `skip_close_limit_refill_top3` 核心结果:
+  - `ma_bias_20_asc`: exec NAV `+227.14%`, close-to-close NAV `+131.40%`, rank q95 `3`
+  - `disp_bias_20_asc`: exec NAV `+188.64%`, close-to-close NAV `+95.87%`, rank q95 `3`
+  - `KSFT_asc`: exec NAV `+178.36%`, close-to-close NAV `+2.59%`, rank q95 `3`
+  - `ret_5d_desc`: exec NAV `+165.93%`, close-to-close NAV `+0.25%`, rank q95 `7`
+  - `combo_high_pos_kmid2_lowrisk`: exec NAV `+138.53%`, close-to-close NAV `+119.77%`, rank q95 `3`
+  - `combo_high_pos_kbar_confirm`: exec NAV `+121.80%`, close-to-close NAV `+101.77%`, rank q95 `4`
+- 当前判断:
+  - 全因子 executable 扫描发现一条与既有 high-pos/kbar 主线不同的强线索: “20 日均线/成本线下回归 + 收盘偏低/回调后反弹”
+  - `ma_bias_20_asc / disp_bias_20_asc / KSFT_asc` 的 close 涨停污染极低，且补位后几乎不衰减，优先级高于继续堆 P/K/M 动量权重
+  - `ret_5d_desc` 仍有很强可执行收益，但高回撤和高涨停覆盖说明它更像 attack/event archetype，不适合作为稳态主基线
+  - 下一步应把低污染强因子纳入新的可解释组合网格，例如 `P/K + pullback` 或 `pullback + lowrisk`，并优先做 Rust 静态 sleeve 验证
+
+### [AMV] Executable-aware 因子/权重网格 v2 首轮
+
+- 背景:
+  - 用户决定重开早期 AMV 多头宽池因子、因子组合与权重网格探索
+  - 新原则:
+    - 主评估: `T+1 open -> horizon close`
+    - 辅助诊断: `close-to-close`
+    - 强制归因: signal close 涨停、`T+1 open` 涨停、`T+1 open` 高开、跳过 close 涨停后补位表现
+  - signal day close 涨停不直接删除；主指标用可执行入场价自然惩罚它
+- 新增:
+  - `scripts/amv_executable_weight_grid.py`
+- 口径:
+  - 复用 `amv_yearly_weight_grid.py` 的 `90` 个 ranker:
+    - 当前 reference
+    - 单因子
+    - 旧 P/K/R 网格
+    - P/K/M 网格
+  - 默认 `horizon = 6`
+  - signal day `D close` 排序
+  - executable 主标签: `D+1 open -> D+7 close`
+  - close-to-close 辅助标签: `D close -> D+6 close`
+  - 同时输出:
+    - `original_top3`
+    - `skip_close_limit_refill_top3`
+- 校验:
+  - `uv run python -m py_compile scripts/amv_executable_weight_grid.py`
+  - `uv run python scripts/amv_executable_weight_grid.py --max-rankers 8`
+  - `uv run python scripts/amv_executable_weight_grid.py`
+  - `ReadLints scripts/amv_executable_weight_grid.py`: 无问题
+- 产物:
+  - smoke: `artifacts/amv_executable_weight_grid/20260519_144637/summary.json`
+  - full: `artifacts/amv_executable_weight_grid/20260519_144938/summary.json`
+  - compact: `artifacts/amv_executable_weight_grid/20260519_144938/compact.csv`
+- Canvas:
+  - tracked: `reports/canvases/amv-executable-weight-grid-v2.canvas.tsx`
+  - renderable: `amv-executable-weight-grid-v2.canvas.tsx`
+- `original_top3` 关键结果:
+  - `single_ret_5d`: exec NAV `+264.07%`, close-to-close NAV `+365.43%`, close 涨停覆盖 `69.0%` 天, `T+1` 高开覆盖 `14.1%` 天, MaxDD `47.11%`
+  - `grid_high_pos_kbar_p3_k0p5_r0`: exec NAV `+160.14%`, close-to-close NAV `+278.93%`, close 涨停覆盖 `20.2%` 天, `T+1` 高开覆盖 `9.0%` 天
+  - `ref_p2_k0p5_r0`: exec NAV `+152.21%`, close-to-close NAV `+248.54%`, close 涨停覆盖 `16.8%` 天, `T+1` 高开覆盖 `7.6%` 天
+  - `grid_pkm_p1_k0p5_m1`: exec NAV `+32.87%`, close-to-close NAV `+1054.55%`, close 涨停覆盖 `73.5%` 天, `T+1` 高开覆盖 `28.0%` 天
+  - `grid_pkm_p2_k0p5_m0p5`: exec NAV `+29.14%`, close-to-close NAV `+768.74%`, close 涨停覆盖 `59.7%` 天, `T+1` 高开覆盖 `26.4%` 天
+  - `grid_pkm_p3_k1_m2`: exec NAV `+31.62%`, close-to-close NAV `+1045.97%`, close 涨停覆盖 `76.4%` 天, `T+1` 高开覆盖 `28.2%` 天
+- `skip_close_limit_refill_top3` 关键结果:
+  - `grid_high_pos_kbar_p3_k0p5_r0`: exec NAV `+151.90%`, close-to-close NAV `+117.44%`, `T+1` 高开覆盖 `0.2%` 天
+  - `ref_p2_k0p5_r0`: exec NAV `+114.12%`, close-to-close NAV `+90.33%`, `T+1` 高开覆盖 `0.2%` 天
+  - `single_ret_5d`: exec NAV `+165.93%`, close-to-close NAV `+0.25%`, close 涨停覆盖 `0%`, MaxDD `30.93%`
+  - `grid_pkm_p1_k0p5_m1`: exec NAV `+90.64%`, close-to-close NAV `+55.71%`
+  - `grid_pkm_p2_k0p5_m0p5`: exec NAV `+66.44%`, close-to-close NAV `+53.72%`
+  - `grid_pkm_p3_k1_m2`: exec NAV `+57.72%`, close-to-close NAV `+31.32%`
+- 当前判断:
+  - 可执行口径 v2 重新支持早期 AMV 高位 + K 线确认结构；旧 reference 附近权重仍强
+  - `P3/K0.5/R0` 在标签侧可执行口径略强于当前 `P2/K0.5/R0`，但仍需 Rust `T+1 open` 真实回测确认，不能直接替换主基线
+  - 带动量的 P/K/M 原始 close-to-close 爆炸，但 executable 仅 `+29% ~ +33%`，污染非常重
+  - 跳过 close 涨停并补位后，P/K/M 有所恢复但仍弱于无动量高位 + K 线结构
+  - `single_ret_5d` 即使 executable NAV 高，也有高涨停覆盖、高回撤和明显事件票属性，应作为污染/动量 archetype 观察，不作为直接主策略候选
+
+### [AMV] Python close 涨停跳过并顺位补位 rolling NAV 诊断
+
+- 背景:
+  - 用户提出在标签侧 rolling NAV 中，如果当日 Top3 有 close 涨停票，则跳过并顺位选择下一个候选，直到补满 Top3
+  - 目标是区分“P/K/M 标签侧高收益是否只来自原始 Top3 涨停污染”与“非涨停后排候选是否仍有 alpha”
+- 新增:
+  - `scripts/amv_limit_refill_rolling_nav.py`
+- 诊断口径:
+  - AMV bull LF2 池，`mv_min = 100`, `amount_ma20_min = 5e7`
+  - close-to-close 标签侧 rolling NAV，默认 `5d / 6d`
+  - 每日原始 Top3、剔除原始 Top3 涨停但不补位、跳过 close 涨停并顺位补满 Top3 三种场景
+  - close 涨停按主板 `10%`、创业板/科创板 `20%`，容差 `0.001`
+  - `max_scan_rank = 0`，即从全候选池顺位补位
+  - 本诊断仍不是真实交易口径: 不含 `T+1 open`、成本、手数、no-repeat、资金约束
+- 运行:
+  - `uv run python scripts/amv_limit_refill_rolling_nav.py`
+  - 产物: `artifacts/amv_limit_refill_rolling_nav/20260519_143120/summary.json`
+- 6d 核心结果:
+  - `manual_p2_k0p5_r0`: 原始 Top3 NAV `+248.54%` -> 跳过涨停补位 `+90.33%`, MaxDD `5.71%`
+  - `pkm_p1_k0p5_m1`: 原始 Top3 NAV `+1054.55%` -> 跳过涨停补位 `+55.71%`, MaxDD `19.10%`
+  - `pkm_p2_k0p5_m0p5`: 原始 Top3 NAV `+768.74%` -> 跳过涨停补位 `+53.72%`, MaxDD `11.64%`
+  - `pkm_p3_k1_m2`: 原始 Top3 NAV `+1045.97%` -> 跳过涨停补位 `+31.32%`, MaxDD `21.35%`
+- close 涨停污染:
+  - manual 原始 Top3 close 涨停 `135 / 1665` 行，覆盖 `94 / 555` 天
+  - `P1/K0.5/M1`: `828 / 1665` 行，覆盖 `408 / 555` 天
+  - `P2/K0.5/M0.5`: `610 / 1665` 行，覆盖 `332 / 555` 天
+  - `P3/K1/M2`: `870 / 1665` 行，覆盖 `424 / 555` 天
+- 补位深度:
+  - manual 补位 rank 均值 `2.74`, q95 `4`, max `258`
+  - `P1/K0.5/M1` 补位 rank 均值 `5.52`, q95 `16`, max `140`
+  - `P2/K0.5/M0.5` 补位 rank 均值 `4.75`, q95 `14`, max `244`
+  - `P3/K1/M2` 补位 rank 均值 `5.90`, q95 `17`, max `170`
+- 当前判断:
+  - P/K/M 原始 rolling NAV 的 `+700%` 到 `+1000%` 级收益主要依赖 close 涨停不可买样本
+  - 顺位补位后 P/K/M 仍有正的标签侧 alpha，但只剩几十个百分点，且 6d 不再超过 manual
+  - 这说明“动量袖子不是完全没信号”，但强信号集中在不可成交极端票；后排非涨停候选不足以支撑主策略替代
+  - 如果后续接 Rust，应把“候选池深度 + 跳过不可买后补位”作为 execution policy 单独测试，但不应再把原始 Python rolling NAV 当作可交易上限
+
+### [Backtest Engine] A 股买入手数口径修正
+
+- 背景:
+  - rolling cohort 真实组合会把单票目标仓位压到 `1/18` 或 `1/21`
+  - 原 `bt_core::round_to_lot` 使用全局 `LOT_SIZE = 300`，会过度压低小仓位可买入数量，并增加高价股跳单
+- 修正:
+  - 普通 A 股买入按 `100` 股整数倍向下取整
+  - 科创板 `sh.688*` 买入少于 `200` 股则跳过；达到 `200` 股后允许按 `1` 股递增
+  - `amv-topn / b1 / b3 / rotation / renko` 的买入逻辑统一传入代码，由 `bt_core::round_to_lot(code, shares)` 判定
+- 影响:
+  - 这是交易口径修正，不是策略调参
+  - 既有 Rust 指标，包括 `manual_p2_k0p5_r0_6td = +168.01%` 与 P/K/M 扫描结果，后续应在新手数口径下重新确认
+  - rolling cohort 回测应基于本口径继续推进
+
+### [AMV] 手数修正后 manual_p2_k0p5_r0_6td 校准重跑
+
+- 背景:
+  - 买入手数从全局 `300` 股修正为普通 A 股 `100` 股、科创板 `200+1` 后，需要先校准当前主基线
+  - 同批重跑了 manual 与三组 P/K/M 静态 sleeve 信号，便于后续滚动持仓回测使用一致信号时间戳
+- 信号导出:
+  - `uv run python scripts/amv_static_sleeve_signal_export.py --sleeves manual_p2_k0p5_r0,pkm_p1_k0p5_m1,pkm_p2_k0p5_m0p5,pkm_p3_k1_m2 --end-date 2026-05-10`
+  - 新产物:
+    - `artifacts/amv_static_sleeve_signals/20260519_085446_manual_p2_k0p5_r0/signal.meta.json`
+    - `artifacts/amv_static_sleeve_signals/20260519_085448_pkm_p1_k0p5_m1/signal.meta.json`
+    - `artifacts/amv_static_sleeve_signals/20260519_085450_pkm_p2_k0p5_m0p5/signal.meta.json`
+    - `artifacts/amv_static_sleeve_signals/20260519_085452_pkm_p3_k1_m2/signal.meta.json`
+- Rust 回测:
+  - `uv run python scripts/amv_topn_backtest.py artifacts/amv_static_sleeve_signals/20260519_085446_manual_p2_k0p5_r0 --config backtest-engine/crates/amv-topn/config_6td_no_stop.toml`
+  - 报告: `artifacts/amv_static_sleeve_signals/20260519_085446_manual_p2_k0p5_r0/backtests/6td_no_stop_20260519_085501_573/report.json`
+- 结果:
+  - 新手数口径: net `+170.80%`, gross `+229.03%`, MaxDD `15.30%`, trades `274`, win rate `51.09%`
+  - 旧手数口径: net `+168.01%`, MaxDD `14.97%`, trades `273`, win rate `51.65%`
+  - 分年份:
+    - 2021 `+10.37%`
+    - 2022 `+39.70%`
+    - 2023 `+14.31%`
+    - 2024 `+49.66%`
+    - 2025 `+12.57%`
+    - 2026 YTD `-8.80%`
+- 当前判断:
+  - 手数修正没有改变 `manual_p2_k0p5_r0_6td` 作为当前主策略底座的结论
+  - 净收益略升、回撤略升，整体变化很小
+  - 下一步可以在同一新手数口径下重跑 P/K/M `6td`，再推进 rolling cohort `5td / 6td`
+
+### [AMV] 手数修正后 P/K/M 6td 校准重跑
+
+- 背景:
+  - 用户要求在重跑 manual 后，用同一新手数口径重跑三组 P/K/M `6td no-stop`
+  - 信号使用同批 `20260519_0854xx` 静态 sleeve 导出
+- Rust 回测:
+  - 配置: `backtest-engine/crates/amv-topn/config_6td_no_stop.toml`
+  - 汇总产物:
+    - `artifacts/amv_static_sleeve_signals/pkm_rust_6td_no_stop_new_lot_summary_20260519_085900.json`
+    - `artifacts/amv_static_sleeve_signals/pkm_rust_6td_no_stop_new_lot_summary_20260519_085900.csv`
+- 核心结果:
+  - `pkm_p1_k0p5_m1`: net `+90.34%`, gross `+128.43%`, MaxDD `48.04%`, trades `269`, win rate `47.21%`
+  - `pkm_p3_k1_m2`: net `+103.58%`, gross `+142.04%`, MaxDD `48.08%`, trades `268`, win rate `47.01%`
+  - `pkm_p2_k0p5_m0p5`: net `+12.10%`, gross `+47.35%`, MaxDD `62.15%`, trades `270`, win rate `45.93%`
+- 分年份:
+  - `pkm_p1_k0p5_m1`: 2021 `+5.72%`, 2022 `+23.94%`, 2023 `-13.94%`, 2024 `+23.15%`, 2025 `+59.60%`, 2026 YTD `-14.12%`
+  - `pkm_p3_k1_m2`: 2021 `+0.35%`, 2022 `+28.05%`, 2023 `-12.82%`, 2024 `+37.17%`, 2025 `+52.14%`, 2026 YTD `-12.93%`
+  - `pkm_p2_k0p5_m0p5`: 2021 `+0.47%`, 2022 `+10.17%`, 2023 `-7.68%`, 2024 `+56.85%`, 2025 `-9.44%`, 2026 YTD `-22.77%`
+- 当前判断:
+  - 手数修正后 P/K/M 结果整体抬升，但仍没有替代 `manual_p2_k0p5_r0_6td`
+  - 最好的 `P3/K1/M2` 约为主基线收益的六成，回撤约为主基线的三倍
+  - P/K/M 仍主要表现为 2025 型高波动补充袖子，2026 YTD 仍弱于 manual
+  - 下一步应进入 rolling cohort 口径，检验每日 Top3 信号产能是否被 `max_positions = 3` 压制
+
+### [AMV] Rolling cohort 真实组合第一版回测
+
+- 背景:
+  - 用户提出用真实账户滚动持仓检验每日 Top3 信号产能
+  - 目标是判断 P/K/M 标签侧 rolling NAV 优势是否只是被 `max_positions = 3` 单组持仓限制压掉
+- 代码口径确认:
+  - `amv-topn` 已支持 `max_positions / max_daily_buys / position_size_pct / max_hold_trading_days`
+  - ECS 执行顺序为 `[open] process_buy_signals -> [close] check_exit_conditions -> update_stats`
+  - 当前实现会跳过已持有代码，因此 rolling cohort 是“不重复加仓”的真实账户口径，不是标签侧可重复 cohort
+- 配置:
+  - 临时配置目录: `artifacts/amv_static_sleeve_signals/rolling_cohort_configs_20260519_090300`
+  - `config_5td_rolling18_no_stop.toml`:
+    - `max_positions = 18`
+    - `max_daily_buys = 3`
+    - `position_size_pct = 1 / 18`
+    - `max_hold_trading_days = 5`
+  - `config_6td_rolling21_no_stop.toml`:
+    - `max_positions = 21`
+    - `max_daily_buys = 3`
+    - `position_size_pct = 1 / 21`
+    - `max_hold_trading_days = 6`
+- 回测范围:
+  - `manual_p2_k0p5_r0`
+  - `pkm_p1_k0p5_m1`
+  - `pkm_p2_k0p5_m0p5`
+  - `pkm_p3_k1_m2`
+  - 均使用 `20260519_0854xx` 新手数口径信号产物
+- 汇总产物:
+  - `artifacts/amv_static_sleeve_signals/amv_rolling_cohort_new_lot_summary_20260519_090500.json`
+  - `artifacts/amv_static_sleeve_signals/amv_rolling_cohort_new_lot_summary_20260519_090500.csv`
+- 核心结果:
+  - `manual_p2_k0p5_r0 5td rolling18`: net `+11.90%`, MaxDD `9.25%`, trades `1361`, win rate `46.66%`
+  - `manual_p2_k0p5_r0 6td rolling21`: net `+23.61%`, MaxDD `9.33%`, trades `1335`, win rate `46.82%`
+  - `pkm_p1_k0p5_m1 5td rolling18`: net `-13.99%`, MaxDD `31.19%`, trades `1248`, win rate `45.75%`
+  - `pkm_p1_k0p5_m1 6td rolling21`: net `-7.29%`, MaxDD `28.28%`, trades `1235`, win rate `44.53%`
+  - `pkm_p2_k0p5_m0p5 5td rolling18`: net `-6.23%`, MaxDD `31.08%`, trades `1301`, win rate `45.89%`
+  - `pkm_p2_k0p5_m0p5 6td rolling21`: net `+0.21%`, MaxDD `26.59%`, trades `1293`, win rate `45.09%`
+  - `pkm_p3_k1_m2 5td rolling18`: net `-14.10%`, MaxDD `29.90%`, trades `1241`, win rate `46.41%`
+  - `pkm_p3_k1_m2 6td rolling21`: net `-8.57%`, MaxDD `27.50%`, trades `1226`, win rate `44.54%`
+- 当前判断:
+  - rolling cohort 没有把 P/K/M 标签侧优势兑现为真实账户优势
+  - manual 仍是 rolling 口径下唯一有明显正收益的候选，且 `6td rolling21` 好于 `5td rolling18`
+  - P/K/M rolling 的 2025 确有正贡献，但被 2022/2023 与高回撤抵消
+  - 下一步若继续 rolling，应先诊断收益被摊薄的原因: 重复代码跳过、现金利用率、买入失败、分散化稀释，而不是继续加权重网格
+  - 结论上，P/K/M 不替代 manual；rolling cohort 也暂不作为默认主策略替代
+
+### [AMV] close-to-close cohort diagnostic crate
+
+- 背景:
+  - 用户指出 Python rolling NAV 与 Rust rolling cohort 差距太大，需要定位损耗断点
+  - 用户要求新增独立 crate，避免把 close-to-close 诊断口径混入真实 `amv-topn` 交易引擎
+  - 用户提醒必须保留涨停/开盘过滤，否则会重复 rotation 中“不可成交信号被计入收益”的问题
+- 新增:
+  - Rust crate: `backtest-engine/crates/amv-cohort-diagnostic`
+  - Python 诊断信号导出: `scripts/amv_close_to_close_diagnostic_signal_export.py`
+  - Python 诊断回测 helper: `scripts/amv_cohort_diagnostic_backtest.py`
+  - 默认配置:
+    - `config_5td_rolling18.toml`
+    - `config_6td_rolling21.toml`
+- 第一版诊断口径 B:
+  - 输入必须是 unshifted close-to-close diagnostic signal
+  - 信号日 close 买入
+  - 持有 `max_hold_trading_days` 后 close 卖出
+  - 不允许重复持有同一代码
+  - 保留真实资金、手数、成本、`max_positions / max_daily_buys / position_size_pct`
+  - 信号日 close 涨停不可买
+  - 默认开盘过滤: `max_open_gap_pct = 0.098`
+  - 继续支持 AMV bull entry gate
+- 校验:
+  - `uv run python -m py_compile scripts/amv_close_to_close_diagnostic_signal_export.py scripts/amv_cohort_diagnostic_backtest.py`
+  - `cargo fmt --package bt-amv-cohort-diagnostic`
+  - `cargo check -p bt-amv-cohort-diagnostic`
+- 当前判断:
+  - 新 crate 已可编译，后续可先导出 manual / P/K/M 的 unshifted diagnostic signal
+  - 下一步跑 B 口径，观察加入 close 涨停过滤与开盘过滤后，close-to-close 账户结构收益是否仍接近 Python rolling NAV
+
+### [AMV] close-to-close cohort diagnostic B 口径首轮结果
+
+- 背景:
+  - 用户要求直接导出 unshifted close-to-close diagnostic signal 并开跑 B 口径
+  - 重点验证 Python rolling NAV 的高收益是否来自大量现实不可成交信号
+- 信号导出:
+  - `uv run python scripts/amv_close_to_close_diagnostic_signal_export.py --sleeves manual_p2_k0p5_r0,pkm_p1_k0p5_m1,pkm_p2_k0p5_m0p5,pkm_p3_k1_m2 --end-date 2026-05-10`
+  - 新产物:
+    - `artifacts/amv_close_to_close_diagnostic_signals/20260519_135621_manual_p2_k0p5_r0/signal.meta.json`
+    - `artifacts/amv_close_to_close_diagnostic_signals/20260519_135623_pkm_p1_k0p5_m1/signal.meta.json`
+    - `artifacts/amv_close_to_close_diagnostic_signals/20260519_135625_pkm_p2_k0p5_m0p5/signal.meta.json`
+    - `artifacts/amv_close_to_close_diagnostic_signals/20260519_135627_pkm_p3_k1_m2/signal.meta.json`
+- 回测:
+  - `uv run python scripts/amv_cohort_diagnostic_backtest.py <signal_dir>`
+  - 配置:
+    - `config_5td_rolling18.toml`
+    - `config_6td_rolling21.toml`
+  - 汇总产物:
+    - `artifacts/amv_close_to_close_diagnostic_signals/amv_close_to_close_cohort_diagnostic_summary_20260519_140000.json`
+    - `artifacts/amv_close_to_close_diagnostic_signals/amv_close_to_close_cohort_diagnostic_summary_20260519_140000.csv`
+- 核心结果:
+  - `manual_p2_k0p5_r0 5td rolling18`: net `+11.66%`, gross `+38.33%`, MaxDD `10.67%`, trades `1335`
+  - `manual_p2_k0p5_r0 6td rolling21`: net `+20.88%`, gross `+44.71%`, MaxDD `11.08%`, trades `1311`
+  - `pkm_p1_k0p5_m1 5td rolling18`: net `+5.63%`, gross `+19.90%`, MaxDD `14.58%`, trades `779`
+  - `pkm_p1_k0p5_m1 6td rolling21`: net `+5.87%`, gross `+17.97%`, MaxDD `15.38%`, trades `772`
+  - `pkm_p2_k0p5_m0p5 5td rolling18`: net `+11.07%`, gross `+30.06%`, MaxDD `12.88%`, trades `980`
+  - `pkm_p2_k0p5_m0p5 6td rolling21`: net `+15.31%`, gross `+31.71%`, MaxDD `11.24%`, trades `971`
+  - `pkm_p3_k1_m2 5td rolling18`: net `+8.65%`, gross `+22.41%`, MaxDD `11.78%`, trades `739`
+  - `pkm_p3_k1_m2 6td rolling21`: net `+8.83%`, gross `+20.44%`, MaxDD `12.38%`, trades `732`
+- close 涨停/高开过滤:
+  - manual: close 涨停过滤 `138`, 高开过滤 `0`
+  - `P1/K0.5/M1`: close 涨停过滤 `812`, 高开过滤 `3`
+  - `P2/K0.5/M0.5`: close 涨停过滤 `602`, 高开过滤 `3`
+  - `P3/K1/M2`: close 涨停过滤 `856`, 高开过滤 `3`
+- 当前判断:
+  - close-to-close B 口径没有复刻 Python rolling NAV 的 `+1000%` 级别收益
+  - P/K/M 的 Python rolling NAV 高收益很大一部分来自信号日收盘已经涨停、现实无法买入的票
+  - 加入 close 涨停不可买、no repeat、资金/手数/成本后，P/K/M 只剩低两位数收益，且 manual 仍更稳
+  - 对比真实 `T+1 open` rolling:
+    - manual `6td`: close-to-close B `+20.88%` vs T+1 open `+23.61%`
+    - `P1 6td`: close-to-close B `+5.87%` vs T+1 open `-7.29%`
+    - `P2 6td`: close-to-close B `+15.31%` vs T+1 open `+0.21%`
+    - `P3 6td`: close-to-close B `+8.83%` vs T+1 open `-8.57%`
+  - 这说明 P/K/M 还存在明显 T+1 open 执行损耗，但更大的第一断点已经是 close 涨停不可买
+  - 下一步如果继续，应做过滤归因表，而不是直接把 Python rolling NAV 视作可交易上限
 
 ## 2026-05-18
 

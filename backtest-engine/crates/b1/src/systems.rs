@@ -65,13 +65,13 @@ pub fn process_buy_signals(
         }
 
         let target_position_value = total_value * config.position_size_pct;
-        let ideal_shares = bt_core::round_to_lot(target_position_value / open_price);
+        let ideal_shares = bt_core::round_to_lot(code, target_position_value / open_price);
         if ideal_shares == 0 {
             continue;
         }
 
         let cost_per_share = open_price * (1.0 + config.commission_rate + config.slippage_pct);
-        let affordable_shares = bt_core::round_to_lot(portfolio.cash / cost_per_share);
+        let affordable_shares = bt_core::round_to_lot(code, portfolio.cash / cost_per_share);
         let shares = ideal_shares.min(affordable_shares);
 
         let min_shares = (ideal_shares as f64 * config.min_position_ratio) as u32;
@@ -108,11 +108,7 @@ pub fn process_buy_signals(
 
         println!(
             "[{}] [BUY] {} @ {:.2} x {} shares | Total Asset: {:.2}",
-            current_date,
-            code,
-            open_price,
-            shares,
-            running_total_asset
+            current_date, code, open_price, shares, running_total_asset
         );
         bought_count += 1;
     }
@@ -167,7 +163,10 @@ pub fn check_sell_conditions(
             position.trailing_stop_active = true;
             println!(
                 "[{}] [TRAILING ACTIVATED] {} | Gain: +{:.1}% | High: {:.2}",
-                current_date, position.code, current_gain_pct * 100.0, position.high_since_entry
+                current_date,
+                position.code,
+                current_gain_pct * 100.0,
+                position.high_since_entry
             );
         }
 

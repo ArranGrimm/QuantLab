@@ -23,7 +23,11 @@ use systems::{check_sell_conditions, process_buy_signals, update_stats};
 #[derive(Parser, Debug)]
 #[command(author, version, about = "B3 AMV bull 波段接力策略回测")]
 struct Args {
-    #[arg(short, long, default_value = "../artifacts/b3_tdx_signals/signal.parquet")]
+    #[arg(
+        short,
+        long,
+        default_value = "../artifacts/b3_tdx_signals/signal.parquet"
+    )]
     data: PathBuf,
 
     #[arg(short, long, default_value = "crates/b3/config.toml")]
@@ -91,7 +95,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (process_buy_signals, check_sell_conditions, update_stats).chain(),
     );
 
-    println!("\nRunning backtest over {} trading days...\n", trading_dates.len());
+    println!(
+        "\nRunning backtest over {} trading days...\n",
+        trading_dates.len()
+    );
     for date in &trading_dates {
         let world = app.world_mut();
         world.resource_mut::<Portfolio>().current_date = Some(*date);
@@ -118,7 +125,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         && bar.trigger_low > 0.0
                     {
                         let structural_stop_price = bar.trigger_low * (1.0 - stop_buffer);
-                        Some((code.clone(), bar.sort_value, bar.open, structural_stop_price))
+                        Some((
+                            code.clone(),
+                            bar.sort_value,
+                            bar.open,
+                            structural_stop_price,
+                        ))
                     } else {
                         None
                     }
@@ -229,7 +241,10 @@ fn build_trade_summary(world: &mut World) -> (String, serde_json::Value) {
     }
 
     let mut lines = String::from("--- Trade Summary ---\n");
-    lines.push_str(&format!("Max Hold Observed:   {}td\n", max_hold_trading_days));
+    lines.push_str(&format!(
+        "Max Hold Observed:   {}td\n",
+        max_hold_trading_days
+    ));
     let mut reason_json = serde_json::Map::new();
 
     for (reason, stats) in &by_reason {
@@ -276,11 +291,18 @@ fn build_trade_summary(world: &mut World) -> (String, serde_json::Value) {
 fn print_config(config: &BacktestConfig) {
     println!("\n--- B3 Configuration ---");
     println!("Initial Capital: {:.0}", config.initial_capital);
-    println!("Max Positions: {} (Daily: {})", config.max_positions, config.max_daily_buys);
+    println!(
+        "Max Positions: {} (Daily: {})",
+        config.max_positions, config.max_daily_buys
+    );
     println!("Position Size: {:.0}%", config.position_size_pct * 100.0);
     println!("Max Hold TD: {}", config.max_hold_trading_days);
     println!("Entry Rank Limit: Top{}", config.entry_rank_limit);
-    println!("Sort Field: {} ({})", config.sort_field, if config.sort_ascending { "ASC" } else { "DESC" });
+    println!(
+        "Sort Field: {} ({})",
+        config.sort_field,
+        if config.sort_ascending { "ASC" } else { "DESC" }
+    );
     println!("Require Bull Regime: {}", config.require_bull_regime);
     println!("Structural Stop: {}", config.structural_stop_enabled);
     println!("Break White Line: {}", config.break_white_line_enabled);
@@ -288,7 +310,11 @@ fn print_config(config: &BacktestConfig) {
         "Fast Fail: {}td @ -{:.1}% ({})",
         config.fast_fail_days,
         config.fast_fail_loss_pct * 100.0,
-        if config.fast_fail_enabled { "ON" } else { "OFF" }
+        if config.fast_fail_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
     );
     println!(
         "Weak Exit: {}td @ +{:.1}% ({})",
@@ -310,33 +336,87 @@ fn format_config(config: &BacktestConfig, trading_days: usize) -> String {
     let mut s = String::new();
     writeln!(s, "--- Configuration ---").unwrap();
     writeln!(s, "Initial Capital:      {:.0}", config.initial_capital).unwrap();
-    writeln!(s, "Max Positions:        {} (Daily: {})", config.max_positions, config.max_daily_buys).unwrap();
-    writeln!(s, "Position Size:        {:.0}%", config.position_size_pct * 100.0).unwrap();
+    writeln!(
+        s,
+        "Max Positions:        {} (Daily: {})",
+        config.max_positions, config.max_daily_buys
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Position Size:        {:.0}%",
+        config.position_size_pct * 100.0
+    )
+    .unwrap();
     writeln!(s, "Max Hold TD:          {}", config.max_hold_trading_days).unwrap();
     writeln!(s, "Trading Days:         {}", trading_days).unwrap();
     writeln!(s, "Entry Rank Limit:     Top{}", config.entry_rank_limit).unwrap();
-    writeln!(s, "Sort Field:           {} ({})", config.sort_field, if config.sort_ascending { "ASC" } else { "DESC" }).unwrap();
+    writeln!(
+        s,
+        "Sort Field:           {} ({})",
+        config.sort_field,
+        if config.sort_ascending { "ASC" } else { "DESC" }
+    )
+    .unwrap();
     writeln!(s, "Require Bull Regime:  {}", config.require_bull_regime).unwrap();
-    writeln!(s, "Structural Stop:      {}", config.structural_stop_enabled).unwrap();
-    writeln!(s, "Break White Line:     {}", config.break_white_line_enabled).unwrap();
-    writeln!(s, "Fast Fail:            {}td @ -{:.1}% ({})",
+    writeln!(
+        s,
+        "Structural Stop:      {}",
+        config.structural_stop_enabled
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Break White Line:     {}",
+        config.break_white_line_enabled
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Fast Fail:            {}td @ -{:.1}% ({})",
         config.fast_fail_days,
         config.fast_fail_loss_pct * 100.0,
-        if config.fast_fail_enabled { "ON" } else { "OFF" }
-    ).unwrap();
-    writeln!(s, "Weak Exit:            {}td @ +{:.1}% ({})",
+        if config.fast_fail_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Weak Exit:            {}td @ +{:.1}% ({})",
         config.weak_days,
         config.weak_min_gain_pct * 100.0,
         if config.weak_enabled { "ON" } else { "OFF" }
-    ).unwrap();
-    writeln!(s, "Trailing Stop:        Activate={:.0}%, Trail={:.0}% ({})",
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Trailing Stop:        Activate={:.0}%, Trail={:.0}% ({})",
         config.trailing_activation_pct * 100.0,
         config.trailing_pct * 100.0,
         if config.trailing_enabled { "ON" } else { "OFF" }
-    ).unwrap();
-    writeln!(s, "Commission:           {:.4}%", config.commission_rate * 100.0).unwrap();
-    writeln!(s, "Stamp Duty:           {:.3}%", config.stamp_duty_rate * 100.0).unwrap();
-    writeln!(s, "Slippage:             {:.2}%", config.slippage_pct * 100.0).unwrap();
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Commission:           {:.4}%",
+        config.commission_rate * 100.0
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Stamp Duty:           {:.3}%",
+        config.stamp_duty_rate * 100.0
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Slippage:             {:.2}%",
+        config.slippage_pct * 100.0
+    )
+    .unwrap();
     s
 }
 
@@ -352,10 +432,8 @@ fn append_b3_registry_entry(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use chrono::Local;
 
-    let registry_path = bt_core::resolve_registry_path(
-        signal_meta,
-        "../artifacts/b3/backtest.jsonl",
-    );
+    let registry_path =
+        bt_core::resolve_registry_path(signal_meta, "../artifacts/b3/backtest.jsonl");
     let derived = bt_core::calc_derived_metrics(stats, portfolio, trading_days);
     let train_run_dir = registry_path
         .parent()
