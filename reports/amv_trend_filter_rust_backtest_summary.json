@@ -1,0 +1,332 @@
+{
+  "generated_at": "2026-05-20 15:30",
+  "signal_roots": [
+    "artifacts/amv_static_sleeve_signals/20260520_152712_trend_p1_k0_pb1_cp0_rv0p5",
+    "artifacts/amv_static_sleeve_signals/20260520_152714_trend_p1_k0p5_pb1_cp0_rv0p5",
+    "artifacts/amv_static_sleeve_signals/20260520_152717_trend_p3_k0p5_pb2_cp1_rv0p5"
+  ],
+  "rows": [
+    {
+      "sleeve": "p1_k0_pb1_cp0_rv0p5",
+      "config": "6td_static_strict_top3_no_stop",
+      "total_return_pct": 64.18301165038372,
+      "max_drawdown_pct": 40.67643832503162,
+      "win_rate_pct": 51.08695652173913,
+      "trades": 276,
+      "total_costs": 188553.82404136244,
+      "limit_up_blocked": 2,
+      "signal_rows": 1734,
+      "yearly_returns": {
+        "2021": 0.03311096703537264,
+        "2022": -0.09855030383929897,
+        "2023": 0.18832883044576776,
+        "2024": 0.26853838616420367,
+        "2025": 0.011502433250272448,
+        "2026": 0.11885724326935665
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152712_trend_p1_k0_pb1_cp0_rv0p5/backtests/6td_static_strict_top3_no_stop_20260520_152742_000"
+    },
+    {
+      "sleeve": "p1_k0_pb1_cp0_rv0p5",
+      "config": "6td_static_refill_top10_no_stop",
+      "total_return_pct": 64.46418331188062,
+      "max_drawdown_pct": 41.059623281719034,
+      "win_rate_pct": 51.08695652173913,
+      "trades": 276,
+      "total_costs": 188867.27205317875,
+      "limit_up_blocked": 8,
+      "signal_rows": 5780,
+      "yearly_returns": {
+        "2021": 0.03513694092724151,
+        "2022": -0.09854593467669792,
+        "2023": 0.1882852417660219,
+        "2024": 0.2679896656580847,
+        "2025": 0.011607020812119062,
+        "2026": 0.11896203943852868
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152712_trend_p1_k0_pb1_cp0_rv0p5/backtests/6td_static_refill_top10_no_stop_20260520_152753_931"
+    },
+    {
+      "sleeve": "p1_k0_pb1_cp0_rv0p5",
+      "config": "6td_rolling21_strict_top3_no_stop",
+      "total_return_pct": 24.4178524092171,
+      "max_drawdown_pct": 7.055667825174164,
+      "win_rate_pct": 48.10810810810811,
+      "trades": 740,
+      "total_costs": 68480.96767746311,
+      "limit_up_blocked": 2,
+      "signal_rows": 1734,
+      "yearly_returns": {
+        "2021": 0.10101409925393101,
+        "2022": -0.007459536620229801,
+        "2023": 0.02034734324513554,
+        "2024": 0.054534301790158723,
+        "2025": 0.03236301735155411,
+        "2026": 0.021052271720861215
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152712_trend_p1_k0_pb1_cp0_rv0p5/backtests/6td_rolling21_strict_top3_no_stop_20260520_152803_357"
+    },
+    {
+      "sleeve": "p1_k0_pb1_cp0_rv0p5",
+      "config": "6td_rolling21_refill_top10_no_stop",
+      "total_return_pct": 35.017007562072486,
+      "max_drawdown_pct": 14.102638232347397,
+      "win_rate_pct": 45.92302674494455,
+      "trades": 1533,
+      "total_costs": 146282.57926081622,
+      "limit_up_blocked": 8,
+      "signal_rows": 5780,
+      "yearly_returns": {
+        "2021": 0.1338121422620575,
+        "2022": -0.02005711929129339,
+        "2023": 0.02421153550623023,
+        "2024": 0.1076778405703327,
+        "2025": 0.06703452286413691,
+        "2026": -0.0009568657433052241
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152712_trend_p1_k0_pb1_cp0_rv0p5/backtests/6td_rolling21_refill_top10_no_stop_20260520_152812_505"
+    },
+    {
+      "sleeve": "p1_k0p5_pb1_cp0_rv0p5",
+      "config": "6td_static_strict_top3_no_stop",
+      "total_return_pct": 60.74179044351913,
+      "max_drawdown_pct": 43.77512423846536,
+      "win_rate_pct": 48.55072463768116,
+      "trades": 276,
+      "total_costs": 185648.0803778749,
+      "limit_up_blocked": 3,
+      "signal_rows": 1734,
+      "yearly_returns": {
+        "2021": 0.034082918942300866,
+        "2022": -0.1292550773020451,
+        "2023": 0.18119132771601665,
+        "2024": 0.29540489083100985,
+        "2025": 0.025550620590451434,
+        "2026": 0.10167460070006129
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152714_trend_p1_k0p5_pb1_cp0_rv0p5/backtests/6td_static_strict_top3_no_stop_20260520_152822_273"
+    },
+    {
+      "sleeve": "p1_k0p5_pb1_cp0_rv0p5",
+      "config": "6td_static_refill_top10_no_stop",
+      "total_return_pct": 60.74179044351913,
+      "max_drawdown_pct": 43.77512423846536,
+      "win_rate_pct": 48.55072463768116,
+      "trades": 276,
+      "total_costs": 185648.0803778749,
+      "limit_up_blocked": 9,
+      "signal_rows": 5780,
+      "yearly_returns": {
+        "2021": 0.034082918942300866,
+        "2022": -0.1292550773020451,
+        "2023": 0.18119132771601665,
+        "2024": 0.29540489083100985,
+        "2025": 0.025550620590451434,
+        "2026": 0.10167460070006129
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152714_trend_p1_k0p5_pb1_cp0_rv0p5/backtests/6td_static_refill_top10_no_stop_20260520_152831_185"
+    },
+    {
+      "sleeve": "p1_k0p5_pb1_cp0_rv0p5",
+      "config": "6td_rolling21_strict_top3_no_stop",
+      "total_return_pct": 23.630439974506643,
+      "max_drawdown_pct": 8.484190262635659,
+      "win_rate_pct": 47.084233261339094,
+      "trades": 926,
+      "total_costs": 84664.74010988885,
+      "limit_up_blocked": 3,
+      "signal_rows": 1734,
+      "yearly_returns": {
+        "2021": 0.12146362051090387,
+        "2022": -0.03523561818680487,
+        "2023": 0.011528126019326512,
+        "2024": 0.057703453649891046,
+        "2025": 0.04509874275738368,
+        "2026": 0.01820058778238054
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152714_trend_p1_k0p5_pb1_cp0_rv0p5/backtests/6td_rolling21_strict_top3_no_stop_20260520_152840_203"
+    },
+    {
+      "sleeve": "p1_k0p5_pb1_cp0_rv0p5",
+      "config": "6td_rolling21_refill_top10_no_stop",
+      "total_return_pct": 29.940041283175,
+      "max_drawdown_pct": 12.580910871428397,
+      "win_rate_pct": 46.91972619788425,
+      "trades": 1607,
+      "total_costs": 156026.30296010766,
+      "limit_up_blocked": 9,
+      "signal_rows": 5780,
+      "yearly_returns": {
+        "2021": 0.2209110742789575,
+        "2022": -0.05440966841363071,
+        "2023": -0.0016153488920067627,
+        "2024": 0.05368893894443416,
+        "2025": 0.06356766590197349,
+        "2026": 0.0023421627163842107
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152714_trend_p1_k0p5_pb1_cp0_rv0p5/backtests/6td_rolling21_refill_top10_no_stop_20260520_152849_471"
+    },
+    {
+      "sleeve": "p3_k0p5_pb2_cp1_rv0p5",
+      "config": "6td_static_strict_top3_no_stop",
+      "total_return_pct": -3.444005780094128,
+      "max_drawdown_pct": 30.259513357852462,
+      "win_rate_pct": 43.27272727272727,
+      "trades": 275,
+      "total_costs": 145377.52535988015,
+      "limit_up_blocked": 7,
+      "signal_rows": 1734,
+      "yearly_returns": {
+        "2021": 0.053241349721951936,
+        "2022": -0.1383062248940966,
+        "2023": -0.13986201934792608,
+        "2024": 0.1565151851551203,
+        "2025": 0.0011713168201894497,
+        "2026": 0.06407975735329519
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152717_trend_p3_k0p5_pb2_cp1_rv0p5/backtests/6td_static_strict_top3_no_stop_20260520_152859_279"
+    },
+    {
+      "sleeve": "p3_k0p5_pb2_cp1_rv0p5",
+      "config": "6td_static_refill_top10_no_stop",
+      "total_return_pct": 0.6091380474027464,
+      "max_drawdown_pct": 26.50482332453215,
+      "win_rate_pct": 43.11594202898551,
+      "trades": 276,
+      "total_costs": 151932.7914121885,
+      "limit_up_blocked": 20,
+      "signal_rows": 5780,
+      "yearly_returns": {
+        "2021": 0.053241349721951936,
+        "2022": -0.08986153826842058,
+        "2023": -0.13985049538621064,
+        "2024": 0.14240744351336954,
+        "2025": 0.0007583595255173936,
+        "2026": 0.0631155528860523
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152717_trend_p3_k0p5_pb2_cp1_rv0p5/backtests/6td_static_refill_top10_no_stop_20260520_152908_155"
+    },
+    {
+      "sleeve": "p3_k0p5_pb2_cp1_rv0p5",
+      "config": "6td_rolling21_strict_top3_no_stop",
+      "total_return_pct": 26.894648223446673,
+      "max_drawdown_pct": 9.857946449071028,
+      "win_rate_pct": 47.29596853490659,
+      "trades": 1017,
+      "total_costs": 92106.3411715421,
+      "limit_up_blocked": 7,
+      "signal_rows": 1734,
+      "yearly_returns": {
+        "2021": 0.07634025153318214,
+        "2022": -0.02205907542491292,
+        "2023": 0.027688680868744875,
+        "2024": 0.11013001735094874,
+        "2025": 0.049347539806809504,
+        "2026": 0.006423146688570691
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152717_trend_p3_k0p5_pb2_cp1_rv0p5/backtests/6td_rolling21_strict_top3_no_stop_20260520_152916_952"
+    },
+    {
+      "sleeve": "p3_k0p5_pb2_cp1_rv0p5",
+      "config": "6td_rolling21_refill_top10_no_stop",
+      "total_return_pct": 25.541422007626167,
+      "max_drawdown_pct": 15.694922548866952,
+      "win_rate_pct": 45.26572999389126,
+      "trades": 1637,
+      "total_costs": 145902.06129960468,
+      "limit_up_blocked": 20,
+      "signal_rows": 5780,
+      "yearly_returns": {
+        "2021": 0.07292448358686787,
+        "2022": -0.015104057080561395,
+        "2023": 0.008693216950628635,
+        "2024": 0.10278289481263081,
+        "2025": 0.05952153938644322,
+        "2026": 0.007451607526363757
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152717_trend_p3_k0p5_pb2_cp1_rv0p5/backtests/6td_rolling21_refill_top10_no_stop_20260520_152926_252"
+    }
+  ],
+  "best_by_config": {
+    "6td_static_strict_top3_no_stop": {
+      "sleeve": "p1_k0_pb1_cp0_rv0p5",
+      "config": "6td_static_strict_top3_no_stop",
+      "total_return_pct": 64.18301165038372,
+      "max_drawdown_pct": 40.67643832503162,
+      "win_rate_pct": 51.08695652173913,
+      "trades": 276,
+      "total_costs": 188553.82404136244,
+      "limit_up_blocked": 2,
+      "signal_rows": 1734,
+      "yearly_returns": {
+        "2021": 0.03311096703537264,
+        "2022": -0.09855030383929897,
+        "2023": 0.18832883044576776,
+        "2024": 0.26853838616420367,
+        "2025": 0.011502433250272448,
+        "2026": 0.11885724326935665
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152712_trend_p1_k0_pb1_cp0_rv0p5/backtests/6td_static_strict_top3_no_stop_20260520_152742_000"
+    },
+    "6td_static_refill_top10_no_stop": {
+      "sleeve": "p1_k0_pb1_cp0_rv0p5",
+      "config": "6td_static_refill_top10_no_stop",
+      "total_return_pct": 64.46418331188062,
+      "max_drawdown_pct": 41.059623281719034,
+      "win_rate_pct": 51.08695652173913,
+      "trades": 276,
+      "total_costs": 188867.27205317875,
+      "limit_up_blocked": 8,
+      "signal_rows": 5780,
+      "yearly_returns": {
+        "2021": 0.03513694092724151,
+        "2022": -0.09854593467669792,
+        "2023": 0.1882852417660219,
+        "2024": 0.2679896656580847,
+        "2025": 0.011607020812119062,
+        "2026": 0.11896203943852868
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152712_trend_p1_k0_pb1_cp0_rv0p5/backtests/6td_static_refill_top10_no_stop_20260520_152753_931"
+    },
+    "6td_rolling21_strict_top3_no_stop": {
+      "sleeve": "p3_k0p5_pb2_cp1_rv0p5",
+      "config": "6td_rolling21_strict_top3_no_stop",
+      "total_return_pct": 26.894648223446673,
+      "max_drawdown_pct": 9.857946449071028,
+      "win_rate_pct": 47.29596853490659,
+      "trades": 1017,
+      "total_costs": 92106.3411715421,
+      "limit_up_blocked": 7,
+      "signal_rows": 1734,
+      "yearly_returns": {
+        "2021": 0.07634025153318214,
+        "2022": -0.02205907542491292,
+        "2023": 0.027688680868744875,
+        "2024": 0.11013001735094874,
+        "2025": 0.049347539806809504,
+        "2026": 0.006423146688570691
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152717_trend_p3_k0p5_pb2_cp1_rv0p5/backtests/6td_rolling21_strict_top3_no_stop_20260520_152916_952"
+    },
+    "6td_rolling21_refill_top10_no_stop": {
+      "sleeve": "p1_k0_pb1_cp0_rv0p5",
+      "config": "6td_rolling21_refill_top10_no_stop",
+      "total_return_pct": 35.017007562072486,
+      "max_drawdown_pct": 14.102638232347397,
+      "win_rate_pct": 45.92302674494455,
+      "trades": 1533,
+      "total_costs": 146282.57926081622,
+      "limit_up_blocked": 8,
+      "signal_rows": 5780,
+      "yearly_returns": {
+        "2021": 0.1338121422620575,
+        "2022": -0.02005711929129339,
+        "2023": 0.02421153550623023,
+        "2024": 0.1076778405703327,
+        "2025": 0.06703452286413691,
+        "2026": -0.0009568657433052241
+      },
+      "path": "artifacts/amv_static_sleeve_signals/20260520_152712_trend_p1_k0_pb1_cp0_rv0p5/backtests/6td_rolling21_refill_top10_no_stop_20260520_152812_505"
+    }
+  }
+}

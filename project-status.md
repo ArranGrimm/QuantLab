@@ -89,6 +89,34 @@
   - 决策报告: `reports/amv_pullback_representative_choice.json`
   - `PB3/CP1` vs `PB2/CP0.5`: total return `+99.62%` vs `+96.06%`, MaxDD `20.70%` vs `22.74%`, exact overlap `1455`, daily corr `0.988`
   - `PB2/CP0.5` 保留为 forward challenger，不与 PB3 同时堆叠；`PB1/CP0` 暂不作为代表
+- 原始 B1 executable-aware lab:
+  - 新增脚本: `scripts/b1_executable_base_lab.py`
+  - 产物: `artifacts/b1_executable_base_lab/20260520_142833/summary.json`
+  - 原始三条件 `close > YL / WL > YL / J <= 13` 在 AMV bull + liquidity 下候选平均 exec NAV `+53.28%`, MaxDD `20.66%`
+  - `J` 越低 Top3 仅 `+36.71%`，说明 `J <= 13` 更适合作为候选过滤而非排序主轴
+  - B1 池内 pullback 排序更强: `PB2/CP0.5` exec NAV `+89.21%`, MaxDD `26.07%`; `PB3/CP1` exec NAV `+80.87%`, MaxDD `27.19%`
+  - 当前判断: 原始 B1 是 pullback 机制旁证，不是独立新主线；现版复杂 B1 失败更可能来自额外约束和排序设计，而不是原始三条件完全无效
+- B1 trend-only 对照:
+  - `scripts/b1_executable_base_lab.py` 已支持 `--base-mode trend_only`
+  - 产物: `artifacts/b1_executable_base_lab/20260520_143434/summary.json`
+  - 只保留 `close > YL / WL > YL` 后，候选池扩到 `260,164` 行、`516` 个信号日、平均每天约 `504.2` 个候选
+  - `trend_only + P3/K0.5` 跳过 close 涨停补位后 exec NAV `+118.74%`, MaxDD `7.27%`
+  - `trend_only + PB2/CP0.5` refill exec NAV `+89.22%`, MaxDD `34.10%`; `PB3/CP1` refill exec NAV `+89.34%`, MaxDD `31.91%`
+  - 当前判断: `J <= 13` 会压制突破排序，trend-only 更像一个趋势候选池；`P3/K0.5` trend-only 值得后续接 Rust strict/refill 验证，但不能用未过滤 close-to-close 结果下结论
+- Trend-only executable focused grid:
+  - 新增脚本: `scripts/amv_executable_trend_filter_grid.py`
+  - focused 产物: `artifacts/amv_executable_trend_filter_grid/20260520_145545/summary.json`
+  - 扫描 `factor + pullback focused + yearly` 共 `301` 个 ranker，候选池 `260,164` 行、`516` 个信号日、`2,282` 只股票
+  - 全部 trend-only 候选平均 exec NAV `+70.40%`, MaxDD `21.20%`; close limit-up day share `94.0%`，所以优先看 refill
+  - Top refill: `P1/K0/PB1/CP0/RV0.5` exec NAV `+213.74%`, MaxDD `4.26%`, ctc NAV `+161.58%`, rank q95 `3`
+  - 其他强候选: `P1/K0.5/PB1/CP0/RV0.5` `+204.40%` / MaxDD `4.87%`; `P3/K0.5/PB2/CP1/RV0.5` `+195.26%` / MaxDD `4.78%`
+  - full grid 当前 Windows 设备耗时过长已中止，未产生有效 summary；后续可在 Mac 夜跑或拆分 ranker-set 分批跑
+  - Rust 验证报告: `reports/amv_trend_filter_rust_backtest_summary.json`
+  - Rust 最好结果: `trend P1/K0/PB1/CP0/RV0.5` static refill net `+64.46%`, MaxDD `41.06%`; rolling21 refill net `+35.02%`, MaxDD `14.10%`
+  - 已定位并修正一个导出口径差异: Python grid 在 trend 候选池内计算组件 rank，初版导出在全市场内计算组件 rank
+  - 修正后报告: `reports/amv_trend_filter_corrected_export_rust_summary.json`
+  - 修正后 `trend P1/K0/PB1/CP0/RV0.5`: static refill net `+112.54%`, MaxDD `38.27%`; rolling21 refill net `+41.47%`, MaxDD `11.66%`
+  - 当前判断: rank 母体修正确实抬升结果，但仍远低于 Python label `+213.74%`，也弱于当前 P3/PB3 主候选；暂不进入主线候选
 - 当前理论锚点: `amv-constrained-oracle.canvas.tsx`
   - 后续讨论 sleeve switching、降仓、进攻切换时优先从“AMV 受约束 Oracle”出发
   - 不再回到完整 hindsight oracle 或 8 类 sleeve selector 重新推导
@@ -134,6 +162,9 @@
 - 第二优先: rolling pure pullback sleeve 验证
   - 已选 `PB3/CP1/RV0 rolling21 refill` 作为代表袖子，rolling21 refill Top10 为 `+99.62%`, MaxDD `20.70%`
   - 下一步不是堆多个 pullback，而是围绕 `P3 static + PB3 rolling` 做 allocation/gating；`PB2/CP0.5/RV0` 仅作为 challenger 监控
+- B1 备注:
+  - 原始 B1 三条件与 pullback 方向同源，但 executable-aware 初筛弱于当前 pure pullback sleeve
+  - 暂不接 Rust，不进入 allocation/gating 候选；如继续，只做条件 ablation，确认现版复杂 B1 哪些过滤压制了 alpha
 - 第三优先: `cash_ok` / 降仓标签
   - 目标是识别是否应该避开 `manual_p2_k0p5_r0_6td` 或 `P3/K0.5/R0` 的亏损日
   - 理论依据来自 AMV 受约束 Oracle 中的 cash 上限

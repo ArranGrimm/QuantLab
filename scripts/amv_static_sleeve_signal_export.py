@@ -17,6 +17,7 @@ from scripts.amv_bull_pool_export_signals import (
     _score_component,
     build_feature_frame,
 )
+from scripts.b1_executable_base_lab import _base_b1_expr, _build_b1_indicators
 
 
 DEFAULT_OUTPUT_ROOT = ROOT / "artifacts" / "amv_static_sleeve_signals"
@@ -37,6 +38,9 @@ SLEEVE_IDS = [
     "pullback_p0_k0_pb3_cp1_rv0",
     "pullback_p0_k0_pb2_cp0p5_rv0",
     "pullback_p2_k0_pb0_cp0p5_rv0p5",
+    "trend_p1_k0_pb1_cp0_rv0p5",
+    "trend_p1_k0p5_pb1_cp0_rv0p5",
+    "trend_p3_k0p5_pb2_cp1_rv0p5",
 ]
 
 
@@ -133,7 +137,35 @@ def sleeve_score_expr(sleeve_id: str) -> tuple[pl.Expr, list[str]]:
             close_pullback_weight=0.5,
             risk_weight=0.5,
         )
+    if sleeve_id == "trend_p1_k0_pb1_cp0_rv0p5":
+        return pullback_combo_score_expr(
+            price_weight=1.0,
+            kbar_weight=0.0,
+            bias_weight=1.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.5,
+        )
+    if sleeve_id == "trend_p1_k0p5_pb1_cp0_rv0p5":
+        return pullback_combo_score_expr(
+            price_weight=1.0,
+            kbar_weight=0.5,
+            bias_weight=1.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.5,
+        )
+    if sleeve_id == "trend_p3_k0p5_pb2_cp1_rv0p5":
+        return pullback_combo_score_expr(
+            price_weight=3.0,
+            kbar_weight=0.5,
+            bias_weight=2.0,
+            close_pullback_weight=1.0,
+            risk_weight=0.5,
+        )
     raise ValueError(f"unknown sleeve_id: {sleeve_id}")
+
+
+def is_trend_filter_sleeve(sleeve_id: str) -> bool:
+    return sleeve_id.startswith("trend_")
 
 
 def pkm_score_expr(
@@ -241,21 +273,27 @@ def build_one_sleeve_signal(
         & (pl.col("amount_ma20") >= args.amount_ma20_min)
         & valid_expr
     )
+    if is_trend_filter_sleeve(sleeve_id):
+        candidate_expr = candidate_expr & _base_b1_expr("trend_only", 13.0)
 
-    scored = (
-        market.with_columns(candidate_expr.alias("_is_signal_candidate"))
-        .with_columns(
+    scored_base = market.with_columns(candidate_expr.alias("_is_signal_candidate"))
+    if is_trend_filter_sleeve(sleeve_id):
+        # Trend-filter grids rank components inside the filtered candidate pool.
+        scored = scored_base.filter(pl.col("_is_signal_candidate")).with_columns(
+            score_expr.alias("_signal_score")
+        )
+    else:
+        scored = scored_base.with_columns(
             pl.when(pl.col("_is_signal_candidate"))
             .then(score_expr)
             .otherwise(None)
             .alias("_signal_score")
         )
-        .with_columns(
-            pl.col("_signal_score")
-            .rank(method="ordinal", descending=True)
-            .over("date")
-            .alias("_signal_rank")
-        )
+    scored = scored.with_columns(
+        pl.col("_signal_score")
+        .rank(method="ordinal", descending=True)
+        .over("date")
+        .alias("_signal_rank")
     )
     signal_rows = (
         scored.filter(pl.col("_is_signal_candidate") & (pl.col("_signal_rank") <= args.top_n))
@@ -413,6 +451,8 @@ def main() -> int:
     started_at = datetime.now()
     print("Building static sleeve signal exports...")
     market = build_feature_frame(args)
+    if any(is_trend_filter_sleeve(sleeve_id) for sleeve_id in args.sleeves):
+        market = market.join(_build_b1_indicators(args), on=["date", "code"], how="left")
     output_paths: list[str] = []
     for sleeve_id in args.sleeves:
         print(f"Exporting sleeve: {sleeve_id}")

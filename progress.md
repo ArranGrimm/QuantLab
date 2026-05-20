@@ -22,8 +22,193 @@
 - 项目级 Skill: `.agents/skills/amv-trade-attribution/SKILL.md` 已沉淀 AMV 回测对比、交易归因、换票解释、成本损耗和互补性分析的标准流程。
 - 通用回测归因脚本: `scripts/backtest_trade_attribution.py` 已支持两个 `bt-amv-topn` artifact 的收益、回撤、成本、年度/月度、trade overlap、unique winners/losers 和日收益相关性对比。
 - AMV rolling pullback 代表: 暂选 `PB3/CP1/RV0 rolling21 refill` 作为后续 allocation/gating 的唯一 pullback 代表；`PB2/CP0.5/RV0` 保留为 forward challenger，不与 PB3 同时堆叠。
+- 原始 B1 executable-aware lab: 原始三条件在 AMV bull + liquidity 下不是废信号，全部候选平均 exec NAV `+53.28%`；但 Top3 需要 pullback 排序增强，`B1 base + PB2/CP0.5` 6td exec NAV `+89.21%`，仍弱于独立 pullback sleeve，暂归类为 pullback 变体线索而非新主线。去掉 `J <= 13` 后，趋势池 `close > YL / WL > YL` 明显扩张，`P3/K0.5` refill 诊断升至 exec NAV `+118.74%` / MaxDD `7.27%`，提示 `J <= 13` 会压制突破排序，但该结果仍需 Rust 真实回测验证。
+- AMV trend-only 网格扫描: 新增 `scripts/amv_executable_trend_filter_grid.py`，focused grid 已跑通 `301` 个 ranker；修正导出脚本的 combo rank 母体后，最强候选 `trend P1/K0/PB1/CP0/RV0.5` static refill 提升到 `+112.54%`, rolling refill `+41.47%`。rank 母体差异解释了部分 Python -> Rust 损耗，但仍低于 Python label `+213.74%` 和当前 P3/PB3 主候选，暂不进入主线候选。
 
 ## 2026-05-20
+
+### [AMV] Trend-only focused candidates Rust verification
+
+- 背景:
+  - Python focused scan 中 `trend-only + P/PB/RV` 组合显示很强的 executable label 表现
+  - 用户要求导出信号并接真实 `bt-amv-topn` 验证
+- 代码:
+  - `scripts/amv_static_sleeve_signal_export.py` 新增 trend-only sleeve:
+    - `trend_p1_k0_pb1_cp0_rv0p5`
+    - `trend_p1_k0p5_pb1_cp0_rv0p5`
+    - `trend_p3_k0p5_pb2_cp1_rv0p5`
+  - trend sleeve 在原 AMV bull + liquidity 过滤之外额外应用 `close > YL / WL > YL`
+  - `YL = mean(MA14, MA28, MA57, MA114)`
+  - `WL = EMA(EMA(close, 10), 10)`
+- 信号导出:
+  - 命令: `uv run python scripts/amv_static_sleeve_signal_export.py --sleeves trend_p1_k0_pb1_cp0_rv0p5,trend_p1_k0p5_pb1_cp0_rv0p5,trend_p3_k0p5_pb2_cp1_rv0p5 --top-n 10`
+  - 输出:
+    - `artifacts/amv_static_sleeve_signals/20260520_152712_trend_p1_k0_pb1_cp0_rv0p5/`
+    - `artifacts/amv_static_sleeve_signals/20260520_152714_trend_p1_k0p5_pb1_cp0_rv0p5/`
+    - `artifacts/amv_static_sleeve_signals/20260520_152717_trend_p3_k0p5_pb2_cp1_rv0p5/`
+  - 每个 signal: `776` 个执行日，Top10 shift 后 `7760` 条信号
+- Rust 回测:
+  - 配置:
+    - `config_6td_static_strict_top3_no_stop.toml`
+    - `config_6td_static_refill_top10_no_stop.toml`
+    - `config_6td_rolling21_strict_top3_no_stop.toml`
+    - `config_6td_rolling21_refill_top10_no_stop.toml`
+  - 运行 `3` 个 sleeve × `4` 个配置，共 `12` 个 release 回测，全部完成
+  - 汇总报告: `reports/amv_trend_filter_rust_backtest_summary.json`
+- 核心结果:
+  - `trend P1/K0/PB1/CP0/RV0.5`:
+    - static strict: net `+64.18%`, MaxDD `40.68%`, trades `276`
+    - static refill: net `+64.46%`, MaxDD `41.06%`, trades `276`
+    - rolling21 strict: net `+24.42%`, MaxDD `7.06%`, trades `740`
+    - rolling21 refill: net `+35.02%`, MaxDD `14.10%`, trades `1533`
+  - `trend P1/K0.5/PB1/CP0/RV0.5`:
+    - static strict/refill: net `+60.74%`, MaxDD `43.78%`
+    - rolling21 strict: net `+23.63%`, MaxDD `8.48%`
+    - rolling21 refill: net `+29.94%`, MaxDD `12.58%`
+  - `trend P3/K0.5/PB2/CP1/RV0.5`:
+    - static strict: net `-3.44%`, MaxDD `30.26%`
+    - static refill: net `+0.61%`, MaxDD `26.50%`
+    - rolling21 strict: net `+26.89%`, MaxDD `9.86%`
+    - rolling21 refill: net `+25.54%`, MaxDD `15.69%`
+- 当前判断:
+  - Python focused label 的 `+195% ~ +214%` 没有在真实 Rust 组合中兑现
+  - `trend-only + P/PB/RV` 至少当前 Top3/Top10 真实口径不如 `P3/K0.5/R0` 静态 strict，也不如 `PB3/CP1/RV0` rolling refill
+  - 该路线暂时降级为“label 线索未兑现”，不进入下一轮 allocation/gating 候选
+  - 若后续继续，只适合做差异归因: Python executable label 与 Rust static/rolling 之间的损耗来自执行日 regime 阻塞、真实资金/持仓约束、重复代码补位还是年度集中性
+
+#### 导出 score scope 修正后复跑
+
+- 问题定位:
+  - Python trend-only grid 是先过滤到 `AMV bull + liquidity + trend_only` 候选池，再在候选池内部做组件 rank
+  - 初版 `scripts/amv_static_sleeve_signal_export.py` 是先在全市场上算组件 rank，再过滤候选池
+  - 对 `P/PB/RV` 这种 rank 组合，rank 母体不同会改变 TopN
+- 修正:
+  - 对 `trend_*` sleeve，导出脚本先物理过滤 `_is_signal_candidate`
+  - 再在该候选 DataFrame 内计算 `pullback_combo_score_expr`
+  - 从而使 `_score_component()` 的 `rank().over("date") / pl.len().over("date")` 与 Python grid 口径一致
+- 复跑对象:
+  - `trend_p1_k0_pb1_cp0_rv0p5`
+  - 新信号: `artifacts/amv_static_sleeve_signals/20260520_153918_trend_p1_k0_pb1_cp0_rv0p5/`
+  - 汇总报告: `reports/amv_trend_filter_corrected_export_rust_summary.json`
+- 修正后 Rust 结果:
+  - static strict: net `+112.54%`, MaxDD `38.27%`, trades `276`
+  - static refill: net `+112.54%`, MaxDD `38.27%`, trades `276`
+  - rolling21 strict: net `+26.85%`, MaxDD `8.83%`, trades `842`
+  - rolling21 refill: net `+41.47%`, MaxDD `11.66%`, trades `1575`
+- 对比:
+  - 修正前 static refill `+64.46%` -> 修正后 `+112.54%`
+  - 修正前 rolling21 refill `+35.02%` -> 修正后 `+41.47%`
+  - Python focused label 仍为 exec NAV `+213.74%`, MaxDD `4.26%`
+- 当前判断:
+  - rank 母体差异确实解释了一部分损耗，尤其 static Top3 显著抬升
+  - 但修正后仍没有接近 Python label，也没有超过当前 `P3/K0.5/R0` 静态 strict 或 `PB3/CP1/RV0` rolling refill
+  - trend-only 方向继续保持降级；如果继续，只做损耗归因，不作为 allocation/gating 新候选
+
+### [AMV] Trend-only executable grid focused scan
+
+- 新增脚本: `scripts/amv_executable_trend_filter_grid.py`
+- 目标:
+  - 将 `trend_only = close > YL / WL > YL` 从 B1 对照实验提升为可复用候选池过滤器
+  - 在该池内扫描 early factor、pullback focused grid、yearly P/K/R/P/K/M rankers
+  - 仍使用 executable-aware v2: 主指标 `D+1 open -> D+7 close`，辅助 `D close -> D+6 close`
+- Smoke test:
+  - `uv run python scripts/amv_executable_trend_filter_grid.py --ranker-set all --grid-preset focused --horizons 6 --top-n 3 --top-k 10 --max-rankers 20`
+  - 产物: `artifacts/amv_executable_trend_filter_grid/20260520_145439/summary.json`
+  - 通过，前 20 个 ranker 中 `factor_atr_14_pct_asc` refill exec NAV `+144.59%`, MaxDD `5.58%`
+- Focused run:
+  - `uv run python scripts/amv_executable_trend_filter_grid.py --ranker-set all --grid-preset focused --horizons 6 --top-n 3 --top-k 30`
+  - 产物: `artifacts/amv_executable_trend_filter_grid/20260520_145545/summary.json`
+  - compact: `artifacts/amv_executable_trend_filter_grid/20260520_145545/compact.csv`
+  - daily: `artifacts/amv_executable_trend_filter_grid/20260520_145545/daily.csv`
+- 候选池:
+  - trend-only rows `260,164`
+  - 信号日 `516`
+  - 覆盖股票 `2,282`
+  - 全部候选平均 exec NAV `+70.40%`, MaxDD `21.20%`
+  - 全部候选 close limit-up day share `94.0%`，所以必须优先看 `skip_close_limit_refill_top3`
+- Focused Top refill:
+  - `pullback P1/K0/PB1/CP0/RV0.5`: exec NAV `+213.74%`, MaxDD `4.26%`, ctc NAV `+161.58%`, rank q95 `3`
+  - `pullback P1/K0.5/PB1/CP0/RV0.5`: exec NAV `+204.40%`, MaxDD `4.87%`, ctc NAV `+166.65%`, rank q95 `3`
+  - `pullback P3/K0.5/PB2/CP1/RV0.5`: exec NAV `+195.26%`, MaxDD `4.78%`, ctc NAV `+163.43%`, rank q95 `3`
+  - `pullback P2/K0.5/PB2/CP0/RV0.5`: exec NAV `+192.52%`, MaxDD `5.33%`, ctc NAV `+142.43%`, rank q95 `3`
+  - `yearly P1/K0.5/R1.5`: exec NAV `+194.00%`, MaxDD `7.11%`, ctc NAV `+162.50%`, rank q95 `3`
+- Full run:
+  - 尝试 `uv run python scripts/amv_executable_trend_filter_grid.py --ranker-set all --grid-preset full --horizons 6 --top-n 3 --top-k 30`
+  - 当前 Windows 设备前置构建/评估耗时过长，已中止，未产生有效 summary
+  - full grid 留待 Mac 夜跑或改成分组分批执行
+- 当前判断:
+  - `trend-only` 不是单独策略，而是比 AMV bull 更窄、比 classic B1 更宽的趋势候选池
+  - 在该候选池中，强候选主要表现为 `P + PB + RV` 的轻回调低风险结构，而不是纯 `P3/K0.5`
+  - Top focused 候选满足低污染、rank q95 浅、回撤低，值得导出信号接 `bt-amv-topn` strict/refill 验证
+  - 由于这仍是 Python executable label grid，暂不能替代 Rust 真实组合结论
+
+### [B1] Original base executable-aware lab
+
+- 新增脚本: `scripts/b1_executable_base_lab.py`
+- 运行:
+  - `uv run python scripts/b1_executable_base_lab.py --horizons 6 --top-n 3 --top-k 12`
+  - 产物: `artifacts/b1_executable_base_lab/20260520_142833/summary.json`
+- 原始 B1 base 定义:
+  - `close_adj > YL`
+  - `WL > YL`
+  - `J <= 13`
+  - `WL = EMA(EMA(close, 10), 10)`
+  - `YL = mean(MA14, MA28, MA57, MA114)`
+  - `J = 3K - 2D`, `K/D` 来自 9 日 RSV 的 `ewm_mean(com=2)`
+- 口径:
+  - 复用 AMV executable-aware v2
+  - 样本 `2021-01-01` 到 `2026-05-10`
+  - AMV bull + ST 剔除 + liquidity 过滤后评估
+  - 主指标 `D+1 open -> D+7 close`，辅助 `D close -> D+6 close`
+- 候选规模:
+  - B1 base rows `28,260`
+  - 可满足 Top3 的信号日 `489`
+  - 覆盖股票 `1,914`
+  - 平均每天候选约 `57.7`
+- 核心结果:
+  - 全部 B1 候选平均: exec NAV `+53.28%`, MaxDD `20.66%`, close limit-up day share `2.86%`
+  - `J` 越低 Top3: exec NAV `+36.71%`, MaxDD `24.62%`
+  - `J` 越高 Top3: exec NAV `+64.31%`, MaxDD `20.95%`
+  - `B1 base + ma_bias_20 asc`: exec NAV `+81.26%`, MaxDD `28.92%`
+  - `B1 base + disp_bias_20 asc`: exec NAV `+76.28%`, MaxDD `26.59%`
+  - `B1 base + PB3/CP1`: exec NAV `+80.87%`, MaxDD `27.19%`, close limit-up day share `0.0%`
+  - `B1 base + PB2/CP0.5`: exec NAV `+89.21%`, MaxDD `26.07%`, close limit-up day share `0.0%`
+  - `B1 base + P3/K0.5`: exec NAV `+43.80%`, MaxDD `10.36%`
+- 当前判断:
+  - 原始 B1 三条件在 AMV bull 里确实更像“趋势中的回调候选池”，不是现版复杂 B1 回测失败所暗示的完全无效信号
+  - 但原始 `J <= 13` 更像候选过滤，不适合作为 Top3 排序主轴；在 `J <= 13` 内继续追求更低 J 反而弱于全部候选平均
+  - 在 B1 base 池内，pullback 排序显著优于 P3/K0.5 突破排序，说明它与当前 pure pullback 发现同源
+  - 由于 `B1 base + PB2/CP0.5` 仍明显弱于独立 pullback executable/grid 与 Rust rolling pullback，短期不应把 B1 提升为新主线；更合理的定位是 pullback 机制的旁证和后续 ablation 线索
+
+#### 去掉 `J <= 13` 的趋势池对照
+
+- 脚本参数:
+  - 新增 `--base-mode classic|trend_only`
+  - `classic`: `close > YL / WL > YL / J <= threshold`
+  - `trend_only`: `close > YL / WL > YL`
+- 运行:
+  - `uv run python scripts/b1_executable_base_lab.py --base-mode trend_only --horizons 6 --top-n 3 --top-k 12`
+  - 产物: `artifacts/b1_executable_base_lab/20260520_143434/summary.json`
+- 候选规模:
+  - trend-only rows `260,164`
+  - 可满足 Top3 的信号日 `516`
+  - 覆盖股票 `2,282`
+  - 平均每天候选约 `504.2`
+- 核心结果:
+  - 全部趋势候选平均: exec NAV `+70.40%`, MaxDD `21.20%`
+  - `J` 越低 Top3: exec NAV `+42.66%`, MaxDD `26.09%`
+  - `J` 越高 Top3: 原始 Top3 exec NAV `+26.80%` 且 close limit-up day share `56.6%`; 跳过 close 涨停补位后 exec NAV `+90.57%`, MaxDD `23.66%`
+  - `close_to_high_20d asc`: 原始 Top3 exec NAV `-3.45%` 且 close limit-up day share `87.2%`; 跳过 close 涨停补位后 exec NAV `+74.82%`, MaxDD `9.04%`
+  - `ma_bias_20 asc`: refill exec NAV `+88.98%`, MaxDD `35.34%`
+  - `disp_bias_20 asc`: refill exec NAV `+102.61%`, MaxDD `33.11%`
+  - `PB3/CP1`: refill exec NAV `+89.34%`, MaxDD `31.91%`
+  - `PB2/CP0.5`: refill exec NAV `+89.22%`, MaxDD `34.10%`
+  - `P3/K0.5`: 原始 Top3 exec NAV `+116.46%` 但 close limit-up day share `28.9%`; 跳过 close 涨停补位后 exec NAV `+118.74%`, MaxDD `7.27%`
+- 当前判断:
+  - `J <= 13` 不是单纯“增益过滤”，它会把趋势池强行压到低 J 回调形态，因此明显压制 `P3/K0.5` 这类突破排序
+  - 去掉 J 后，trend-only + `P3/K0.5` 的 refill 诊断很强，且回撤很低，是值得后续导出信号接 Rust 的候选
+  - 但 trend-only 候选池非常大，部分原始 Top3 排序存在严重 close 涨停污染；后续如果验证，只应使用 strict/refill 可成交口径，不应看原始 close-to-close 或未过滤 Top3
+  - B1 方向可以拆成两条: `classic B1 = 趋势中的低 J 回调`，`trend-only = 趋势过滤器/候选池`；二者不应混为同一个策略假设
 
 ### [AMV] Rolling pullback 代表袖子选择
 
