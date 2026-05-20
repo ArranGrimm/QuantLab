@@ -9,7 +9,9 @@
 - 当前主策略底座: `manual_p2_k0p5_r0_6td`
   - 修正买入手数口径后，净收益更新为 `+170.80%`
   - 最大回撤 `15.30%`
-  - 当前仍是 AMV bull pool 下最强可交易基线
+  - 当前仍作为 reference baseline；`candidate_p3_k0p5_b0_c0_r0` 已成为强替换候选，净收益 `+201.69%`, MaxDD `13.52%`
+  - P3 归因 Canvas: `reports/canvases/amv-p3-vs-ref-trade-attribution.canvas.tsx`
+  - P3 的优势主要来自 `30` 笔边际替换交易，而非整体交易池重写；换票机制已解释为更偏向 P-block 的高位突破延续，但仍需后续样本确认稳定性
 - 最新 P/K/M 验证: `amv-pkm-sleeve-rust-backtest.canvas.tsx`
   - 标签侧动量增强没有兑现为更好的 Rust 主基线
   - 新手数口径下 `P3/K1/M2` 最好，净收益 `+103.58%`，但仍弱于主基线 `+170.80%`
@@ -51,12 +53,42 @@
   - Canvas: `reports/canvases/amv-executable-pullback-grid.canvas.tsx`
   - focused grid `164` 个 ranker 已跑通；full grid `618` 个 ranker 已在当前 Mac 复跑完成
   - full grid 产物: `artifacts/amv_executable_pullback_grid/20260519_213813/summary.json`
-  - 最强低污染组合 `pullback_p0_k0_b1_c0_r0`: exec NAV `+245.37%`, MaxDD `23.29%`, close 涨停覆盖 `0.5%`
-  - `pullback_p0_k0_b3_c1_r0`: exec NAV `+215.37%`, MaxDD `20.29%`, close 涨停覆盖 `0.0%`
-  - full grid 新增折中候选 `pullback_p0_k0_b2_c0p5_r0`: exec NAV `+210.37%`, MaxDD `21.89%`, close 涨停覆盖 `0.0%`
-  - refill 场景低回撤混合候选 `pullback_p2_k0_b0_c0p5_r0p5`: exec NAV `+167.31%`, MaxDD `5.73%`, rank q95 `4`
-  - `P/K + C` 候选如 `pullback_p2_k0_b0_c1_r0` refill exec NAV `+155.87%`, MaxDD `10.14%`, rank q95 `5`
+  - 最强低污染组合 `pullback_p0_k0_pb1_cp0_rv0`: exec NAV `+245.37%`, MaxDD `23.29%`, close 涨停覆盖 `0.5%`
+  - `pullback_p0_k0_pb3_cp1_rv0`: exec NAV `+215.37%`, MaxDD `20.29%`, close 涨停覆盖 `0.0%`
+  - full grid 新增折中候选 `pullback_p0_k0_pb2_cp0p5_rv0`: exec NAV `+210.37%`, MaxDD `21.89%`, close 涨停覆盖 `0.0%`
+  - refill 场景低回撤混合候选 `pullback_p2_k0_pb0_cp0p5_rv0p5`: exec NAV `+167.31%`, MaxDD `5.73%`, rank q95 `4`
+  - `P/K + CP` 候选如 `pullback_p2_k0_pb0_cp1_rv0` refill exec NAV `+155.87%`, MaxDD `10.14%`, rank q95 `5`
   - 当前判断: pullback sleeve 成立，但回撤深于主基线；应作为独立 sleeve / 互补 sleeve 候选接 Rust 真实回测，不直接替换 `manual_p2_k0p5_r0_6td`
+- Executable/Pullback sleeves Rust TopN 验证:
+  - 新增 `scripts/amv_static_sleeve_signal_export.py` 的 6 个 executable/pullback sleeve 导出，并新增 `bt-amv-topn` 静态/rolling strict/refill 6td 配置
+  - Canvas: `reports/canvases/amv-executable-sleeve-rust-complement.canvas.tsx`
+  - pullback 命名已收口为 `PB/CP/RV`: `PB = ma_bias_20 + disp_bias_20`, `CP = KSFT + intraday_pos`, `RV = atr_14_pct + panic_vol_ratio_20d`
+  - 静态 strict Top3: `candidate_p3_k0p5_b0_c0_r0` net `+201.69%`, MaxDD `13.52%`，优于 reference `+170.80%` / `15.30%`
+  - 新命名 artifact 已复跑: `20260520_105222_pullback_p0_k0_pb1_cp0_rv0` 到 `20260520_105228_pullback_p2_k0_pb0_cp0p5_rv0p5`，结果与旧命名一致
+  - 静态 strict pure pullback: `PB1/CP0/RV0` net `+190.28%` 但 MaxDD `43.43%`; `PB3/CP1/RV0` net `+152.84%`, MaxDD `41.85%`
+  - rolling21 refill Top10: `PB3/CP1/RV0` net `+99.62%`, MaxDD `20.70%`; `PB2/CP0.5/RV0` net `+96.06%`, MaxDD `22.74%`; `PB1/CP0/RV0` net `+89.41%`, MaxDD `21.28%`
+  - rolling21 reference/P3 仍低: reference refill `+21.44%`, P3 refill `+22.19%`; P3 strict `+30.65%`
+  - 当前判断: `P3/K0.5/R0` 是主基线替换候选；pure pullback 是 rolling/互补 sleeve 候选，不是静态主策略替代
+- P3 vs Ref 主基线替换归因:
+  - Canvas: `reports/canvases/amv-p3-vs-ref-trade-attribution.canvas.tsx`
+  - 两者各 `274` 笔交易，exact overlap (`entry_date + code`) 为 `244` 笔，重合率 `89.05%`
+  - P3-only `30` 笔合计 PnL `+170,899`; Ref-only `30` 笔合计 PnL `+29,737`; 边际换票贡献约 `+141,161`
+  - 年度上 P3 明显修复 2026: Ref `-8.80%` -> P3 `-0.77%`; 但 P3 弱于 Ref 的年份包括 2021 `-1.76pp` 和 2024 `-3.23pp`
+  - 关键正贡献月份: `2026-01` trade PnL delta `+129,226`; `2023-04` trade PnL delta `+73,186`
+  - 关键换票: P3 买入 `sz.003035` `+92,771` 且避开 Ref 的 `sh.688789` `-35,846`; 但也错过 Ref 的 `sz.000559` `+83,373` 和 `sz.002271` `+51,608`
+  - 换票特征分解: `reports/amv_p3_ref_swap_feature_explain.json`
+  - 当前判断: P3 是强替换候选，但不是完全定版；机制上偏向“更贴近 20 日高点/新高但 K 线项较弱”的突破延续票，仍需 forward 监控验证可重复性
+- Executable sleeves 年度互补性:
+  - P/K 主线内部高度相关: reference static vs P3 static daily return corr `0.916`，P3 更像替换而非互补
+  - P/K 主线 vs rolling pullback 低相关: P3 static vs `PB3/CP1 rolling` corr `0.255`，vs `PB2/CP0.5 rolling` corr `0.243`，vs `PB1/CP0 rolling` corr `0.214`
+  - rolling pullback 家族内部高度重叠: `PB3/CP1` vs `PB2/CP0.5` corr `0.988`，所以不应堆多个 pullback sleeve
+  - 2026 YTD: reference static `-8.80%`, P3 static `-0.77%`, `PB3/CP1 rolling +15.15%`, `PB2/CP0.5 rolling +15.25%`, `PB1/CP0 rolling +12.32%`
+  - 简单 daily rebalance 诊断: `P3 static + PB3/CP1 rolling` 80/20 total `+183.05%`, MaxDD `11.60%`, 2026 `+2.35%`; 70/30 total `+173.03%`, MaxDD `10.81%`, 2026 `+3.93%`
+- Rolling pullback 代表选择:
+  - 当前代表: `PB3/CP1/RV0 rolling21 refill`
+  - 决策报告: `reports/amv_pullback_representative_choice.json`
+  - `PB3/CP1` vs `PB2/CP0.5`: total return `+99.62%` vs `+96.06%`, MaxDD `20.70%` vs `22.74%`, exact overlap `1455`, daily corr `0.988`
+  - `PB2/CP0.5` 保留为 forward challenger，不与 PB3 同时堆叠；`PB1/CP0` 暂不作为代表
 - 当前理论锚点: `amv-constrained-oracle.canvas.tsx`
   - 后续讨论 sleeve switching、降仓、进攻切换时优先从“AMV 受约束 Oracle”出发
   - 不再回到完整 hindsight oracle 或 8 类 sleeve selector 重新推导
@@ -68,6 +100,8 @@
   - `project-status.md`: 当前状态、最终决策、关键指标
   - `progress.md`: 按日期倒序的实验日志
   - `experiments/` / Canvas: 长篇分析、历史归档、可视化结果
+  - `.agents/skills/amv-trade-attribution/SKILL.md`: AMV 回测对比、交易归因、换票解释、成本损耗和互补性分析的项目级工作流
+  - `scripts/backtest_trade_attribution.py`: `bt-amv-topn` artifact 通用交易归因入口
 
 ---
 
@@ -94,20 +128,18 @@
 
 ### 下一步候选
 
-- 第一优先: `cash_ok` / 降仓标签
-  - 目标是识别是否应该避开 `manual_p2_k0p5_r0_6td` 的亏损日
+- 第一优先: `P3/K0.5/R0` 主基线替换验证
+  - Rust 静态 strict 已从 reference `+170.80%` / MaxDD `15.30%` 提升到 `+201.69%` / MaxDD `13.52%`
+  - 年度/交易归因显示优势主要来自 `30` 笔边际换票；2026-01 与 2023-04 的换票机制已解释，下一步看更多样本和 forward 监控后再正式切换
+- 第二优先: rolling pure pullback sleeve 验证
+  - 已选 `PB3/CP1/RV0 rolling21 refill` 作为代表袖子，rolling21 refill Top10 为 `+99.62%`, MaxDD `20.70%`
+  - 下一步不是堆多个 pullback，而是围绕 `P3 static + PB3 rolling` 做 allocation/gating；`PB2/CP0.5/RV0` 仅作为 challenger 监控
+- 第三优先: `cash_ok` / 降仓标签
+  - 目标是识别是否应该避开 `manual_p2_k0p5_r0_6td` 或 `P3/K0.5/R0` 的亏损日
   - 理论依据来自 AMV 受约束 Oracle 中的 cash 上限
-- 第二优先: executable-aware 权重网格 v2 后续验证
-  - 先把 `P3/K0.5/R0` 等可执行口径高分候选导出为静态 sleeve，接 Rust `T+1 open / 6td / Top3 / no-stop`
+- 第四优先: executable-aware 评估规范继续固化
   - 后续所有因子/权重探索必须同时输出 executable 主指标、close-to-close 辅助指标和涨停/高开污染归因
-- 第三优先: executable-aware 回调因子组合
-  - 基于全因子扫描，把 `ma_bias_20_asc / disp_bias_20_asc / KSFT_asc` 与现有 P/K 结构组合
-  - 目标是检验“高位强势”和“回调后反弹”能否形成互补 sleeve，而非继续强化涨停动量
-  - full pullback grid 已证明低污染 pullback sleeve 成立；下一步导出 3-6 个候选做 Rust 静态 sleeve 回测
-- 第四优先: rolling cohort 真实组合口径
-  - 第一版结果显示 rolling cohort 没有帮助 P/K/M 追上 manual
-  - 后续若继续，应先分析为什么 rolling 后收益被摊薄: 重复代码跳过、现金利用率、买入失败、分散化稀释
-  - 在该诊断前，不把 rolling cohort 作为默认替代
+  - refill Top10 需要明确区分“涨停补位”和“已有持仓重复代码补位”，不能默认视为质量提升
 - 第五优先: close-to-close cohort diagnostic
   - B 口径已证明 close 涨停不可买会大幅压低 P/K/M 的 close-to-close 上限
   - Python refill 诊断进一步证明，即使顺位补满 Top3，P/K/M 标签侧收益也从千百分比级降至几十个百分点

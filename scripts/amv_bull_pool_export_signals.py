@@ -97,6 +97,11 @@ def build_feature_frame(args: argparse.Namespace) -> pl.DataFrame:
             "ret_20d",
             "price_pos_20d",
             "close_to_high_20d",
+            "ma_bias_20",
+            "disp_bias_20",
+            "atr_14_pct",
+            "panic_vol_ratio_20d",
+            "intraday_pos",
             *ALPHA158_KBAR_COLS,
         ]
 

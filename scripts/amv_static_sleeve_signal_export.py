@@ -28,9 +28,15 @@ SLEEVE_IDS = [
     "kmid2",
     "manual_p2_k0p5_r0",
     "manual_p3_k0p5_r0",
+    "reference_p2_k0p5_b0_c0_r0",
+    "candidate_p3_k0p5_b0_c0_r0",
     "pkm_p1_k0p5_m1",
     "pkm_p2_k0p5_m0p5",
     "pkm_p3_k1_m2",
+    "pullback_p0_k0_pb1_cp0_rv0",
+    "pullback_p0_k0_pb3_cp1_rv0",
+    "pullback_p0_k0_pb2_cp0p5_rv0",
+    "pullback_p2_k0_pb0_cp0p5_rv0p5",
 ]
 
 
@@ -58,28 +64,36 @@ def sleeve_score_expr(sleeve_id: str) -> tuple[pl.Expr, list[str]]:
     if sleeve_id == "kmid2":
         return pl.col("KMID2"), ["KMID2"]
     if sleeve_id == "manual_p2_k0p5_r0":
-        cols = ["price_pos_20d", "close_to_high_20d", "KLEN", "KMID2"]
-        return (
-            (
-                _score_component("price_pos_20d", higher_is_better=True, weight=2.0)
-                + _score_component("close_to_high_20d", higher_is_better=False, weight=2.0)
-                + _score_component("KLEN", higher_is_better=False, weight=0.5)
-                + _score_component("KMID2", higher_is_better=True, weight=0.5)
-            )
-            / 5.0,
-            cols,
+        return pullback_combo_score_expr(
+            price_weight=2.0,
+            kbar_weight=0.5,
+            bias_weight=0.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.0,
         )
     if sleeve_id == "manual_p3_k0p5_r0":
-        cols = ["price_pos_20d", "close_to_high_20d", "KLEN", "KMID2"]
-        return (
-            (
-                _score_component("price_pos_20d", higher_is_better=True, weight=3.0)
-                + _score_component("close_to_high_20d", higher_is_better=False, weight=3.0)
-                + _score_component("KLEN", higher_is_better=False, weight=0.5)
-                + _score_component("KMID2", higher_is_better=True, weight=0.5)
-            )
-            / 7.0,
-            cols,
+        return pullback_combo_score_expr(
+            price_weight=3.0,
+            kbar_weight=0.5,
+            bias_weight=0.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.0,
+        )
+    if sleeve_id == "reference_p2_k0p5_b0_c0_r0":
+        return pullback_combo_score_expr(
+            price_weight=2.0,
+            kbar_weight=0.5,
+            bias_weight=0.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.0,
+        )
+    if sleeve_id == "candidate_p3_k0p5_b0_c0_r0":
+        return pullback_combo_score_expr(
+            price_weight=3.0,
+            kbar_weight=0.5,
+            bias_weight=0.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.0,
         )
     if sleeve_id == "pkm_p1_k0p5_m1":
         return pkm_score_expr(price_weight=1.0, kbar_weight=0.5, momentum_weight=1.0)
@@ -87,6 +101,38 @@ def sleeve_score_expr(sleeve_id: str) -> tuple[pl.Expr, list[str]]:
         return pkm_score_expr(price_weight=2.0, kbar_weight=0.5, momentum_weight=0.5)
     if sleeve_id == "pkm_p3_k1_m2":
         return pkm_score_expr(price_weight=3.0, kbar_weight=1.0, momentum_weight=2.0)
+    if sleeve_id == "pullback_p0_k0_pb1_cp0_rv0":
+        return pullback_combo_score_expr(
+            price_weight=0.0,
+            kbar_weight=0.0,
+            bias_weight=1.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.0,
+        )
+    if sleeve_id == "pullback_p0_k0_pb3_cp1_rv0":
+        return pullback_combo_score_expr(
+            price_weight=0.0,
+            kbar_weight=0.0,
+            bias_weight=3.0,
+            close_pullback_weight=1.0,
+            risk_weight=0.0,
+        )
+    if sleeve_id == "pullback_p0_k0_pb2_cp0p5_rv0":
+        return pullback_combo_score_expr(
+            price_weight=0.0,
+            kbar_weight=0.0,
+            bias_weight=2.0,
+            close_pullback_weight=0.5,
+            risk_weight=0.0,
+        )
+    if sleeve_id == "pullback_p2_k0_pb0_cp0p5_rv0p5":
+        return pullback_combo_score_expr(
+            price_weight=2.0,
+            kbar_weight=0.0,
+            bias_weight=0.0,
+            close_pullback_weight=0.5,
+            risk_weight=0.5,
+        )
     raise ValueError(f"unknown sleeve_id: {sleeve_id}")
 
 
@@ -112,6 +158,70 @@ def pkm_score_expr(
         / total_weight,
         cols,
     )
+
+
+def pullback_combo_score_expr(
+    *,
+    price_weight: float,
+    kbar_weight: float,
+    bias_weight: float,
+    close_pullback_weight: float,
+    risk_weight: float,
+) -> tuple[pl.Expr, list[str]]:
+    components: list[tuple[str, bool, float]] = []
+    if price_weight > 0:
+        components.extend(
+            [
+                ("price_pos_20d", True, price_weight),
+                ("close_to_high_20d", False, price_weight),
+            ]
+        )
+    if kbar_weight > 0:
+        components.extend(
+            [
+                ("KLEN", False, kbar_weight),
+                ("KMID2", True, kbar_weight),
+            ]
+        )
+    if bias_weight > 0:
+        components.extend(
+            [
+                ("ma_bias_20", False, bias_weight),
+                ("disp_bias_20", False, bias_weight),
+            ]
+        )
+    if close_pullback_weight > 0:
+        components.extend(
+            [
+                ("KSFT", False, close_pullback_weight),
+                ("intraday_pos", False, close_pullback_weight),
+            ]
+        )
+    if risk_weight > 0:
+        components.extend(
+            [
+                ("atr_14_pct", False, risk_weight),
+                ("panic_vol_ratio_20d", False, risk_weight),
+            ]
+        )
+
+    total_weight = sum(weight for _, _, weight in components)
+    if total_weight <= 0:
+        raise ValueError("pullback combo total weight must be positive")
+
+    score_expr = _score_component(
+        components[0][0],
+        higher_is_better=components[0][1],
+        weight=components[0][2],
+    )
+    for factor, higher_is_better, weight in components[1:]:
+        score_expr = score_expr + _score_component(
+            factor,
+            higher_is_better=higher_is_better,
+            weight=weight,
+        )
+
+    return score_expr / total_weight, [factor for factor, _, _ in components]
 
 
 def build_one_sleeve_signal(

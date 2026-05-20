@@ -122,14 +122,14 @@ def _make_ranker(
             f"{label_prefix}"
             f"_p{_weight_token(price_weight)}"
             f"_k{_weight_token(kbar_weight)}"
-            f"_b{_weight_token(bias_weight)}"
-            f"_c{_weight_token(close_pullback_weight)}"
-            f"_r{_weight_token(risk_weight)}"
+            f"_pb{_weight_token(bias_weight)}"
+            f"_cp{_weight_token(close_pullback_weight)}"
+            f"_rv{_weight_token(risk_weight)}"
         ),
         "label": (
             f"{label_prefix} "
-            f"P{price_weight:g}/K{kbar_weight:g}/B{bias_weight:g}/"
-            f"C{close_pullback_weight:g}/R{risk_weight:g}"
+            f"P{price_weight:g}/K{kbar_weight:g}/PB{bias_weight:g}/"
+            f"CP{close_pullback_weight:g}/RV{risk_weight:g}"
         ),
         "group": group,
         "weights": {
