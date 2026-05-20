@@ -27,6 +27,84 @@
 
 ## 2026-05-20
 
+### [AMV] Trend-only executable grid full scan on Mac
+
+- 背景:
+  - 白天 Windows 设备上 trend-only full grid 耗时过长中止，未产生有效 summary
+  - 晚上在当前 Mac 上复跑全量 `factor + pullback full + yearly`
+- 运行:
+  - `PYTHONUNBUFFERED=1 uv run python scripts/amv_executable_trend_filter_grid.py --ranker-set all --grid-preset full --horizons 6 --top-n 3 --top-k 30`
+  - Ranker sets: `factor,pullback,yearly`
+  - Rankers: `755`
+  - Trend-only pool: `260,164` 行，`516` 天，`2,282` 只股票
+  - 使用本地 ST 缓存 `261` 只
+  - 耗时约 `244s`
+- 产物:
+  - `artifacts/amv_executable_trend_filter_grid/20260520_212625/summary.json`
+  - `compact.csv`
+  - `daily.csv`
+- 全部候选基准:
+  - trend-only all candidates: exec NAV `+70.40%`, MaxDD `21.20%`, close limit-up day share `94.0%`
+- Full grid `skip_close_limit_refill_top3` Top 结果:
+  - `P1/K0.5/PB1/CP0/RV1`: exec NAV `+256.94%`, MaxDD `4.51%`, CTC NAV `+207.10%`, rank q95 `3`
+  - `P1/K1/PB1/CP0/RV1`: exec NAV `+243.77%`, MaxDD `4.38%`, CTC NAV `+201.91%`, rank q95 `3`
+  - `P1/K1/PB0.5/CP0/RV1`: exec NAV `+235.41%`, MaxDD `5.97%`, CTC NAV `+180.69%`, rank q95 `3`
+  - `P1/K1/PB1/CP0.5/RV1`: exec NAV `+229.19%`, MaxDD `6.23%`, CTC NAV `+190.40%`, rank q95 `3`
+  - `P2/K0.5/PB2/CP0/RV1`: exec NAV `+216.01%`, MaxDD `4.11%`, CTC NAV `+171.89%`, rank q95 `3`
+  - focused 旧最强 `P1/K0/PB1/CP0/RV0.5`: exec NAV `+213.74%`, MaxDD `4.26%`, CTC NAV `+161.58%`
+- Full grid `original_top3` 观察:
+  - 最强 tradeoff 也集中在 `P + K + PB + RV`，例如 `P1/K1/PB0.5/CP0.5/RV1` exec NAV `+250.21%`, MaxDD `7.41%`
+  - close 涨停/高开污染显著低于 momentum 类候选，Top refill 多数 rank q95 `3`
+- 当前判断:
+  - Mac full run 已跑通，并显著抬高 trend-only label 侧上限
+  - 新的最强族群不是 focused 里的 `P1/K0/PB1/CP0/RV0.5`，而是 `P1 + K0.5/1 + PB0.5/1 + RV1`，即趋势池内的轻价格位置 + K 线确认 + 回调 + 风险约束
+  - 但 focused 旧最强在 Rust 修正后仍只有 static refill `+112.54%`、rolling refill `+41.47%`，说明 Python label -> Rust 真实组合损耗很大
+  - 下一步如果继续 trend-only，只应挑 full grid Top 2-3 个新候选导出 Rust 验证；在 Rust 兑现前，trend-only 仍不进入当前主线候选
+
+#### Full top 新候选 Rust 验证
+
+- 背景:
+  - 用户指出: trend-only full top label 与普通 pullback 都在 `200%+`，且 trend-only top 涨停污染不重；如果 label -> Rust 损耗相近，trend-only 不应明显弱于普通 pullback
+  - 因此补充导出 full grid Top 新候选并接真实 Rust 回测
+- 新增 sleeve:
+  - `trend_p1_k0p5_pb1_cp0_rv1`
+  - `trend_p1_k1_pb1_cp0_rv1`
+  - `trend_p2_k0p5_pb2_cp0_rv1`
+- 信号导出:
+  - `uv run python scripts/amv_static_sleeve_signal_export.py --sleeves trend_p1_k0p5_pb1_cp0_rv1,trend_p1_k1_pb1_cp0_rv1,trend_p2_k0p5_pb2_cp0_rv1 --top-n 10`
+  - 输出:
+    - `artifacts/amv_static_sleeve_signals/20260520_214039_trend_p1_k0p5_pb1_cp0_rv1/`
+    - `artifacts/amv_static_sleeve_signals/20260520_214040_trend_p1_k1_pb1_cp0_rv1/`
+    - `artifacts/amv_static_sleeve_signals/20260520_214040_trend_p2_k0p5_pb2_cp0_rv1/`
+  - 每个信号约 `776` 个执行日、Top10 shift 后 `7,759~7,760` 行
+- Rust 回测:
+  - 每个 sleeve 跑 `static strict Top3`、`static refill Top10`、`rolling21 strict Top3`、`rolling21 refill Top10`
+  - 汇总报告: `reports/amv_trend_filter_full_top_rust_summary.json`
+  - Canvas: `reports/canvases/amv-trend-full-rust-conversion.canvas.tsx`
+- 核心结果:
+  - `trend P1/K0.5/PB1/CP0/RV1`:
+    - static strict/refill: net `+85.85%`, gross `+126.15%`, MaxDD `43.24%`
+    - rolling21 refill: net `+56.97%`, gross `+90.55%`, MaxDD `11.88%`
+  - `trend P1/K1/PB1/CP0/RV1`:
+    - static strict/refill: net `+76.15%`, gross `+116.26%`, MaxDD `42.12%`
+    - rolling21 refill: net `+60.17%`, gross `+95.13%`, MaxDD `11.58%`
+  - `trend P2/K0.5/PB2/CP0/RV1`:
+    - static strict/refill: net `+123.58%`, gross `+171.28%`, MaxDD `38.27%`
+    - rolling21 refill: net `+56.73%`, gross `+91.57%`, MaxDD `10.36%`
+- 与普通 pullback 对照:
+  - `PB1/CP0/RV0` static strict: net `+190.28%`, gross `+230.07%`, MaxDD `43.43%`
+  - `PB3/CP1/RV0` rolling21 refill: net `+99.62%`, gross `+130.78%`, MaxDD `20.70%`
+  - trend full top 的成本损耗并非唯一原因；rolling gross 已从 label `+216%~257%` 掉到 `+90%~95%`
+- 当前解释:
+  - trend-only full top 的涨停污染确实很低，不应归因于涨停污染
+  - 真正差异在于 Python executable label 到 Rust 真实组合的 gross edge 转换率:
+    - Python label 是每日 Top3 cohort 的重叠净值诊断
+    - Rust static 会受持仓占用影响，每次买满后 6td 内无法继续捕捉新信号
+    - Rust rolling 更接近 label，但仍有 no-repeat、真实资金、手数、成本、重复代码补位等约束
+  - 普通 pullback 的 label 年度结构更稳: `PB1/CP0/RV0` / `PB3/CP1/RV0` label 侧 `stable_positive_years = 5`，且 2025/2026 edge 为正
+  - trend-only full top label 侧虽然总 NAV 更高，但 stable years 只有 `3~4`，且 2025/2026 edge 多为负；转成真实 rolling 后 gross edge 保留不足
+  - 结论: trend-only 不是“废”，但当前更像 label 侧平滑强、真实组合承接弱；暂不替代 `P3 static` 或 `PB3 rolling`，后续若继续应做 Python daily cohort 与 Rust actual trades 的逐日/逐票损耗归因
+
 ### [AMV] Trend-only focused candidates Rust verification
 
 - 背景:

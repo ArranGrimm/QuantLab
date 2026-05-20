@@ -41,6 +41,9 @@ SLEEVE_IDS = [
     "trend_p1_k0_pb1_cp0_rv0p5",
     "trend_p1_k0p5_pb1_cp0_rv0p5",
     "trend_p3_k0p5_pb2_cp1_rv0p5",
+    "trend_p1_k0p5_pb1_cp0_rv1",
+    "trend_p1_k1_pb1_cp0_rv1",
+    "trend_p2_k0p5_pb2_cp0_rv1",
 ]
 
 
@@ -160,6 +163,30 @@ def sleeve_score_expr(sleeve_id: str) -> tuple[pl.Expr, list[str]]:
             bias_weight=2.0,
             close_pullback_weight=1.0,
             risk_weight=0.5,
+        )
+    if sleeve_id == "trend_p1_k0p5_pb1_cp0_rv1":
+        return pullback_combo_score_expr(
+            price_weight=1.0,
+            kbar_weight=0.5,
+            bias_weight=1.0,
+            close_pullback_weight=0.0,
+            risk_weight=1.0,
+        )
+    if sleeve_id == "trend_p1_k1_pb1_cp0_rv1":
+        return pullback_combo_score_expr(
+            price_weight=1.0,
+            kbar_weight=1.0,
+            bias_weight=1.0,
+            close_pullback_weight=0.0,
+            risk_weight=1.0,
+        )
+    if sleeve_id == "trend_p2_k0p5_pb2_cp0_rv1":
+        return pullback_combo_score_expr(
+            price_weight=2.0,
+            kbar_weight=0.5,
+            bias_weight=2.0,
+            close_pullback_weight=0.0,
+            risk_weight=1.0,
         )
     raise ValueError(f"unknown sleeve_id: {sleeve_id}")
 

@@ -110,13 +110,18 @@
   - 全部 trend-only 候选平均 exec NAV `+70.40%`, MaxDD `21.20%`; close limit-up day share `94.0%`，所以优先看 refill
   - Top refill: `P1/K0/PB1/CP0/RV0.5` exec NAV `+213.74%`, MaxDD `4.26%`, ctc NAV `+161.58%`, rank q95 `3`
   - 其他强候选: `P1/K0.5/PB1/CP0/RV0.5` `+204.40%` / MaxDD `4.87%`; `P3/K0.5/PB2/CP1/RV0.5` `+195.26%` / MaxDD `4.78%`
-  - full grid 当前 Windows 设备耗时过长已中止，未产生有效 summary；后续可在 Mac 夜跑或拆分 ranker-set 分批跑
+  - Mac full grid 已跑通: `755` 个 ranker，产物 `artifacts/amv_executable_trend_filter_grid/20260520_212625/summary.json`
+  - Full top refill: `P1/K0.5/PB1/CP0/RV1` exec NAV `+256.94%`, MaxDD `4.51%`, ctc NAV `+207.10%`; `P1/K1/PB1/CP0/RV1` `+243.77%` / MaxDD `4.38%`
   - Rust 验证报告: `reports/amv_trend_filter_rust_backtest_summary.json`
   - Rust 最好结果: `trend P1/K0/PB1/CP0/RV0.5` static refill net `+64.46%`, MaxDD `41.06%`; rolling21 refill net `+35.02%`, MaxDD `14.10%`
   - 已定位并修正一个导出口径差异: Python grid 在 trend 候选池内计算组件 rank，初版导出在全市场内计算组件 rank
   - 修正后报告: `reports/amv_trend_filter_corrected_export_rust_summary.json`
   - 修正后 `trend P1/K0/PB1/CP0/RV0.5`: static refill net `+112.54%`, MaxDD `38.27%`; rolling21 refill net `+41.47%`, MaxDD `11.66%`
-  - 当前判断: rank 母体修正确实抬升结果，但仍远低于 Python label `+213.74%`，也弱于当前 P3/PB3 主候选；暂不进入主线候选
+  - Full top 新候选 Rust 报告: `reports/amv_trend_filter_full_top_rust_summary.json`
+  - Full top 新候选 Canvas: `reports/canvases/amv-trend-full-rust-conversion.canvas.tsx`
+  - Full top Rust 最好 static: `trend P2/K0.5/PB2/CP0/RV1` net `+123.58%`, MaxDD `38.27%`
+  - Full top Rust 最好 rolling: `trend P1/K1/PB1/CP0/RV1` net `+60.17%`, MaxDD `11.58%`
+  - 当前判断: full grid 抬高了 trend-only label 上限，且涨停污染不是主因；但 Rust gross edge 自身掉到 `+90%~95%` rolling，低于 `PB3/CP1/RV0` rolling gross `+130.78%`，暂不进入主线候选
 - 当前理论锚点: `amv-constrained-oracle.canvas.tsx`
   - 后续讨论 sleeve switching、降仓、进攻切换时优先从“AMV 受约束 Oracle”出发
   - 不再回到完整 hindsight oracle 或 8 类 sleeve selector 重新推导
@@ -165,6 +170,9 @@
 - B1 备注:
   - 原始 B1 三条件与 pullback 方向同源，但 executable-aware 初筛弱于当前 pure pullback sleeve
   - 暂不接 Rust，不进入 allocation/gating 候选；如继续，只做条件 ablation，确认现版复杂 B1 哪些过滤压制了 alpha
+- Trend-only 备注:
+  - Mac full grid 显示 `P1/K0.5/PB1/CP0/RV1` 等新候选 label 侧更强，但 full top 新候选 Rust 验证后仍未超过 P3/PB3
+  - 主要问题不是涨停污染，而是 Python daily cohort label 到 Rust 真实组合的 gross edge 保留率不足；如继续，只做逐日/逐票损耗归因
 - 第三优先: `cash_ok` / 降仓标签
   - 目标是识别是否应该避开 `manual_p2_k0p5_r0_6td` 或 `P3/K0.5/R0` 的亏损日
   - 理论依据来自 AMV 受约束 Oracle 中的 cash 上限
