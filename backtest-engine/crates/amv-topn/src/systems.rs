@@ -54,7 +54,7 @@ pub fn process_buy_signals(
         if bought_count >= available_slots {
             break;
         }
-        if existing_codes.contains(code) {
+        if !config.allow_duplicate_positions && existing_codes.contains(code) {
             continue;
         }
 

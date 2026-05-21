@@ -1,0 +1,335 @@
+{
+  "generated_at": "2026-05-21 09:12",
+  "purpose": "Compare Python executable-label daily Top3 candidates with Rust rolling21 refill actual buys.",
+  "horizon_trading_days": 6,
+  "cases": [
+    {
+      "name": "trend_p1_k1_pb1_cp0_rv1",
+      "signal_dir": "artifacts\\amv_static_sleeve_signals\\20260521_090943_trend_p1_k1_pb1_cp0_rv1",
+      "backtest_dir": "artifacts\\amv_static_sleeve_signals\\20260521_090943_trend_p1_k1_pb1_cp0_rv1\\backtests\\6td_rolling21_refill_top10_no_stop_20260521_090957_450",
+      "rust_metrics": {
+        "avg_trades_per_day": 1.2639318885448916,
+        "drawdown_peak_date": "2022-06-14",
+        "drawdown_recovery_date": "2024-09-30",
+        "drawdown_trough_date": "2022-10-27",
+        "final_portfolio": 800854.7787287886,
+        "gross_pnl": 475667.5531453055,
+        "gross_return_pct": 95.1335106290611,
+        "max_drawdown_pct": 11.577256141534367,
+        "total_commission": 24939.27723427798,
+        "total_costs": 174812.77441651843,
+        "total_pnl": 300854.77872878703,
+        "total_return_pct": 60.17095574575772,
+        "total_slippage": 99757.10893711192,
+        "total_stamp_duty": 50116.38824512853,
+        "total_trades": 1633,
+        "trading_days": 1292,
+        "win_rate_pct": 47.091243110838946
+      },
+      "rust_filter_extra": {
+        "bull_regime_blocked_days": 27,
+        "bull_regime_blocked_signals": 270,
+        "limit_up_blocked": 8,
+        "limit_up_days": 1,
+        "open_gap_blocked": 0,
+        "open_gap_blocked_days": 0,
+        "require_bull_regime": true,
+        "signal_rows": 5780
+      },
+      "candidate_days_bull": 545,
+      "python_top3_bull_rows": 1633,
+      "python_top3_label_mean_ret_pct": 1.351950602868459,
+      "python_top3_available_not_held_not_limit_rows": 807,
+      "python_top3_available_not_held_not_limit_mean_ret_pct": 1.1010154741083078,
+      "rust_actual_buys": 1633,
+      "rust_actual_matched_to_signal_rows": 1614,
+      "rust_actual_label_mean_ret_pct": 1.0352305411319036,
+      "rust_actual_gross_trade_mean_ret_pct": 1.0062080103531148,
+      "rust_actual_net_trade_mean_ret_pct": 0.6531276932026944,
+      "buys_rank_1_3": 802,
+      "buys_rank_4_10": 812,
+      "buy_share_rank_1_3_pct": 49.69021065675341,
+      "buy_share_rank_4_10_pct": 50.30978934324659,
+      "daily_exact_top3_days": 81,
+      "daily_exact_top3_day_share_pct": 14.862385321100918,
+      "daily_avg_overlap_vs_python_top3_pct": 49.051987767584095,
+      "daily_avg_overlap_vs_rust_buys_pct": 49.32598039215686,
+      "python_top3_missed_reason_counts": {
+        "already_held": 824,
+        "exec_open_limit_up": 2,
+        "other": 5
+      },
+      "python_top3_missed_reason_mean_ret_pct": {
+        "already_held": 1.6316540576269356,
+        "exec_open_limit_up": -12.633548302902952,
+        "other": -0.9382633040206723
+      },
+      "rank_bucket": [
+        {
+          "rank_bucket": "not_matched",
+          "buys": 19,
+          "gross_trade_ret_mean": -0.014799507467964143,
+          "net_trade_ret_mean": -0.018243405263157896,
+          "label_ret_mean": null
+        },
+        {
+          "rank_bucket": "rank_1_3",
+          "buys": 802,
+          "gross_trade_ret_mean": 0.011137286017267345,
+          "net_trade_ret_mean": 0.007602729763092267,
+          "label_ret_mean": 0.011137291822013812
+        },
+        {
+          "rank_bucket": "rank_4_10",
+          "buys": 812,
+          "gross_trade_ret_mean": 0.009581852296932598,
+          "net_trade_ret_mean": 0.006052722487684729,
+          "label_ret_mean": 0.009576986320953019
+        }
+      ],
+      "rank_distribution": [
+        {
+          "rank": null,
+          "buys": 19,
+          "gross_trade_ret_mean": -0.014799507467964143,
+          "net_trade_ret_mean": -0.018243405263157896,
+          "label_ret_mean": null
+        },
+        {
+          "rank": 1,
+          "buys": 233,
+          "gross_trade_ret_mean": 0.006887323243146573,
+          "net_trade_ret_mean": 0.003367630643776826,
+          "label_ret_mean": 0.006887336683143589
+        },
+        {
+          "rank": 2,
+          "buys": 262,
+          "gross_trade_ret_mean": 0.010166007842919038,
+          "net_trade_ret_mean": 0.0066348409160305365,
+          "label_ret_mean": 0.01016600759578875
+        },
+        {
+          "rank": 3,
+          "buys": 307,
+          "gross_trade_ret_mean": 0.015191736206353324,
+          "net_trade_ret_mean": 0.011643006547231266,
+          "label_ret_mean": 0.015191741381061783
+        },
+        {
+          "rank": 4,
+          "buys": 265,
+          "gross_trade_ret_mean": 0.008976564616806524,
+          "net_trade_ret_mean": 0.005449551018867923,
+          "label_ret_mean": 0.008976560575548909
+        },
+        {
+          "rank": 5,
+          "buys": 201,
+          "gross_trade_ret_mean": 0.009571616683069599,
+          "net_trade_ret_mean": 0.006042524527363185,
+          "label_ret_mean": 0.00957161363246527
+        },
+        {
+          "rank": 6,
+          "buys": 135,
+          "gross_trade_ret_mean": 0.016035302430492133,
+          "net_trade_ret_mean": 0.01248361674074074,
+          "label_ret_mean": 0.016006060766432746
+        },
+        {
+          "rank": 7,
+          "buys": 98,
+          "gross_trade_ret_mean": -0.0004928103969629342,
+          "net_trade_ret_mean": -0.0039867180612244875,
+          "label_ret_mean": -0.0004928102169675573
+        },
+        {
+          "rank": 8,
+          "buys": 55,
+          "gross_trade_ret_mean": 0.004083062535525607,
+          "net_trade_ret_mean": 0.0005731418181818187,
+          "label_ret_mean": 0.004083044704838946
+        },
+        {
+          "rank": 9,
+          "buys": 42,
+          "gross_trade_ret_mean": 0.023857323437363704,
+          "net_trade_ret_mean": 0.020278274761904764,
+          "label_ret_mean": 0.02385730233916237
+        },
+        {
+          "rank": 10,
+          "buys": 16,
+          "gross_trade_ret_mean": 0.008420815957581117,
+          "net_trade_ret_mean": 0.004895748749999999,
+          "label_ret_mean": 0.008420815046956895
+        }
+      ]
+    },
+    {
+      "name": "pullback_p0_k0_pb3_cp1_rv0",
+      "signal_dir": "artifacts\\amv_static_sleeve_signals\\20260521_090945_pullback_p0_k0_pb3_cp1_rv0",
+      "backtest_dir": "artifacts\\amv_static_sleeve_signals\\20260521_090945_pullback_p0_k0_pb3_cp1_rv0\\backtests\\6td_rolling21_refill_top10_no_stop_20260521_091007_830",
+      "rust_metrics": {
+        "avg_trades_per_day": 1.2770897832817338,
+        "drawdown_peak_date": "2023-11-15",
+        "drawdown_recovery_date": "2024-09-27",
+        "drawdown_trough_date": "2024-02-05",
+        "final_portfolio": 998123.6829866946,
+        "gross_pnl": 653893.4232165872,
+        "gross_return_pct": 130.77868464331743,
+        "max_drawdown_pct": 20.703872330497656,
+        "total_commission": 22206.113359754923,
+        "total_costs": 155769.7402298929,
+        "total_pnl": 498123.6829866943,
+        "total_return_pct": 99.62473659733892,
+        "total_slippage": 88824.4534390197,
+        "total_stamp_duty": 44739.17343111826,
+        "total_trades": 1650,
+        "trading_days": 1292,
+        "win_rate_pct": 48.06060606060606
+      },
+      "rust_filter_extra": {
+        "bull_regime_blocked_days": 27,
+        "bull_regime_blocked_signals": 270,
+        "limit_up_blocked": 3,
+        "limit_up_days": 1,
+        "open_gap_blocked": 0,
+        "open_gap_blocked_days": 0,
+        "require_bull_regime": true,
+        "signal_rows": 5778
+      },
+      "candidate_days_bull": 545,
+      "python_top3_bull_rows": 1633,
+      "python_top3_label_mean_ret_pct": 1.3263272315018222,
+      "python_top3_available_not_held_not_limit_rows": 1222,
+      "python_top3_available_not_held_not_limit_mean_ret_pct": 1.3108547450871888,
+      "rust_actual_buys": 1650,
+      "rust_actual_matched_to_signal_rows": 1632,
+      "rust_actual_label_mean_ret_pct": 1.3829805479108341,
+      "rust_actual_gross_trade_mean_ret_pct": 1.3864043525214829,
+      "rust_actual_net_trade_mean_ret_pct": 1.0319949515151514,
+      "buys_rank_1_3": 1143,
+      "buys_rank_4_10": 489,
+      "buy_share_rank_1_3_pct": 70.03676470588235,
+      "buy_share_rank_4_10_pct": 29.963235294117645,
+      "daily_exact_top3_days": 202,
+      "daily_exact_top3_day_share_pct": 37.06422018348624,
+      "daily_avg_overlap_vs_python_top3_pct": 69.96941896024464,
+      "daily_avg_overlap_vs_rust_buys_pct": 70.0,
+      "python_top3_missed_reason_counts": {
+        "already_held": 410,
+        "exec_open_limit_up": 1,
+        "other": 79
+      },
+      "python_top3_missed_reason_mean_ret_pct": {
+        "already_held": 1.3850135307204028,
+        "exec_open_limit_up": -3.827677049434375,
+        "other": -0.4643841206309231
+      },
+      "rank_bucket": [
+        {
+          "rank_bucket": "not_matched",
+          "buys": 18,
+          "gross_trade_ret_mean": 0.025143444854997286,
+          "net_trade_ret_mean": 0.02155992166666667,
+          "label_ret_mean": null
+        },
+        {
+          "rank_bucket": "rank_1_3",
+          "buys": 1143,
+          "gross_trade_ret_mean": 0.014224226600454493,
+          "net_trade_ret_mean": 0.01067887316710411,
+          "label_ret_mean": 0.014335527944237871
+        },
+        {
+          "rank_bucket": "rank_4_10",
+          "buys": 489,
+          "gross_trade_ret_mean": 0.012606950521257737,
+          "net_trade_ret_mean": 0.009067251697341515,
+          "label_ret_mean": 0.012647717999265708
+        }
+      ],
+      "rank_distribution": [
+        {
+          "rank": null,
+          "buys": 18,
+          "gross_trade_ret_mean": 0.025143444854997286,
+          "net_trade_ret_mean": 0.02155992166666667,
+          "label_ret_mean": null
+        },
+        {
+          "rank": 1,
+          "buys": 359,
+          "gross_trade_ret_mean": 0.004912945658653788,
+          "net_trade_ret_mean": 0.0014001393871866277,
+          "label_ret_mean": 0.00515485245411262
+        },
+        {
+          "rank": 2,
+          "buys": 379,
+          "gross_trade_ret_mean": 0.019615880737888974,
+          "net_trade_ret_mean": 0.016051678311345643,
+          "label_ret_mean": 0.019722402751410247
+        },
+        {
+          "rank": 3,
+          "buys": 405,
+          "gross_trade_ret_mean": 0.017432406699266302,
+          "net_trade_ret_mean": 0.013875841753086418,
+          "label_ret_mean": 0.017432409299883864
+        },
+        {
+          "rank": 4,
+          "buys": 249,
+          "gross_trade_ret_mean": 0.01548428952620363,
+          "net_trade_ret_mean": 0.011934533654618471,
+          "label_ret_mean": 0.015484291246826353
+        },
+        {
+          "rank": 5,
+          "buys": 142,
+          "gross_trade_ret_mean": 0.010023334026484912,
+          "net_trade_ret_mean": 0.00649266429577465,
+          "label_ret_mean": 0.010023332695133929
+        },
+        {
+          "rank": 6,
+          "buys": 65,
+          "gross_trade_ret_mean": 0.0012854210493673012,
+          "net_trade_ret_mean": -0.002214697846153845,
+          "label_ret_mean": 0.0015921169840253917
+        },
+        {
+          "rank": 7,
+          "buys": 20,
+          "gross_trade_ret_mean": 0.049053233342144356,
+          "net_trade_ret_mean": 0.045386124,
+          "label_ret_mean": 0.049053226879967896
+        },
+        {
+          "rank": 8,
+          "buys": 7,
+          "gross_trade_ret_mean": -0.019200329440313944,
+          "net_trade_ret_mean": -0.022628847142857143,
+          "label_ret_mean": -0.01920033476583738
+        },
+        {
+          "rank": 9,
+          "buys": 3,
+          "gross_trade_ret_mean": -0.029044288147894653,
+          "net_trade_ret_mean": -0.0324384,
+          "label_ret_mean": -0.029044297887409847
+        },
+        {
+          "rank": 10,
+          "buys": 3,
+          "gross_trade_ret_mean": 0.014271805527864223,
+          "net_trade_ret_mean": 0.010726293333333336,
+          "label_ret_mean": 0.01427181131141105
+        }
+      ]
+    }
+  ]
+}

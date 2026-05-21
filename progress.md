@@ -22,8 +22,160 @@
 - 项目级 Skill: `.agents/skills/amv-trade-attribution/SKILL.md` 已沉淀 AMV 回测对比、交易归因、换票解释、成本损耗和互补性分析的标准流程。
 - 通用回测归因脚本: `scripts/backtest_trade_attribution.py` 已支持两个 `bt-amv-topn` artifact 的收益、回撤、成本、年度/月度、trade overlap、unique winners/losers 和日收益相关性对比。
 - AMV rolling pullback 代表: 暂选 `PB3/CP1/RV0 rolling21 refill` 作为后续 allocation/gating 的唯一 pullback 代表；`PB2/CP0.5/RV0` 保留为 forward challenger，不与 PB3 同时堆叠。
+- AMV rolling cohort 多统计诊断: 新增 `scripts/amv_signal_cohort_stats.py`，报告 `reports/amv_signal_cohort_stats_main_pullback_trend.json`，Canvas `amv-signal-cohort-stats.canvas.tsx`。event-time cohort 结果显示 trend-only top 信号质量最高、PB3 次之、P3/reference 更低；但 trend-only 到 Rust account NAV 仍受 no-repeat、资金暴露和成本压制。
+- P3 static cadence 敏感性: `reports/amv_p3_static_cadence_sensitivity.json` 显示，P3 static 不是单一起点侥幸；7 个起始 offset 的 no-cost Python-like static 路径最差 `+260.74%`、中位 `+285.60%`、最好 `+297.79%`，粗扣 `0.35%` 单轮往返成本后最差约 `+162.19%`、中位 `+181.25%`、最好 `+190.14%`。
 - 原始 B1 executable-aware lab: 原始三条件在 AMV bull + liquidity 下不是废信号，全部候选平均 exec NAV `+53.28%`；但 Top3 需要 pullback 排序增强，`B1 base + PB2/CP0.5` 6td exec NAV `+89.21%`，仍弱于独立 pullback sleeve，暂归类为 pullback 变体线索而非新主线。去掉 `J <= 13` 后，趋势池 `close > YL / WL > YL` 明显扩张，`P3/K0.5` refill 诊断升至 exec NAV `+118.74%` / MaxDD `7.27%`，提示 `J <= 13` 会压制突破排序，但该结果仍需 Rust 真实回测验证。
 - AMV trend-only 网格扫描: 新增 `scripts/amv_executable_trend_filter_grid.py`，focused grid 已跑通 `301` 个 ranker；修正导出脚本的 combo rank 母体后，最强候选 `trend P1/K0/PB1/CP0/RV0.5` static refill 提升到 `+112.54%`, rolling refill `+41.47%`。rank 母体差异解释了部分 Python -> Rust 损耗，但仍低于 Python label `+213.74%` 和当前 P3/PB3 主候选，暂不进入主线候选。
+- Trend-only Python label -> Rust rolling 损耗归因: `reports/amv_trend_vs_pb3_signal_trade_overlap.json` 显示，`trend P1/K1/PB1/CP0/RV1` 真实 rolling refill 只有 `49.7%` 买入仍在 Python Top3，`824` 个 Python Top3 未买原因是已持有；`PB3/CP1/RV0` 对照有 `70.0%` 买入仍在 Top3。因此 trend-only 的主要损耗不是涨停/高开污染，而是 Top3 重复度高、真实账户不能重复加仓，导致大量补位到 rank 4-10。
+- bt-amv-topn duplicate lot 诊断: 新增 `allow_duplicate_positions` 配置，默认 `false` 保持旧口径；duplicate rolling 诊断显示 `trend P1/K1/PB1/CP0/RV1` 从 `+60.17%` 升至 `+106.50%`，PB3 仅从 `+99.62%` 小升至 `+102.93%`，坐实 trend-only 的主要损耗来自 no-repeat 持仓语义。
+
+## 2026-05-21
+
+### [AMV] Python rolling cohort multi-stat diagnostics
+
+- 背景:
+  - 用户指出 Python rolling cohort NAV 不应只看平均收益或最终 NAV
+  - 需要同时观察中位数、分位数、胜率、6 条 cohort sleeve 的最差/中位/最好路径，以及粗成本调整
+- 新增脚本:
+  - `scripts/amv_signal_cohort_stats.py`
+  - 输入: 一个或多个 `signal.parquet` / signal artifact
+  - 输出:
+    - `strict_top3`
+    - `refill_top10`
+    - daily return distribution: mean/median/std/p05/p10/p25/p75/p90/p95/win rate
+    - pick return distribution
+    - event-time cohort NAV
+    - event-time cohort cost-adjusted NAV
+    - 6 条 sleeve 的 worst/median/best NAV
+    - dense calendar zero-return cohort NAV
+    - yearly diagnostics
+- 重算对象:
+  - `reference_p2`
+  - `p3`
+  - `pb3_cp1`
+  - `trend_label_top`: `trend_p1_k0p5_pb1_cp0_rv1`
+  - `trend_rust_top`: `trend_p1_k1_pb1_cp0_rv1`
+- 补导出:
+  - `artifacts/amv_static_sleeve_signals/20260521_122805_reference_p2_k0p5_b0_c0_r0/`
+  - `artifacts/amv_static_sleeve_signals/20260521_122807_trend_p1_k0p5_pb1_cp0_rv1/`
+- 报告:
+  - `reports/amv_signal_cohort_stats_main_pullback_trend.json`
+- Canvas:
+  - `amv-signal-cohort-stats.canvas.tsx`
+- 关键结果（`refill_top10`, event-time cohort）:
+  - `reference_p2`: NAV `+98.55%`, median daily `+0.282%`, p10 `-3.330%`, win `55.1%`, sleeve worst `+12.22%`
+  - `p3`: NAV `+102.93%`, median daily `+0.305%`, p10 `-3.182%`, win `55.3%`, sleeve worst `+31.75%`
+  - `PB3/CP1`: NAV `+186.48%`, median daily `+0.512%`, p10 `-5.194%`, win `53.8%`, sleeve worst `+119.61%`
+  - `trend label top`: NAV `+229.26%`, median daily `+0.443%`, p10 `-2.376%`, win `57.4%`, sleeve worst `+157.84%`
+  - `trend Rust top`: NAV `+215.39%`, median daily `+0.441%`, p10 `-2.533%`, win `57.6%`, sleeve worst `+145.90%`
+- 粗成本调整（`0.35%` 单轮往返成本，`refill_top10`）:
+  - `reference_p2`: `+45.16%`
+  - `p3`: `+48.36%`
+  - `PB3/CP1`: `+109.64%`
+  - `trend label top`: `+141.10%`
+  - `trend Rust top`: `+130.90%`
+- dense calendar zero-return 对比（`refill_top10`）:
+  - `reference_p2`: `+89.98%`
+  - `p3`: `+105.19%`
+  - `PB3/CP1`: `+176.58%`
+  - `trend label top`: `+227.85%`
+  - `trend Rust top`: `+219.09%`
+- 当前判断:
+  - Python rolling cohort 作为信号质量诊断可以更细: trend-only top 的统计分布确实最强，PB3 次之
+  - 但这仍不能替代 Rust account NAV；trend-only 的真实承接问题已由 no-repeat、duplicate、资金暴露和成本诊断解释
+  - P3/reference 的 event-time cohort 不惊艳，但 P3 static Rust 强，说明 P3 的价值主要在 static cadence 与低换手真实组合，而不是 rolling cohort 信号质量
+- 校验:
+  - `uv run python -m py_compile scripts/amv_signal_cohort_stats.py`
+
+### [AMV] P3 static cadence sensitivity
+
+- 背景:
+  - 用户对 P3 static “单日起点路径”是否存在侥幸提出质疑
+  - Python executable 平均值只能证明信号日整体 edge，不足以证明某条 static cadence 不是运气
+- 重导出:
+  - `uv run python scripts/amv_static_sleeve_signal_export.py --sleeves candidate_p3_k0p5_b0_c0_r0 --top-n 10`
+  - artifact: `artifacts/amv_static_sleeve_signals/20260521_113554_candidate_p3_k0p5_b0_c0_r0/`
+- 诊断:
+  - 报告: `reports/amv_p3_static_cadence_sensitivity.json`
+  - 口径: `T+1 open -> D+7 close`, strict Top3, 跳过执行日开盘涨停，不补位，不含成本
+  - all signal-day Top3 分布:
+    - mean `+0.859%`
+    - median `+0.299%`
+    - p10 `-3.253%`
+    - p90 `+5.246%`
+    - worst `-17.494%`
+    - positive day share `55.27%`
+  - 7 个 static cadence offset:
+    - no-cost 最差 `+260.74%`
+    - no-cost 中位 `+285.60%`
+    - no-cost 最好 `+297.79%`
+    - MaxDD 均约 `8.93%`
+  - 粗略扣 `0.35%` 单轮往返成本:
+    - 最差约 `+162.19%`
+    - 中位约 `+181.25%`
+    - 最好约 `+190.14%`
+- 当前判断:
+  - P3 static 的收益不是单一起点侥幸；不同起始 offset 都有明显正收益
+  - 但 Rust net `+201.69%` 仍应作为主结论，因为它包含真实成本、手数、现金和执行细节
+
+### [AMV] bt-amv-topn duplicate lot diagnostic
+
+- 背景:
+  - Python executable label 允许每天重复选择同一只强票，Rust rolling 原口径禁止对已持有 code 重复买入
+  - 为验证 trend-only 是否被 no-repeat 语义压制，给 `bt-amv-topn` 增加配置开关，默认保持旧行为
+- 代码变更:
+  - 新增配置字段: `allow_duplicate_positions`
+  - 默认值: `false`
+  - 开启后同一 code 可生成多个 `Position` lot；每个 lot 独立记录 entry、持有天数、成本和退出
+  - 原有配置不写该字段时结果语义不变
+- 新增配置:
+  - `backtest-engine/crates/amv-topn/config_6td_rolling21_refill_top10_duplicate_no_stop.toml`
+- 验证:
+  - `cargo check -p bt-amv-topn`
+  - 通过
+- duplicate 诊断结果:
+  - 报告: `reports/amv_duplicate_position_diagnostic_summary.json`
+  - `trend P1/K1/PB1/CP0/RV1`: no-repeat `+60.17%` -> duplicate `+106.50%`, gross `+95.13%` -> `+147.17%`, MaxDD `11.58%` -> `13.33%`
+  - `PB3/CP1/RV0`: no-repeat `+99.62%` -> duplicate `+102.93%`, gross `+130.78%` -> `+134.12%`, MaxDD `20.70%` -> `20.46%`
+  - duplicate 口径下 trend 最大同 code 并发 lot 数 `7`，PB3 为 `5`
+- 当前判断:
+  - no-repeat 持仓语义解释了 trend-only 很大一部分 Python -> Rust 损耗
+  - duplicate lot 口径让 trend-only 明显改善，但也引入更高单票集中度，暂作为诊断/可选进攻口径，不替代默认分散持仓口径
+  - PB3 对 duplicate 不敏感，说明它本身更兼容“不同 code rolling”的真实组合语义
+
+### [AMV] Trend-only vs PB3 Python/Rust daily trade overlap
+
+- 背景:
+  - 用户指出 trend-only full top 的涨停/高开污染很低，理论上 Rust 损耗不应明显大于 pullback
+  - 为确认原因，重跑最小可复现集并比较 Python executable-label 每日 Top3 与 Rust rolling21 refill 实际买入逐日/逐票 overlap
+- 重跑:
+  - `trend_p1_k1_pb1_cp0_rv1`
+  - `pullback_p0_k0_pb3_cp1_rv0`
+  - 配置: `config_6td_rolling21_refill_top10_no_stop.toml`
+- 产物:
+  - overlap 报告: `reports/amv_trend_vs_pb3_signal_trade_overlap.json`
+  - trend artifact: `artifacts/amv_static_sleeve_signals/20260521_090943_trend_p1_k1_pb1_cp0_rv1/`
+  - PB3 artifact: `artifacts/amv_static_sleeve_signals/20260521_090945_pullback_p0_k0_pb3_cp1_rv0/`
+- 核心对比:
+  - `trend P1/K1/PB1/CP0/RV1`:
+    - Rust rolling refill net `+60.17%`, gross `+95.13%`
+    - Python bull Top3 6td open-to-exit mean `+1.35%`
+    - Rust 实际买入 mean: gross `+1.01%`, net `+0.65%`
+    - 实买 rank 1-3 占比 `49.7%`，rank 4-10 占比 `50.3%`
+    - 每日 exact Top3 完全一致仅 `14.9%`，日均 Top3 overlap `49.1%`
+    - Python Top3 未买原因: 已持有 `824`，执行日涨停 `2`，其他 `5`
+  - `PB3/CP1/RV0`:
+    - Rust rolling refill net `+99.62%`, gross `+130.78%`
+    - Python bull Top3 6td open-to-exit mean `+1.33%`
+    - Rust 实际买入 mean: gross `+1.39%`, net `+1.03%`
+    - 实买 rank 1-3 占比 `70.0%`，rank 4-10 占比 `30.0%`
+    - 每日 exact Top3 完全一致 `37.1%`，日均 Top3 overlap `70.0%`
+    - Python Top3 未买原因: 已持有 `410`，执行日涨停 `1`，其他 `79`
+- 当前判断:
+  - trend-only 的 Python label 没有兑现，不是因为涨停/高开污染；执行日涨停只解释极少数缺口
+  - 真正关键是 trend-only Top3 重复度高，滚动真实账户不能对已持有股票重复买入，导致约一半实际交易来自 rank 4-10 补位
+  - PB3/CP1/RV0 的 Top3 更“可滚动”，真实买入保留了约 `70%` 的 Python Top3，因此 Python label 到 Rust 的转换更好
+  - 后续如果继续 trend-only，应新增“持仓去重后的 executable label”或在 Python grid 阶段加入 no-repeat rolling 仓位约束，否则 label 会继续高估真实 rolling 表现
 
 ## 2026-05-20
 

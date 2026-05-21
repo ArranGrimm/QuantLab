@@ -258,6 +258,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "max_daily_buys": config.max_daily_buys,
                 "position_size_pct": config.position_size_pct,
                 "max_hold_trading_days": config.max_hold_trading_days,
+                "allow_duplicate_positions": config.allow_duplicate_positions,
                 "start_date": config.start_date.map(|d| d.to_string()),
                 "end_date": config.end_date.map(|d| d.to_string()),
                 "top_n": config.top_n,
@@ -321,6 +322,14 @@ fn print_config(config: &AmvTopnConfig) {
     println!("Max Daily Buys: {}", config.max_daily_buys);
     println!("Position Size: {:.1}%", config.position_size_pct * 100.0);
     println!("Max Hold Trading Days: {}", config.max_hold_trading_days);
+    println!(
+        "Allow Duplicate Positions: {}",
+        if config.allow_duplicate_positions {
+            "ON (lot-level)"
+        } else {
+            "OFF"
+        }
+    );
     let start_str = config
         .start_date
         .map(|d| d.to_string())
@@ -446,6 +455,16 @@ fn format_config(config: &AmvTopnConfig, trading_days: usize) -> String {
     )
     .unwrap();
     writeln!(s, "Max Hold Trading Days: {}", config.max_hold_trading_days).unwrap();
+    writeln!(
+        s,
+        "Allow Duplicate Positions: {}",
+        if config.allow_duplicate_positions {
+            "true (lot-level)"
+        } else {
+            "false"
+        }
+    )
+    .unwrap();
     let start_str = config
         .start_date
         .map(|d| d.to_string())
@@ -563,6 +582,7 @@ fn append_amv_topn_registry_entry(
         "max_daily_buys": config.max_daily_buys,
         "position_size_pct": config.position_size_pct,
         "max_hold_trading_days": config.max_hold_trading_days,
+        "allow_duplicate_positions": config.allow_duplicate_positions,
         "top_n": config.top_n,
         "entry_rank_limit": config.entry_rank_limit,
         "min_score": config.min_score,

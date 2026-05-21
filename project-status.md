@@ -164,6 +164,8 @@
 - 第一优先: `P3/K0.5/R0` 主基线替换验证
   - Rust 静态 strict 已从 reference `+170.80%` / MaxDD `15.30%` 提升到 `+201.69%` / MaxDD `13.52%`
   - 年度/交易归因显示优势主要来自 `30` 笔边际换票；2026-01 与 2023-04 的换票机制已解释，下一步看更多样本和 forward 监控后再正式切换
+  - P3 static cadence 敏感性报告: `reports/amv_p3_static_cadence_sensitivity.json`
+  - 7 个起始 offset 的 no-cost Python-like static 路径最差 `+260.74%`、中位 `+285.60%`、最好 `+297.79%`；粗扣 `0.35%` 单轮往返成本后最差约 `+162.19%`、中位 `+181.25%`，说明 static 不是单一起点侥幸，但最终仍以 Rust net 为准
 - 第二优先: rolling pure pullback sleeve 验证
   - 已选 `PB3/CP1/RV0 rolling21 refill` 作为代表袖子，rolling21 refill Top10 为 `+99.62%`, MaxDD `20.70%`
   - 下一步不是堆多个 pullback，而是围绕 `P3 static + PB3 rolling` 做 allocation/gating；`PB2/CP0.5/RV0` 仅作为 challenger 监控
@@ -172,13 +174,23 @@
   - 暂不接 Rust，不进入 allocation/gating 候选；如继续，只做条件 ablation，确认现版复杂 B1 哪些过滤压制了 alpha
 - Trend-only 备注:
   - Mac full grid 显示 `P1/K0.5/PB1/CP0/RV1` 等新候选 label 侧更强，但 full top 新候选 Rust 验证后仍未超过 P3/PB3
-  - 主要问题不是涨停污染，而是 Python daily cohort label 到 Rust 真实组合的 gross edge 保留率不足；如继续，只做逐日/逐票损耗归因
+  - 逐日/逐票归因报告: `reports/amv_trend_vs_pb3_signal_trade_overlap.json`
+  - 主要问题不是涨停/高开污染，而是 Python Top3 在真实 rolling 账户中大量变成已持仓不可重复买入；`trend P1/K1/PB1/CP0/RV1` 实买只有 `49.7%` 仍在 Python Top3，而 `PB3/CP1/RV0` 为 `70.0%`
+  - 已新增 `bt-amv-topn` duplicate lot 诊断开关 `allow_duplicate_positions`，默认 `false`；诊断配置为 `config_6td_rolling21_refill_top10_duplicate_no_stop.toml`
+  - duplicate 诊断报告: `reports/amv_duplicate_position_diagnostic_summary.json`
+  - duplicate 后 `trend P1/K1/PB1/CP0/RV1` rolling refill 从 `+60.17%` 升至 `+106.50%`，PB3 从 `+99.62%` 小升至 `+102.93%`
+  - 当前结论: duplicate 坐实 trend-only 被 no-repeat 语义明显压制，但它会提高单票集中度，暂作为诊断/可选进攻口径，不替代默认分散持仓口径；如继续 trend-only，应同时看 no-repeat 和 duplicate 两套真实回测
 - 第三优先: `cash_ok` / 降仓标签
   - 目标是识别是否应该避开 `manual_p2_k0p5_r0_6td` 或 `P3/K0.5/R0` 的亏损日
   - 理论依据来自 AMV 受约束 Oracle 中的 cash 上限
 - 第四优先: executable-aware 评估规范继续固化
   - 后续所有因子/权重探索必须同时输出 executable 主指标、close-to-close 辅助指标和涨停/高开污染归因
   - refill Top10 需要明确区分“涨停补位”和“已有持仓重复代码补位”，不能默认视为质量提升
+  - 新增 rolling cohort 多统计脚本: `scripts/amv_signal_cohort_stats.py`
+  - 最新报告: `reports/amv_signal_cohort_stats_main_pullback_trend.json`
+  - Canvas: `amv-signal-cohort-stats.canvas.tsx`
+  - `refill_top10` event-time cohort: reference `+98.55%`, P3 `+102.93%`, PB3 `+186.48%`, trend label top `+229.26%`, trend Rust top `+215.39%`
+  - 该报告用于信号质量诊断，不替代 Rust account NAV；trend-only 统计分布最强，但真实组合承接仍受 no-repeat、资金暴露和成本影响
 - 第五优先: close-to-close cohort diagnostic
   - B 口径已证明 close 涨停不可买会大幅压低 P/K/M 的 close-to-close 上限
   - Python refill 诊断进一步证明，即使顺位补满 Top3，P/K/M 标签侧收益也从千百分比级降至几十个百分点

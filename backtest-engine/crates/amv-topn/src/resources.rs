@@ -27,6 +27,8 @@ pub struct BacktestSection {
     pub position_size_pct: f64,
     pub max_hold_trading_days: i32,
     #[serde(default)]
+    pub allow_duplicate_positions: bool,
+    #[serde(default)]
     pub start_date: Option<String>,
     #[serde(default)]
     pub end_date: Option<String>,
@@ -89,6 +91,7 @@ pub struct AmvTopnConfig {
     pub max_daily_buys: usize,
     pub position_size_pct: f64,
     pub max_hold_trading_days: i32,
+    pub allow_duplicate_positions: bool,
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
     pub min_position_ratio: f64,
@@ -119,6 +122,7 @@ impl Default for AmvTopnConfig {
             max_daily_buys: 3,
             position_size_pct: 1.0 / 3.0,
             max_hold_trading_days: 10,
+            allow_duplicate_positions: false,
             start_date: None,
             end_date: None,
             min_position_ratio: 0.5,
@@ -152,6 +156,7 @@ impl From<ConfigFile> for AmvTopnConfig {
             max_daily_buys,
             position_size_pct: cfg.backtest.position_size_pct,
             max_hold_trading_days: cfg.backtest.max_hold_trading_days,
+            allow_duplicate_positions: cfg.backtest.allow_duplicate_positions,
             start_date: bt_core::parse_date_opt(&cfg.backtest.start_date),
             end_date: bt_core::parse_date_opt(&cfg.backtest.end_date),
             min_position_ratio: cfg.backtest.min_position_ratio,
