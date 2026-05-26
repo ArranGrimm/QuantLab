@@ -166,9 +166,13 @@
   - 年度/交易归因显示优势主要来自 `30` 笔边际换票；2026-01 与 2023-04 的换票机制已解释，下一步看更多样本和 forward 监控后再正式切换
   - P3 static cadence 敏感性报告: `reports/amv_p3_static_cadence_sensitivity.json`
   - 7 个起始 offset 的 no-cost Python-like static 路径最差 `+260.74%`、中位 `+285.60%`、最好 `+297.79%`；粗扣 `0.35%` 单轮往返成本后最差约 `+162.19%`、中位 `+181.25%`，说明 static 不是单一起点侥幸，但最终仍以 Rust net 为准
-- 第二优先: rolling pure pullback sleeve 验证
+- 第二优先: rolling pure pullback sleeve 验证 + gating
   - 已选 `PB3/CP1/RV0 rolling21 refill` 作为代表袖子，rolling21 refill Top10 为 `+99.62%`, MaxDD `20.70%`
-  - 下一步不是堆多个 pullback，而是围绕 `P3 static + PB3 rolling` 做 allocation/gating；`PB2/CP0.5/RV0` 仅作为 challenger 监控
+  - **新增 PB3 rolling gating 规则**: `(aged + 非加速) OR (neg_streak>=3 & amp>2.5%)`，跳过 18.5% 交易、净赚 `+52K`（+10.5%）、零误杀
+  - 下一步: 在 `bt-amv-topn` 配置中接入该 ruleset，Rust 验证 what-if 结论；`PB2/CP0.5/RV0` 仅作为 challenger 监控
+- P3 static gating 备注:
+  - 纯 AMV 特征无法为 P3 构建正向 gating（最优规则仅 +13K），原因在于 P3 6d 静态周期与混沌期时间窗口不匹配
+  - 若继续 P3 gating，需要 AMV 之外的维度：板块宽度或个股相对 AMV 的表现
 - B1 备注:
   - 原始 B1 三条件与 pullback 方向同源，但 executable-aware 初筛弱于当前 pure pullback sleeve
   - 暂不接 Rust，不进入 allocation/gating 候选；如继续，只做条件 ablation，确认现版复杂 B1 哪些过滤压制了 alpha
@@ -181,8 +185,9 @@
   - duplicate 后 `trend P1/K1/PB1/CP0/RV1` rolling refill 从 `+60.17%` 升至 `+106.50%`，PB3 从 `+99.62%` 小升至 `+102.93%`
   - 当前结论: duplicate 坐实 trend-only 被 no-repeat 语义明显压制，但它会提高单票集中度，暂作为诊断/可选进攻口径，不替代默认分散持仓口径；如继续 trend-only，应同时看 no-repeat 和 duplicate 两套真实回测
 - 第三优先: `cash_ok` / 降仓标签
-  - 目标是识别是否应该避开 `manual_p2_k0p5_r0_6td` 或 `P3/K0.5/R0` 的亏损日
-  - 理论依据来自 AMV 受约束 Oracle 中的 cash 上限
+  - PB3 rolling 已有简化版 gating（UNION 规则，+52K），不再是纯 cash_ok 问题
+  - P3 static gating 仍需突破：AMV 内部分析显示事后 late 亏 -221K 但纯 AMV 特征无法前向分离，需要新维度
+  - 理论依据来自 AMV 受约束 Oracle 中的 cash 上限；但当前判断 gating 路径从 ML（attack_ok）→ AMV 内部阶段（age/maturity）→ 混沌期（neg_streak+amplitude）逐步收敛到更简单的规则形式
 - 第四优先: executable-aware 评估规范继续固化
   - 后续所有因子/权重探索必须同时输出 executable 主指标、close-to-close 辅助指标和涨停/高开污染归因
   - refill Top10 需要明确区分“涨停补位”和“已有持仓重复代码补位”，不能默认视为质量提升
@@ -231,6 +236,30 @@
   - 完整 8 类 sleeve selector 当前不可直接学习
   - 状态特征对完整 oracle class 的区分度偏弱
   - 更合理入口是低维 gating: `base_ok / cash_ok / attack_ok`
+
+### AMV Regime 内部阶段诊断
+
+- 新增脚本: `scripts/amv_regime_phase_diagnostic.py`
+- 产物: `reports/amv_regime_phase_diagnostic.json`
+- 目标: 在 AMV 牛市内部识别可交易的 gating 条件，替代 `attack_ok` 的 ML 路径
+- 双阶段体系:
+  - (A) hindsight：事后标签 early/mid/late（基于 regime_progress），用于诊断改善空间
+  - (B) forward：仅用 entry 当天可观测特征（duration、momentum、acceleration、dd_from_high、regime_maturity、neg_streak、amplitude），用于制定可执行规则
+- 关键发现:
+  - P3 static 在事后 late 阶段亏 `-221K`（76t, WR=39.5%），mid 阶段赚 `+715K`（114t, WR=64%），改善空间真实存在
+  - 事后 late 亏损中 AMV 平均走了 30d、成熟度 68%、加速度 -12%、距高点回撤 -4.4%
+  - **纯 AMV 层面特征无法为 P3 static 构建正向 gating 规则**：最佳规则（aged+非加速）仅净赚 `+13K`，且误杀 4 笔大赢家；其他 duration/momentum/acceleration/dd/maturity 组合均为净亏损
+  - 根本原因: P3 6d 静态 cadence 天然频率低（274t），且 late 阶段的"末期暴力反弹"和"真的见顶"在 AMV 特征上过于相似
+  - 但 AMV 在 bear trigger（-2.3% 单日跌幅）前存在可检测的"混沌期"：触发前 5-10 天 AMV 日均收益持续为负、振幅从 mid-bull 的 2.5% 升至 2.9%
+- **PB3 rolling 接入 gating 成立**:
+  - 规则: `(regime_duration 16-30d & slope_5d < 1.5%) OR (neg_streak >= 3 & amplitude > 2.5%)`
+  - 跳过 305t（18.5%），跳过 PnL `-52K`（61% 亏损），净赚 `+52K`（+10.5%），**零误杀大赢家**
+  - 2022 年省下 `+33K`（全年仅赚 `+41K`），2023 年省下 `+50K`（全年总亏 `-18K` 被掰回）
+  - PB3 高频 rolling 与混沌期的 3-5 天时间窗口匹配，而 P3 6d 周期天然跳过
+  - 当前判断: PB3 rolling 可以接入这个 UNION gating；P3 static 的 gating 需要引入 AMV 之外的维度（板块宽度或个股状态）
+- regime_maturity（经验生存 CDF）:
+  - `d10: 35%`, `d17: 49%`（中位）, `d20: 60%`, `d30: 81%`, `d50: 93%`
+  - 比硬 duration 分桶更平滑，但单独使用仍无法解决分离问题
 
 ---
 

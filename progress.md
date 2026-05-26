@@ -4765,3 +4765,29 @@
     - 固定单一进攻袖子后重新做二分类
     - 或提高 `attack_ok` 标签门槛，追求更高 precision
     - 或先补 `cash_ok`，减少“该避险却被迫在 base/attack 中选”的噪声
+
+## 2026-05-26
+
+### [AMV] Regime phase diagnostic
+
+- 目标: AMV 牛市内部 early/mid/late 阶段是否偏好不同 sleeve (Ref/P3/PB3)
+- 脚本: `scripts/amv_regime_phase_diagnostic.py`
+- 产物: `reports/amv_regime_phase_diagnostic.json`
+- 阶段划分: early 0-25%, mid 25-75%, late 75-100%, pulse <5d, non_bull
+- 关键数字:
+  - early: P3_static_strict PnL=454,460 WR=48.0%; PB3_rolling_refill PnL=123,059 WR=50.5%; Ref_static_strict PnL=402,222 WR=49.3%
+  - mid: P3_static_strict PnL=714,810 WR=64.0%; PB3_rolling_refill PnL=384,409 WR=50.1%; Ref_static_strict PnL=608,654 WR=61.4%
+  - late: P3_static_strict PnL=-221,493 WR=39.5%; PB3_rolling_refill PnL=-4,429 WR=42.9%; Ref_static_strict PnL=-217,587 WR=36.8%
+  - pulse: P3_static_strict PnL=60,683 WR=55.6%; PB3_rolling_refill PnL=-4,915 WR=57.1%; Ref_static_strict PnL=60,724 WR=55.6%
+  - non_bull: P3_static_strict PnL=0; PB3_rolling_refill PnL=0; Ref_static_strict PnL=0
+
+## 2026-05-26
+
+### [AMV] Regime phase diagnostic – forward-observable edition
+
+- 脚本: `scripts/amv_regime_phase_diagnostic.py`
+- 产物: `reports/amv_regime_phase_diagnostic.json`
+- 双系统: (A) hindsight early/mid/late, (B) forward duration×momentum grid
+- P3_static_strict hindsight: early=454,460(75t) mid=714,810(114t) late=-221,493(76t) pulse=60,683(9t) 
+- PB3_rolling_refill hindsight: early=123,059(297t) mid=384,409(833t) late=-4,429(499t) pulse=-4,915(21t) 
+- Ref_static_strict hindsight: early=402,222(75t) mid=608,654(114t) late=-217,587(76t) pulse=60,724(9t) 
