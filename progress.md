@@ -29,6 +29,73 @@
 - Trend-only Python label -> Rust rolling 损耗归因: `reports/amv_trend_vs_pb3_signal_trade_overlap.json` 显示，`trend P1/K1/PB1/CP0/RV1` 真实 rolling refill 只有 `49.7%` 买入仍在 Python Top3，`824` 个 Python Top3 未买原因是已持有；`PB3/CP1/RV0` 对照有 `70.0%` 买入仍在 Top3。因此 trend-only 的主要损耗不是涨停/高开污染，而是 Top3 重复度高、真实账户不能重复加仓，导致大量补位到 rank 4-10。
 - bt-amv-topn duplicate lot 诊断: 新增 `allow_duplicate_positions` 配置，默认 `false` 保持旧口径；duplicate rolling 诊断显示 `trend P1/K1/PB1/CP0/RV1` 从 `+60.17%` 升至 `+106.50%`，PB3 仅从 `+99.62%` 小升至 `+102.93%`，坐实 trend-only 的主要损耗来自 no-repeat 持仓语义。
 
+
+## 2026-05-26
+
+### [AMV] 牛市内部阶段诊断与 gating 探索
+
+- 目标: AMV 牛市内部 early/mid/late 阶段是否偏好不同 sleeve，能否前向构建 gating 规则
+- 脚本: `scripts/amv_regime_phase_diagnostic.py`
+- 产物: `reports/amv_regime_phase_diagnostic.json`
+- 事后阶段（hindsight）: early 0-25%, mid 25-75%, late 75-100%, pulse <5d
+  - P3: early +454K(75t,WR=48%), mid +715K(114t,WR=64%), **late -221K(76t,WR=40%)**
+  - PB3: early +123K(297t), mid +384K(833t), late -4K(499t) ← late 基本打平
+  - Ref: early +402K(75t), mid +609K(114t), late -218K(76t)
+- 前向规则（forward-observable）:
+  - P3 static: 纯 AMV 特征无法构建正向 gating（最优规则仅 +13K，4 误杀）
+  - PB3 rolling: UNION 规则 `(aged+非加速) OR (neg>=3 & amp>2.5)` 跳过 18.5% 交易、净赚 **+52K (+10.5%)、零误杀**
+  - 原因: P3 6d cadence 与混沌期（3-5 天）时间窗口不匹配；PB3 高频 rolling 匹配
+- AMV 混沌期发现: bear trigger 前 5-10 天 AMV 日均 ret 持续为负、振幅从 2.5%→2.9%，可检测但 P3 频率不匹配
+- regime_maturity（经验生存 CDF）: d10=35%, d17=49%, d30=81%
+
+### [AMV] PB3 rolling regime gating 接 Rust 验证
+
+- 目标: 将 PB3 rolling 的前向 gating 规则接入真实 `bt-amv-topn` 账户回测，而不是只看 trade-level what-if
+- 代码:
+  - `scripts/amv_static_sleeve_signal_export.py` 新增 `--pb3-regime-gate aged_non_accel_or_chaos`
+  - gate 在 `signal_date` 收盘后计算，再随信号 shift 到 T+1 open，避免使用 entry day 收盘后的 AMV 信息
+- 规则: `(aged + 非加速) OR (amv_neg_streak >= 3 AND amplitude_pct > 2.5)`
+  - `aged + 非加速`: `fwd_duration_bucket == aged` 且 `fwd_momentum_bucket in [cruising, stalling, retreating]`
+  - `chaos`: AMV 连续下跌天数 `>=3` 且当日振幅 `>2.5%`
+- 导出 artifact: `artifacts/amv_static_sleeve_signals/20260526_184023_pullback_p0_k0_pb3_cp1_rv0/`
+  - 原始 signal rows `8140` -> gated `6760`，过滤 `1380` 行
+  - 原始 signal days `814` -> gated `676`，过滤 `138` 个信号日
+- Rust 配置: `config_6td_rolling21_refill_top10_no_stop.toml`
+- 结果报告: `reports/amv_pb3_regime_gating_rust_summary.json`
+  - raw PB3 rolling: net `+99.62%`, gross `+130.78%`, MaxDD `20.70%`, trades `1650`, WR `48.06%`
+  - gated PB3 rolling: net `+109.73%`, gross `+138.12%`, MaxDD `16.20%`, trades `1393`, WR `49.53%`
+  - 改善: net `+10.10pp`, gross `+7.34pp`, MaxDD `-4.50pp`, 成本减少约 `13.8K`
+  - 年度: 主要修复 `2023`（equity `-3.37% -> +7.59%`），但牺牲 `2021/2024/2025/2026` 的一部分收益
+- 当前判断:
+  - PB3 rolling gating 在真实账户口径下有效，不只是 hindsight trade-level 归因幻觉
+  - 规则更像“避开 AMV 老化/混沌期继续开新仓”，不是卖出规则；已有持仓仍按原 6td 生命周期退出
+  - 下一步如果继续推进，应做 walk-forward/阈值敏感性，确认 `aged`、`amp>2.5`、`neg>=3` 不是单点拟合
+
+### [AMV] 板块宽度诊断
+
+- 目标: 板块宽度是否能解释 P3 在 AMV 牛市不同阶段的收益差异
+- 脚本: `scripts/amv_sector_breadth_diagnostic.py`
+- 产物: `reports/amv_sector_breadth_diagnostic.json`
+- 行业数据: 东方财富 86 个行业, 5552 只股票
+- 关键发现:
+  - Bull 宽度 61% vs Non-bull 39%，区分度良好
+  - 但 P3 在**窄基牛市**里反而单笔收益更高（narrow 1.51% vs broad 1.24%）
+  - 板块 OK 过滤在全历史上净亏（误杀 3 笔大赢家，含 +53K）
+  - 2026 年 P3 亏损真相: 4 月选了水泥、地产、航天等非科技行业假突破，**一支半导体都没选到**
+  - 行业中性化不是答案；P3 需要的是"板块顺风过滤"而非"板块中性化"
+
+### [AMV] P3 退出逻辑（止损/延长持有）what-if
+
+- 脚本: `scripts/amv_exit_logic_whatif.py`
+- 目标: 模拟早期止损 + 延长持有对 P3 的改善效果
+- 早期止损（d2 cum_ret < -3% → 卖出）:
+  - 24 笔触发, 原始合计 -337K, 提前止损约省 **+166K**
+  - 2 笔误杀大赢家（均因 d0 正 d1 跌 → 可加"d1 也为负"修复）
+- 延长持有（d6 cum_ret > 10% & near high → extend 3d trailing -5%）:
+  - 111 笔触发（40%，太多），平均额外仅 +0.2%, 51 笔亏更多
+  - 结论: 延长持有当前信号信噪比不够，暂不推进
+- 合并近似: +250K（主要来自止损）
+
 ## 2026-05-21
 
 ### [AMV] Python rolling cohort multi-stat diagnostics
@@ -4766,28 +4833,3 @@
     - 或提高 `attack_ok` 标签门槛，追求更高 precision
     - 或先补 `cash_ok`，减少“该避险却被迫在 base/attack 中选”的噪声
 
-## 2026-05-26
-
-### [AMV] Regime phase diagnostic
-
-- 目标: AMV 牛市内部 early/mid/late 阶段是否偏好不同 sleeve (Ref/P3/PB3)
-- 脚本: `scripts/amv_regime_phase_diagnostic.py`
-- 产物: `reports/amv_regime_phase_diagnostic.json`
-- 阶段划分: early 0-25%, mid 25-75%, late 75-100%, pulse <5d, non_bull
-- 关键数字:
-  - early: P3_static_strict PnL=454,460 WR=48.0%; PB3_rolling_refill PnL=123,059 WR=50.5%; Ref_static_strict PnL=402,222 WR=49.3%
-  - mid: P3_static_strict PnL=714,810 WR=64.0%; PB3_rolling_refill PnL=384,409 WR=50.1%; Ref_static_strict PnL=608,654 WR=61.4%
-  - late: P3_static_strict PnL=-221,493 WR=39.5%; PB3_rolling_refill PnL=-4,429 WR=42.9%; Ref_static_strict PnL=-217,587 WR=36.8%
-  - pulse: P3_static_strict PnL=60,683 WR=55.6%; PB3_rolling_refill PnL=-4,915 WR=57.1%; Ref_static_strict PnL=60,724 WR=55.6%
-  - non_bull: P3_static_strict PnL=0; PB3_rolling_refill PnL=0; Ref_static_strict PnL=0
-
-## 2026-05-26
-
-### [AMV] Regime phase diagnostic – forward-observable edition
-
-- 脚本: `scripts/amv_regime_phase_diagnostic.py`
-- 产物: `reports/amv_regime_phase_diagnostic.json`
-- 双系统: (A) hindsight early/mid/late, (B) forward duration×momentum grid
-- P3_static_strict hindsight: early=454,460(75t) mid=714,810(114t) late=-221,493(76t) pulse=60,683(9t) 
-- PB3_rolling_refill hindsight: early=123,059(297t) mid=384,409(833t) late=-4,429(499t) pulse=-4,915(21t) 
-- Ref_static_strict hindsight: early=402,222(75t) mid=608,654(114t) late=-217,587(76t) pulse=60,724(9t) 

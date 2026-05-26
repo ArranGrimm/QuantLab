@@ -18,6 +18,7 @@ from scripts.amv_bull_pool_export_signals import (
     build_feature_frame,
 )
 from scripts.b1_executable_base_lab import _base_b1_expr, _build_b1_indicators
+from scripts.amv_regime_phase_diagnostic import build_amv_phase_frame
 
 
 DEFAULT_OUTPUT_ROOT = ROOT / "artifacts" / "amv_static_sleeve_signals"
@@ -195,6 +196,49 @@ def is_trend_filter_sleeve(sleeve_id: str) -> bool:
     return sleeve_id.startswith("trend_")
 
 
+def uses_pb3_regime_gate(sleeve_id: str, args: argparse.Namespace) -> bool:
+    return (
+        sleeve_id == "pullback_p0_k0_pb3_cp1_rv0"
+        and args.pb3_regime_gate != "none"
+    )
+
+
+def build_pb3_regime_gate_frame(args: argparse.Namespace) -> pl.DataFrame:
+    """Build signal-date AMV gate flags using only known close data."""
+    if args.pb3_regime_gate != "aged_non_accel_or_chaos":
+        raise ValueError(f"unknown PB3 regime gate: {args.pb3_regime_gate}")
+
+    phase = build_amv_phase_frame(
+        bull_trigger_pct=args.amv_bull_trigger_pct,
+        bear_trigger_1d_pct=args.amv_bear_trigger_1d_pct,
+        bull_lookback_days=args.amv_bull_lookback_days,
+        effective_lag_days=args.amv_effective_lag_days,
+    )
+    aged_non_accel = (
+        (pl.col("fwd_duration_bucket") == "aged")
+        & pl.col("fwd_momentum_bucket").is_in(["cruising", "stalling", "retreating"])
+    )
+    chaos = (pl.col("amv_neg_streak") >= 3) & (pl.col("amplitude_pct") > 2.5)
+    return (
+        phase.select([
+            "date",
+            "fwd_duration_bucket",
+            "fwd_momentum_bucket",
+            "fwd_phase",
+            "amv_neg_streak",
+            "amplitude_pct",
+        ])
+        .with_columns(
+            [
+                aged_non_accel.alias("pb3_gate_aged_non_accel"),
+                chaos.alias("pb3_gate_chaos"),
+                (aged_non_accel | chaos).alias("pb3_gate_skip"),
+            ]
+        )
+        .rename({"date": "signal_date"})
+    )
+
+
 def pkm_score_expr(
     *,
     price_weight: float,
@@ -288,6 +332,7 @@ def build_one_sleeve_signal(
     *,
     sleeve_id: str,
     args: argparse.Namespace,
+    pb3_gate: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame, dict[str, Any]]:
     score_expr, required_cols = sleeve_score_expr(sleeve_id)
     valid_expr = _finite_expr(required_cols[0])
@@ -335,6 +380,40 @@ def build_one_sleeve_signal(
         )
         .sort(["signal_date", "rank", "code"])
     )
+    gating_summary: dict[str, Any] = {
+        "pb3_regime_gate": args.pb3_regime_gate,
+        "pb3_regime_gate_applied": False,
+    }
+    if uses_pb3_regime_gate(sleeve_id, args):
+        if pb3_gate is None:
+            raise ValueError("PB3 regime gate requested but gate frame was not provided")
+        before_rows = signal_rows.height
+        before_days = signal_rows.select("signal_date").n_unique()
+        signal_rows = (
+            signal_rows.join(pb3_gate, on="signal_date", how="left")
+            .with_columns(
+                [
+                    pl.col("pb3_gate_skip").fill_null(False),
+                    pl.col("pb3_gate_aged_non_accel").fill_null(False),
+                    pl.col("pb3_gate_chaos").fill_null(False),
+                ]
+            )
+        )
+        blocked = signal_rows.filter(pl.col("pb3_gate_skip"))
+        signal_rows = signal_rows.filter(~pl.col("pb3_gate_skip")).sort(["signal_date", "rank", "code"])
+        gating_summary = {
+            "pb3_regime_gate": args.pb3_regime_gate,
+            "pb3_regime_gate_applied": True,
+            "pb3_gate_timing": "signal_date_close_before_t_plus_1_open",
+            "pb3_gate_rows_before": before_rows,
+            "pb3_gate_rows_after": signal_rows.height,
+            "pb3_gate_rows_blocked": blocked.height,
+            "pb3_gate_days_before": before_days,
+            "pb3_gate_days_after": signal_rows.select("signal_date").n_unique(),
+            "pb3_gate_days_blocked": blocked.select("signal_date").n_unique(),
+            "pb3_gate_aged_non_accel_rows": int(blocked["pb3_gate_aged_non_accel"].sum()),
+            "pb3_gate_chaos_rows": int(blocked["pb3_gate_chaos"].sum()),
+        }
 
     trading_dates = market.select("date").unique().sort("date")
     next_dates = trading_dates.with_columns(
@@ -396,6 +475,7 @@ def build_one_sleeve_signal(
         ),
         "score_min": float(signal_rows["score"].min()) if signal_rows.height else None,
         "score_max": float(signal_rows["score"].max()) if signal_rows.height else None,
+        **gating_summary,
     }
     return export, signal_rows, summary
 
@@ -446,6 +526,7 @@ def write_one_signal(
             "amv_bull_lookback_days": args.amv_bull_lookback_days,
             "amv_bear_trigger_1d_pct": args.amv_bear_trigger_1d_pct,
             "amv_effective_lag_days": args.amv_effective_lag_days,
+            "pb3_regime_gate": args.pb3_regime_gate,
         },
         "summary": summary,
         "files": {
@@ -473,6 +554,12 @@ def main() -> int:
     parser.add_argument("--amv-bull-lookback-days", type=int, default=2)
     parser.add_argument("--amv-bear-trigger-1d-pct", type=float, default=-2.3)
     parser.add_argument("--amv-effective-lag-days", type=int, default=1)
+    parser.add_argument(
+        "--pb3-regime-gate",
+        choices=["none", "aged_non_accel_or_chaos"],
+        default="none",
+        help="Optional signal-date AMV gate for PB3/CP1/RV0 exports.",
+    )
     args = parser.parse_args()
 
     started_at = datetime.now()
@@ -480,10 +567,18 @@ def main() -> int:
     market = build_feature_frame(args)
     if any(is_trend_filter_sleeve(sleeve_id) for sleeve_id in args.sleeves):
         market = market.join(_build_b1_indicators(args), on=["date", "code"], how="left")
+    pb3_gate = None
+    if args.pb3_regime_gate != "none":
+        pb3_gate = build_pb3_regime_gate_frame(args)
     output_paths: list[str] = []
     for sleeve_id in args.sleeves:
         print(f"Exporting sleeve: {sleeve_id}")
-        export, selected, summary = build_one_sleeve_signal(market, sleeve_id=sleeve_id, args=args)
+        export, selected, summary = build_one_sleeve_signal(
+            market,
+            sleeve_id=sleeve_id,
+            args=args,
+            pb3_gate=pb3_gate,
+        )
         meta_path = write_one_signal(
             args.output_root,
             sleeve_id=sleeve_id,

@@ -89,6 +89,13 @@
   - 决策报告: `reports/amv_pullback_representative_choice.json`
   - `PB3/CP1` vs `PB2/CP0.5`: total return `+99.62%` vs `+96.06%`, MaxDD `20.70%` vs `22.74%`, exact overlap `1455`, daily corr `0.988`
   - `PB2/CP0.5` 保留为 forward challenger，不与 PB3 同时堆叠；`PB1/CP0` 暂不作为代表
+- PB3 rolling regime gating:
+  - `scripts/amv_static_sleeve_signal_export.py` 已支持 `--pb3-regime-gate aged_non_accel_or_chaos`
+  - 规则按 `signal_date` 收盘计算，避免 T+1 open 买入时使用 entry day 收盘后信息
+  - Rust 报告: `reports/amv_pb3_regime_gating_rust_summary.json`
+  - raw PB3 rolling `+99.62%` / MaxDD `20.70%` -> gated `+109.73%` / MaxDD `16.20%`
+  - 过滤 `1380/8140` 条 signal rows、`138/814` 个 signal days；交易数 `1650 -> 1393`
+  - 当前判断: 这是目前最值得继续验证的 PB3 风控/降开仓规则，但需要 walk-forward 与阈值敏感性确认
 - 原始 B1 executable-aware lab:
   - 新增脚本: `scripts/b1_executable_base_lab.py`
   - 产物: `artifacts/b1_executable_base_lab/20260520_142833/summary.json`
