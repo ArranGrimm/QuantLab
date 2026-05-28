@@ -9,6 +9,14 @@
 
 ## 最新收口索引
 
+- AMV 下一轮上下文因子路线: 已明确不先补组合层 allocation，而是继续按“板块/行业顺风 + 市场赚钱效应 -> 64/128 日中期结构 + 趋势质量 -> 涨停生态 sleeve”的顺序推进。核心判断是量价还有空间，但不再堆 RSI/RSRS/MACD 这类通用指标；优先补“板块、情绪、趋势质量、涨停生态”四类 A 股上下文因子。
+- AMV 128 日中期结构 / 趋势质量第二阶段验收: 新增 `scripts/amv_medium_trend_quality_diagnostic.py`、`scripts/amv_medium_trend_quality_signal_export.py`、`scripts/amv_context_combo_signal_export.py`。说明: artifact 名里的 `medium128` 指“128 日中期结构 + 128 日趋势质量”。参数邻域确认 `p0.03` 是局部峰值: `p0.025` total `+251.32%`, `p0.03` `+264.90%`, `p0.035` `+240.97%`, `p0.04` `+225.43%`。与 sector-tailwind 交互后，最佳组合为 `sector mix10/20 linear rel20_under0 p0.02 + 128 日中期结构 / 趋势质量 p0.03`: Rust total `+272.06%`, MaxDD `14.05%`, 相对 raw P3 `+70.37pp`；no-cost cadence `7/7` 个 offset 优于 raw，median delta `+31.69pp`。当前判断: 第二阶段可以阶段性收口，保留 2026-01 被牺牲作为 forward/final route 风险。
+- AMV market sentiment 初筛: 新增 `scripts/amv_market_sentiment_diagnostic.py`，在 `signal_date` 构造全市场涨停/跌停、炸板、20 日新高、昨日涨停次日溢价、强势股回撤等情绪特征。P3 的简单冷市场过滤不成立，低涨停/低新高/低上涨占比反而误杀大赢家；“昨日涨停溢价过热 + 20 日新高家数偏高”拥挤过滤在 trade-level 看似有效，跳过 `54` 笔、delta `+132.5K`，2026 delta `+62.9K`，但严格 date gate 接 Rust 后被否决：raw P3 `+201.69%` / MaxDD `13.52%` -> gated `+182.02%` / MaxDD `13.53%`。当前判断: 市场情绪单独硬 gate 不成立，只能作为后续 soft/rerank 或与行业因子交互的候选线索。
+- AMV sector tailwind 初筛: 新增 `scripts/amv_sector_tailwind_diagnostic.py`，使用静态东方财富行业映射 + QMT 日线在 `signal_date` 构造行业顺风特征。P3 的行业 10 日收益排名底部 40% 交易为 `67` 笔、合计 `-43.9K`，作为弱行业过滤有价值；但严格 `tailwind_ok` 会误杀大量赢家，PB3 不适合直接套该过滤。
+- AMV P3 sector tailwind rerank: 新增 `scripts/amv_sector_tailwind_signal_export.py`，对 P3 候选中行业 10 日收益 rank bottom 40% 做 soft penalty 后重排。Rust static strict 显示 `penalty=0.02` 最佳: total `+242.10%`, CAGR `25.91%`, Sharpe `1.32`, MaxDD `13.44%`, 2026 `+0.63%`；相对 raw P3 total `+40.41pp`，但需要 cadence/行业映射/窗口稳健性复核。
+- AMV P3 sector tailwind robustness: focused grid 显示方向不是单点好运气。`10d/bottom40` 下 `penalty=0.018~0.025` 均明显优于 raw P3；`bottom50` 过度惩罚导致 total `+138.70%`、MaxDD `20.65%`；`20d` 窗口 total 更高 `+264.26%` 但 MaxDD 扩到 `16.09%`。当前最均衡仍是 `10d / bottom40 / penalty=0.02`。
+- AMV P3 sector tailwind cadence: no-cost 7 offset 检查推翻了直接升级 `10d/bottom40/0.02` 的想法，只有 `2/7` 个 offset 优于 raw，median delta `-10.56pp`。`20d/bottom40/0.02` 相对更稳，`5/7` 个 offset 优于 raw，median delta `+9.10pp`，但最差 offset `-22.25pp` 且 drawdown 可到 `15.42%`，暂只能作为 challenger。
+- AMV P3 sector tailwind complete expression: 将离散 bucket 扣分改为连续型行业 rank penalty，并加入 `10d/20d` 混合与个股相对行业弱势确认。推荐候选 `mix10/20 + linear + rel20_under0 + p0.03`: Rust total `+219.55%`, Sharpe `1.279`, MaxDD `14.07%`，相对 raw P3 `+17.86pp`；Python no-cost cadence `7/7` 个 offset 优于 raw，median delta `+20.94pp`。行业因子可升为 P3 主线 challenger；当前阶段暂不启动历史行业分类数据工程，完整走完下一轮策略路线后再作为最终验收复核。
 - AMV P/K/M Rust 验证: 标签侧动量增强未兑现为更好主基线；可解释为 2025 补充袖子，但未解决 2026。
 - AMV 年度权重网格: 2025/2026 弱势更像旧 `P2/K0.5/R0` 缺少动量项，但该结论已被 Rust 验证降级为标签侧线索。
 - AMV 手数修正后主基线: `manual_p2_k0p5_r0_6td` 更新为净收益 `+170.80%`, MaxDD `15.30%`。
@@ -22,6 +30,10 @@
 - 项目级 Skill: `.agents/skills/amv-trade-attribution/SKILL.md` 已沉淀 AMV 回测对比、交易归因、换票解释、成本损耗和互补性分析的标准流程。
 - 通用回测归因脚本: `scripts/backtest_trade_attribution.py` 已支持两个 `bt-amv-topn` artifact 的收益、回撤、成本、年度/月度、trade overlap、unique winners/losers 和日收益相关性对比。
 - AMV rolling pullback 代表: 暂选 `PB3/CP1/RV0 rolling21 refill` 作为后续 allocation/gating 的唯一 pullback 代表；`PB2/CP0.5/RV0` 保留为 forward challenger，不与 PB3 同时堆叠。
+- PB3 rolling gating 稳健性: `reports/amv_pb3_gating_robustness.json` 显示，当前 `(aged+非加速) OR (neg>=3 & amp>2.5)` 在 trade-level 跳过 `258/1650` 笔、贡献 `+23.2K`，且无大赢家误杀；但分年主要靠 `2022/2023`，`2025/2026` 为负贡献。walk-forward 合计仍为正，说明方向可用但不宜激进加码。
+- P3 early stop Rust 验证: `reports/amv_p3_early_stop_rust_summary.json` 显示，`d2 < -3% 且 d1 为负` 规则被真实账户口径否决；净收益 `+201.69% -> +134.75%`，MaxDD 仅 `13.52% -> 12.78%`，27 笔 early-stop 中 12 笔相对原始持有为负贡献，合计少赚约 `149K`。
+- RSRS executable 初筛: 新增 `scripts/amv_executable_rsrs_scan.py`，RSRS 因子构造全程使用 Polars rolling covariance/variance/correlation；`reports/amv_rsrs_executable_scan_summary.json` 显示传统 `RSRS beta high` 在 AMV bull pool 中很弱（refill exec NAV `-4.89%`），低/标准化 RSRS 更强，最好 `rsrs_z_18_120_low` refill exec NAV `+99.88%`、MaxDD `31.46%`、close 涨停污染 `0%`。当前判断: RSRS 可作为 pullback/reversion 辅助特征，不宜作为独立主线或突破增强。
+- P3 + PB3 gated allocation: 新增 `scripts/amv_allocation_diagnostic.py` 和 Canvas `reports/canvases/amv-p3-pb3-gated-allocation.canvas.tsx`。daily rebalance 组合显示，`P3 80% / PB3 gated 20%` total `+185.25%`, MaxDD `11.64%`, 2026 `+2.20%`；`70/30` total `+176.50%`, MaxDD `10.87%`, 2026 `+3.70%`。当前判断: 80/20 gated 是自然起点，70/30 更防守。
 - AMV rolling cohort 多统计诊断: 新增 `scripts/amv_signal_cohort_stats.py`，报告 `reports/amv_signal_cohort_stats_main_pullback_trend.json`，Canvas `amv-signal-cohort-stats.canvas.tsx`。event-time cohort 结果显示 trend-only top 信号质量最高、PB3 次之、P3/reference 更低；但 trend-only 到 Rust account NAV 仍受 no-repeat、资金暴露和成本压制。
 - P3 static cadence 敏感性: `reports/amv_p3_static_cadence_sensitivity.json` 显示，P3 static 不是单一起点侥幸；7 个起始 offset 的 no-cost Python-like static 路径最差 `+260.74%`、中位 `+285.60%`、最好 `+297.79%`，粗扣 `0.35%` 单轮往返成本后最差约 `+162.19%`、中位 `+181.25%`、最好 `+190.14%`。
 - 原始 B1 executable-aware lab: 原始三条件在 AMV bull + liquidity 下不是废信号，全部候选平均 exec NAV `+53.28%`；但 Top3 需要 pullback 排序增强，`B1 base + PB2/CP0.5` 6td exec NAV `+89.21%`，仍弱于独立 pullback sleeve，暂归类为 pullback 变体线索而非新主线。去掉 `J <= 13` 后，趋势池 `close > YL / WL > YL` 明显扩张，`P3/K0.5` refill 诊断升至 exec NAV `+118.74%` / MaxDD `7.27%`，提示 `J <= 13` 会压制突破排序，但该结果仍需 Rust 真实回测验证。
@@ -29,6 +41,507 @@
 - Trend-only Python label -> Rust rolling 损耗归因: `reports/amv_trend_vs_pb3_signal_trade_overlap.json` 显示，`trend P1/K1/PB1/CP0/RV1` 真实 rolling refill 只有 `49.7%` 买入仍在 Python Top3，`824` 个 Python Top3 未买原因是已持有；`PB3/CP1/RV0` 对照有 `70.0%` 买入仍在 Top3。因此 trend-only 的主要损耗不是涨停/高开污染，而是 Top3 重复度高、真实账户不能重复加仓，导致大量补位到 rank 4-10。
 - bt-amv-topn duplicate lot 诊断: 新增 `allow_duplicate_positions` 配置，默认 `false` 保持旧口径；duplicate rolling 诊断显示 `trend P1/K1/PB1/CP0/RV1` 从 `+60.17%` 升至 `+106.50%`，PB3 仅从 `+99.62%` 小升至 `+102.93%`，坐实 trend-only 的主要损耗来自 no-repeat 持仓语义。
 
+## 2026-05-28
+
+### [AMV] 下一轮上下文因子路线
+
+- 背景:
+  - 上一轮行业顺风因子已阶段性收口，`mix10/20 + linear + rel20_under0 + p0.03` 可作为 P3 主线 challenger
+  - 但当前约定不是马上补组合层 allocation，而是继续完成下一轮 A 股上下文因子路线
+  - 核心判断: 量价还有空间，但不是继续堆 RSI/RSRS/MACD 这类通用指标；最该补的是“板块、情绪、趋势质量、涨停生态”四类 A 股上下文因子
+  - 路线目标: 解释并减少 P3 的假突破、2026 弱段和 AMV bull 内部赚钱效应不足的问题，而不是立刻替换当前主底座或马上做组合层 allocation
+- 板块/行业顺风因子:
+  - 这是当前最建议先做的方向
+  - P3 2026 的问题不是个股形态完全错，而是选到了水泥、地产、航天这类当时不在主线里的假突破
+  - 可做因子: 行业 5/10/20 日收益排名、行业内上涨家数占比、行业内新高占比、行业成交额扩张、个股相对行业强弱
+  - 用法: 更适合做 gate 或加权，而不是单独排序
+  - 当前状态: 已完成第一轮从 trade diagnostic 到 Rust rerank/cadence 的技术收口
+  - 当前候选: `mix10/20 + linear + rel20_under0 + p0.03` 可列为 P3 主线 challenger，但不直接替换默认 P3
+  - 未完成验收: 历史行业分类 / 行业映射版本复核、forward 样本、以及最终组合层影响
+- 市场赚钱效应 / 情绪温度因子:
+  - 这是下一步优先做的方向
+  - A 股很吃这个；纯 AMV bull 还不够，需要知道当下是不是“有赚钱效应的牛”，还是“指数没坏但短线很难做”
+  - 可做因子: 全市场涨停数、跌停数、炸板率、连板高度、昨日涨停次日溢价、20 日新高家数、强势股回撤幅度
+  - 用法: 对 P3 的入场过滤很有价值，先做 trade-level diagnostic，再决定是否做 gate / rerank / soft penalty
+  - 预期验证问题: P3 在低赚钱效应、高跌停、高炸板、昨日涨停无溢价、强势股回撤较深的环境下，是否更容易出现假突破和亏损交易
+- 中期结构因子，特别是 64/128 日窗口:
+  - 博主早期强调 128 日日 K 窗口，当前体系更多是 20 日附近的形态，可能缺一个中期结构视角
+  - 可做因子: 128 日收益分位、128 日高低位、趋势效率、回撤后修复比例、波动收缩程度、长期均线斜率
+  - 用法: 不一定直接提高 Top3 收益，更可能帮助区分“真趋势票”和“短期假突破”；优先作为 P3 假突破诊断和候选加权项
+- 趋势质量因子:
+  - 不是看涨了多少，而是看涨得是否顺；A 股里很多票短期涨幅强，但路径很脏，容易回撤
+  - 可做因子: 收益 / 波动、上涨天数占比、K 线实体效率、回撤深度、趋势线性度、均线排列稳定性
+  - 用法: 适合补 P3，因为 P3 当前偏“贴近新高”，但还缺“新高质量”
+- 流动性冲击 / 成交额异动因子:
+  - 当前已有一些成交额/波动相关东西，但还可以更系统
+  - 可做因子: 成交额相对 20/60 日分位、换手率突增、放量不涨、缩量回调、突破日量能确认、流动性枯竭后恢复
+  - 用法: 对 PB3 可能尤其有用，因为 pullback 成功往往需要“缩量回调 + 再放量”；对 P3 则更偏突破质量确认
+- 涨停生态 / 强势股事件因子:
+  - 这是 A 股特色，和普通量价因子不完全一样
+  - 可做因子: 近 N 日是否涨停、涨停后第几天、炸板后修复、首板后回踩、反包、连板断板后承接
+  - 用法: 可能形成一个独立 sleeve，而不是混进 P3/PB3；优先当作独立策略族候选
+- 基本面/另类数据因子:
+  - 这条放中期，不是马上第一优先
+  - 可做因子: 盈利质量、营收/利润增速、ROE、估值分位、机构持仓变化、股东户数、年报长度、CEO 年龄等另类数据
+  - 用法: 可能降低纯量价失效风险，但数据治理成本更高
+- 执行顺序:
+  - 第一阶段: 板块顺风 + 市场赚钱效应，直接对应 P3 当前最大痛点，即假突破和 2026 弱段
+  - 第二阶段: 128 日中期结构 + 趋势质量，补的是博主早期窗口里可能有、但当前体系还没充分表达的东西
+  - 第二阶段偏后: 流动性冲击 / 成交额异动，优先服务 PB3，也可辅助 P3 的突破质量确认
+  - 第三阶段: 涨停生态 sleeve，可能是真正低相关的新策略族，不一定和 P3/PB3 混在一起
+  - 基本面/另类数据留作中期数据治理分支，不打断当前量价上下文路线
+
+### [AMV] Market sentiment / 情绪温度初筛
+
+- 目标:
+  - 继续第一阶段“板块顺风 + 市场赚钱效应”的另一半
+  - 验证 P3 假突破是否来自 AMV bull 内部的短线赚钱效应不足，或来自过热拥挤后的回撤
+  - 只做 trade-level diagnostic，不直接改信号、不接组合层 allocation
+- 新增脚本: `scripts/amv_market_sentiment_diagnostic.py`
+  - 数据: QMT 复权日线 + `build_feature_frame()` 的非 ST 全市场股票池
+  - join 口径: 所有情绪特征按 `signal_date` 合成并 join 到交易，避免使用 T+1 entry day 收盘信息
+  - 输出: `reports/amv_market_sentiment_diagnostic.json`
+  - Canvas: `reports/canvases/amv-market-sentiment-diagnostic.canvas.tsx`
+- 构造特征:
+  - `limit_up_count`: 按主板 10%、创业板/科创板 20% 识别收盘涨停数量
+  - `limit_down_count`: 按板块涨跌幅限制识别收盘跌停数量
+  - `failed_limit_up_ratio`: 日内触及涨停但未收盘封住的近似炸板率
+  - `new_high_20_ratio`: 收盘创 20 日新高的股票占比
+  - `yday_limit_up_close_premium`: 昨日收盘涨停股在今日收盘的平均溢价
+  - `strong_stock_drawdown_20d_median`: 20 日收益 top20% 强势股相对 20 日高点的中位回撤
+- P3 static strict 结果:
+  - 总样本: `274` 笔，trade PnL `+1,008.5K`
+  - 简单冷市场过滤不成立:
+    - 低涨停数 bucket: `57` 笔，PnL `+272.3K`
+    - 低 20 日新高占比 bucket: `63` 笔，PnL `+497.2K`
+    - 低市场上涨占比 bucket: `78` 笔，PnL `+495.3K`
+    - 这些规则会大量误杀大赢家，不能作为 P3 cash/gate 方向
+  - 反而是过热/拥挤环境更值得继续:
+    - `skip_hot_yday_limit_up_premium`: 跳过 `95` 笔，跳过 PnL `-120.6K`，trade-level delta `+120.6K`
+    - `skip_hot_yday_premium_and_new_high`: 跳过 `54` 笔，跳过 PnL `-132.5K`，trade-level delta `+132.5K`
+    - 后者 2026 delta `+62.9K`，但 2022 delta `-18.0K`
+    - 误杀 `3` 笔 `>20K` 大赢家，避开 `6` 笔 `<-20K` 大亏损
+  - 当前判断: P3 的市场情绪因子更像“过热/拥挤过滤”，不是“冷市场过滤”
+- PB3 rolling raw 对照:
+  - 总样本: `1650` 笔，trade PnL `+498.1K`
+  - `skip_low_limit_up_count`: 跳过 `396` 笔，跳过 PnL `-24.0K`，trade-level delta `+24.0K`
+  - 无 `>20K` 大赢家误杀，但分年并不稳定，2022/2026 为负
+  - 当前判断: PB3 对全市场涨停数量低迷有一点敏感，但信号弱于既有 regime gating，暂不优先升级
+- 下一步:
+  - 将 `hot_yday_premium_and_new_high` 做成 P3 signal-level gate 或 soft penalty
+  - 接 `bt-amv-topn` static strict Rust 验证，看 trade-level delta 是否能兑现到账户路径
+  - 若 Rust 成立，再做阈值邻域、cadence、与 sector-tailwind 的交互验证
+
+### [AMV] P3 market sentiment hot gate 接 Rust
+
+- 目标:
+  - 将 market sentiment 初筛里最强的 trade-level 规则接到可执行信号层
+  - 规则是 AMV bull 内部的过热/拥挤过滤，不替代 AMV bull
+  - 第一版采用 date-level hard gate: `yday_limit_up_close_premium_rank >= 0.67` 且 `new_high_20_ratio_rank >= 0.67` 的 signal_date 不开新仓
+- 新增脚本: `scripts/amv_market_sentiment_signal_export.py`
+  - 输出 artifact: `artifacts/amv_static_sleeve_signals/20260528_165842_p3_sentiment_hot_yday_premium_newhigh_gate_yp0p67_nh0p67`
+  - 修正点: 初版 summary 的 raw overlap 没有限定候选池，已改为候选池内 raw rank；重导出后 `raw_top3_overlap_ratio = 1.0`
+  - 导出优化: 避免重复构建全市场 feature frame，Windows 上重导出耗时从卡住降到约 `38s`
+- Rust 回测:
+  - 配置: `backtest-engine/crates/amv-topn/config_6td_static_strict_top3_no_stop.toml`
+  - 输出: `artifacts/amv_static_sleeve_signals/20260528_165842_p3_sentiment_hot_yday_premium_newhigh_gate_yp0p67_nh0p67/backtests/6td_static_strict_top3_no_stop_20260528_165842_p3_sentiment_hot_yday_premium_newhigh_gate_yp0p67_nh0p67`
+  - raw P3: total `+201.69%`, MaxDD `13.52%`, trades `274`, win rate `52.55%`
+  - sentiment hard gate: total `+182.02%`, MaxDD `13.53%`, trades `264`, win rate `53.03%`
+  - delta: total `-19.67pp`, MaxDD `+0.01pp`, trades `-10`
+- 当前判断:
+  - trade-level 规则没有兑现到账户路径；严格 date-level hard gate 被否决
+  - 它没有降低回撤，反而减少了复利路径上的收益
+  - 市场情绪不是 P3 的独立硬过滤器；如果继续，只能改成更温和的 soft penalty / rerank，或与 sector-tailwind 交互，而不是单独删除整天信号
+
+### [AMV] 第二阶段 64/128 日中期结构 + 趋势质量
+
+- 目标:
+  - 进入上下文因子路线第二阶段，补当前 P3 主要依赖 20 日附近形态、但缺少中期结构和“新高质量”确认的问题
+  - 验证 64/128 日窗口是否能区分“真趋势票”和“短期假突破”，尤其是 P3 在贴近新高时是否需要更顺的中期路径
+  - 先做 trade-level diagnostic，再用 soft penalty/rerank 接 Rust；不直接做 hard gate
+- 新增诊断脚本: `scripts/amv_medium_trend_quality_diagnostic.py`
+  - 输出: `reports/amv_medium_trend_quality_diagnostic.json`
+  - Canvas: `reports/canvases/amv-medium-trend-quality-diagnostic.canvas.tsx`
+  - 数据口径: 使用 `build_feature_frame()` 的 QMT 复权日线、非 ST 与 AMV bull 候选池特征，在 `signal_date` 将个股级中期结构/趋势质量 join 到 P3 static strict 和 PB3 rolling trades
+  - 中期结构分: 64/128 日收益分位、区间位置分位、长期均线斜率分位的均值
+  - 趋势质量分: 趋势效率、上涨天数占比、收益/波动、K 线实体效率分位的均值
+  - 趋势效率定义: 中期绝对收益 / 同窗口逐日绝对收益和，用来近似“涨得是否顺”，而不是只看涨幅
+- P3 diagnostic 发现:
+  - 总样本: `274` 笔，trade PnL `+1,008.5K`
+  - `structure64_high`: `124` 笔，PnL `+1,075.7K`，avg `+2.80%`，win `55.6%`
+  - `structure64_low`: `33` 笔，PnL `-167.0K`，avg `-1.37%`，win `39.4%`
+  - `quality128_high`: `37` 笔，PnL `+626.1K`，avg `+5.57%`，win `64.9%`
+  - `pos128_high`: `150` 笔，PnL `+979.3K`；`pos128_low`: `43` 笔，PnL `-122.7K`
+  - 单独 `low_structure_128` 或 `low_quality_128` hard skip 不成立，会误杀 2026 大赢家；`skip_medium_structure_and_quality_weak` 在 trade-level 跳过 `90` 笔、delta `+97.2K`，但 2026 delta `-28.7K`
+  - 当前解释: 中期结构/质量对 P3 有解释力，但第一版应做 soft penalty/rerank，而不是删除信号
+- PB3 对照:
+  - PB3 的 `quality128_high` 和 `retvol128_high` 也更好，但最佳规则 `skip_64_128_quality_both_low` 只贡献 `+6.3K`
+  - 当前判断: 第二阶段先服务 P3，PB3 暂不优先接入
+- 新增 signal export: `scripts/amv_medium_trend_quality_signal_export.py`
+  - 规则: 对 `structure_score_128d < 0.5` 且 `trend_quality_score_128d < 0.5` 的 P3 候选做 linear soft penalty，再重新排序 Top3
+  - 导出 artifact:
+    - `artifacts/amv_static_sleeve_signals/20260528_171844_p3_medium128_quality_linear_t0p5_p0p01`
+    - `artifacts/amv_static_sleeve_signals/20260528_171848_p3_medium128_quality_linear_t0p5_p0p02`
+    - `artifacts/amv_static_sleeve_signals/20260528_171853_p3_medium128_quality_linear_t0p5_p0p03`
+  - raw Top3 overlap: `0.01` 为 `93.24%`，`0.02` 为 `87.43%`，`0.03` 为 `83.54%`
+- Rust static strict 回测:
+  - 配置: `backtest-engine/crates/amv-topn/config_6td_static_strict_top3_no_stop.toml`
+  - 汇总报告: `reports/amv_p3_medium_trend_quality_rust_summary.json`
+  - 归因报告: `reports/amv_p3_medium_trend_quality_attribution.json`
+  - cadence 报告: `reports/amv_p3_medium_trend_quality_cadence.json`
+  - raw P3: total `+201.69%`, MaxDD `13.52%`, trades `274`, win `52.55%`
+  - `linear p0.01`: total `+201.10%`, MaxDD `14.71%`, trades `274`, win `54.74%`
+  - `linear p0.02`: total `+261.77%`, MaxDD `15.33%`, trades `274`, win `54.74%`
+  - `linear p0.03`: total `+264.90%`, MaxDD `14.05%`, trades `274`, win `54.38%`
+  - 当前最佳是 `p0.03`: 相对 raw total `+63.21pp`，MaxDD `+0.53pp`
+- `p0.03` 归因:
+  - exact overlap `227/274 = 82.85%`
+  - raw-only `47` 笔合计 `-68.6K`; 128 日中期结构 / 趋势质量 rerank-only `47` 笔合计 `+161.3K`; unique trade delta `+230.0K`
+  - 共同交易仍贡献 `+86.1K`，来自资金路径/仓位规模差异
+  - 年度收益: 2021 `+3.92pp`, 2022 `-0.92pp`, 2023 `+1.96pp`, 2024 `+10.96pp`, 2025 `+9.30pp`, 2026 `-0.56pp`
+  - 最强正贡献月份: 2025-08 trade delta `+139.8K`; 2026-04 delta `+59.2K`; 2024-11 delta `+51.5K`
+  - 最大负贡献月份: 2026-01 trade delta `-110.7K`
+- cadence:
+  - no-cost Python-like static 7 offset: `7/7` 个 offset 优于 raw
+  - raw worst/median/best: `+260.74% / +285.60% / +297.79%`
+  - 128 日中期结构 / 趋势质量 p0.03 worst/median/best: `+284.61% / +307.71% / +331.63%`
+  - delta worst/median/best: `+21.24pp / +22.64pp / +33.85pp`
+- 当前判断:
+  - 第二阶段首轮产生了强 challenger，强度超过上一轮 sector-tailwind 单独 challenger
+  - 但它仍牺牲 2026-01，说明 128 日结构/质量惩罚会压掉某些短期爆发票
+  - 暂不直接替换默认 P3；下一步先做 128 日中期结构 / 趋势质量与 sector-tailwind 的交互/组合复核，再决定是否升级为主线 challenger
+
+### [AMV] 第二阶段验收复核: 128 日中期结构 / 趋势质量参数邻域 + sector 交互
+
+- 目标:
+  - 回答第二阶段是否可以收口
+  - 验证 `medium128 p0.03` 是否只是边界偶然；这里的 `medium128` 指 128 日中期结构 / 趋势质量
+  - 验证第一阶段 sector-tailwind challenger 与第二阶段 128 日中期结构 / 趋势质量是互补还是互相打架
+- 参数邻域:
+  - 新导出 artifact:
+    - `artifacts/amv_static_sleeve_signals/20260528_174416_p3_medium128_quality_linear_t0p5_p0p025`
+    - `artifacts/amv_static_sleeve_signals/20260528_174421_p3_medium128_quality_linear_t0p5_p0p035`
+    - `artifacts/amv_static_sleeve_signals/20260528_174425_p3_medium128_quality_linear_t0p5_p0p04`
+  - Rust static strict:
+    - raw P3: total `+201.69%`, MaxDD `13.52%`
+    - `medium p0.025`: total `+251.32%`, MaxDD `15.33%`
+    - `medium p0.03`: total `+264.90%`, MaxDD `14.05%`
+    - `medium p0.035`: total `+240.97%`, MaxDD `16.07%`
+    - `medium p0.04`: total `+225.43%`, MaxDD `16.13%`
+  - 结论: `p0.03` 是局部峰值；`p0.025` 仍强于 raw，但 `p0.035/0.04` 收益回落且回撤扩大，说明不是惩罚越强越好
+- 新增组合导出脚本: `scripts/amv_context_combo_signal_export.py`
+  - 组合逻辑: P3 基础分 - sector-tailwind penalty - 128 日中期结构 / 趋势质量 penalty
+  - sector 口径: `mix10/20 + linear + bottom40 + rel20_under0`
+  - 128 日中期结构 / 趋势质量口径: `structure_score_128d < 0.5` 且 `trend_quality_score_128d < 0.5` 的 linear penalty
+  - 组合 artifact:
+    - `artifacts/amv_static_sleeve_signals/20260528_174808_p3_ctx_sectormix1020_linear_b0p4_sp0p02_medium128_linear_t0p5_mp0p03_rel20_under0`
+    - `artifacts/amv_static_sleeve_signals/20260528_174814_p3_ctx_sectormix1020_linear_b0p4_sp0p03_medium128_linear_t0p5_mp0p03_rel20_under0`
+- 组合 Rust:
+  - `sector p0.02 + 128 日中期结构 / 趋势质量 p0.03`: total `+272.06%`, MaxDD `14.05%`, win `54.74%`
+  - `sector p0.03 + 128 日中期结构 / 趋势质量 p0.03`: total `+247.51%`, MaxDD `14.05%`, win `54.01%`
+  - 结论: sector 与 128 日中期结构 / 趋势质量有互补，但叠加后 sector penalty 要降档；`sector p0.03` 在组合中惩罚过强
+- 最佳组合归因:
+  - 汇总报告: `reports/amv_p3_context_combo_validation.json`
+  - raw vs combo 归因: `reports/amv_p3_context_combo_attribution.json`
+  - 单独 128 日中期结构 / 趋势质量 vs combo 归因: `reports/amv_p3_context_combo_vs_medium_attribution.json`
+  - 相对 raw: total `+70.37pp`, MaxDD `+0.53pp`, exact overlap `226/274`
+  - raw-only `48` 笔合计 `-83.8K`; combo-only `48` 笔合计 `+163.1K`; unique trade delta `+246.9K`
+  - 相对单独 128 日中期结构 / 趋势质量: total `+7.16pp`, MaxDD 几乎不变，exact overlap `272/274`
+  - 年度相对 raw: 2021 `+4.64pp`, 2022 `-0.79pp`, 2023 `+3.44pp`, 2024 `+11.07pp`, 2025 `+9.24pp`, 2026 `-0.57pp`
+  - 最强正贡献月份: 2025-08 trade delta `+144.2K`; 2026-04 `+58.5K`; 2024-11 `+53.8K`
+  - 最大负贡献月份仍是 2026-01 trade delta `-110.4K`
+- cadence:
+  - 报告: `reports/amv_p3_context_combo_cadence.json`
+  - no-cost Python-like static 7 offset: `7/7` 个 offset 优于 raw
+  - raw worst/median/best: `+260.74% / +285.60% / +297.79%`
+  - combo worst/median/best: `+292.95% / +316.55% / +340.99%`
+  - delta worst/median/best: `+29.74pp / +31.69pp / +43.21pp`
+- 当前判断:
+  - 第二阶段验收复核通过，可以阶段性收口
+  - 最佳候选从单独 `128 日中期结构 / 趋势质量 p0.03` 升级为 `sector p0.02 + 128 日中期结构 / 趋势质量 p0.03` 的组合上下文 rerank
+  - 仍不直接替换默认 P3，因为 2026-01 的短期爆发票被牺牲，后续需 forward 监控和最终路线对比
+
+### [AMV] P3 sector tailwind rerank 接 Rust
+
+- 目标: 将 sector tailwind 从事后 trade-level 过滤推进到可执行信号层，在 P3 候选池内做 soft penalty + 重新排序，再接 `bt-amv-topn` 静态 strict Top3。
+- 新增脚本: `scripts/amv_sector_tailwind_signal_export.py`
+  - 基础: `candidate_p3_k0p5_b0_c0_r0`
+  - 规则: 对行业 10 日收益 rank bottom 40% 候选扣分，扣分强度扫描 `0.01 / 0.02 / 0.03 / 0.05`
+  - 产物: `artifacts/amv_static_sleeve_signals/20260528_143430_p3_sector_bottom40_penalty_0p01` 等
+  - 输出字段仍兼容 `bt-amv-topn` 的 `signal.parquet + signal.meta.json`
+- Rust 回测:
+  - 配置: `backtest-engine/crates/amv-topn/config_6td_static_strict_top3_no_stop.toml`
+  - 汇总报告: `reports/amv_p3_sector_tailwind_rerank_summary.json`
+  - 归因报告: `reports/amv_p3_sector_tailwind_rerank_attribution.json`
+  - Canvas: `reports/canvases/amv-p3-sector-tailwind-rerank.canvas.tsx`
+- penalty grid:
+  - raw P3: total `+201.69%`, CAGR `22.98%`, Sharpe `1.22`, MaxDD `13.52%`, 2026 `-0.77%`
+  - `0.01`: total `+196.62%`, CAGR `22.59%`, Sharpe `1.20`, MaxDD `15.84%`, 2026 `-1.86%`
+  - `0.02`: total `+242.10%`, CAGR `25.91%`, Sharpe `1.32`, MaxDD `13.44%`, 2026 `+0.63%`
+  - `0.03`: total `+223.56%`, CAGR `24.60%`, Sharpe `1.26`, MaxDD `13.47%`, 2026 `-5.50%`
+  - `0.05`: total `+226.92%`, CAGR `24.84%`, Sharpe `1.27`, MaxDD `13.47%`, 2026 `-5.48%`
+- 归因:
+  - `0.02` vs raw P3: total `+40.41pp`, MaxDD `-0.08pp`
+  - exact overlap `216/274 = 78.83%`
+  - raw-only `58` 笔合计 `-60.4K`; rerank-only `58` 笔合计 `+84.0K`; unique trade delta `+144.4K`
+  - 共同交易仍贡献 `+57.7K`，来自资金路径/仓位规模差异
+  - 年度: 2021 `+12.22pp`, 2024 `+11.21pp`, 2025 `+7.10pp`, 2026 `+1.40pp`; 2022 `-11.18pp`, 2023 `-5.40pp`
+- 当前判断:
+  - sector tailwind soft penalty 是 P3 方向目前最有价值的新因子增强之一，明显优于硬 gate
+  - 最佳点暂为 `0.02`，但 `0.03/0.05` 打坏 2026，说明参数并非越强越好
+  - 进入候选前还必须做起始 offset / cadence、行业映射版本、rank 窗口与 bottom 阈值稳健性验证；当前静态东方财富行业映射存在历史分类偏差
+
+### [AMV] P3 sector tailwind focused robustness
+
+- 目标: 验证 `10d / bottom40 / penalty=0.02` 是否只是单点参数拟合。
+- 脚本更新: `scripts/amv_sector_tailwind_signal_export.py`
+  - 新增 `--rank-window 5/10/20`
+  - artifact 名称写入 `rank_window / bottom_threshold / penalty`，避免 grid 产物混淆
+- 产物:
+  - JSON: `reports/amv_p3_sector_tailwind_robustness.json`
+  - Canvas: `reports/canvases/amv-p3-sector-tailwind-robustness.canvas.tsx`
+- penalty 邻域，固定 `10d / bottom40`:
+  - raw P3: total `+201.69%`, Sharpe `1.22`, MaxDD `13.52%`, 2026 `-0.77%`
+  - `0.015`: total `+191.28%`, Sharpe `1.18`, MaxDD `15.79%`, 2026 `-1.86%`
+  - `0.018`: total `+227.55%`, Sharpe `1.28`, MaxDD `13.44%`, 2026 `-1.85%`
+  - `0.020`: total `+242.10%`, Sharpe `1.32`, MaxDD `13.44%`, 2026 `+0.63%`
+  - `0.022`: total `+239.74%`, Sharpe `1.31`, MaxDD `13.47%`, 2026 `+0.64%`
+  - `0.025`: total `+239.74%`, Sharpe `1.31`, MaxDD `13.47%`, 2026 `+0.64%`
+- threshold 敏感性，固定 `10d / penalty=0.02`:
+  - bottom30: total `+226.99%`, Sharpe `1.31`, MaxDD `13.52%`, 2026 `+1.29%`
+  - bottom40: total `+242.10%`, Sharpe `1.32`, MaxDD `13.44%`, 2026 `+0.63%`
+  - bottom50: total `+138.70%`, Sharpe `0.96`, MaxDD `20.65%`, 2026 `+0.71%`
+- rank window 敏感性，固定 `bottom40 / penalty=0.02`:
+  - `5d`: total `+222.04%`, Sharpe `1.26`, MaxDD `16.62%`, 2026 `+1.56%`
+  - `10d`: total `+242.10%`, Sharpe `1.32`, MaxDD `13.44%`, 2026 `+0.63%`
+  - `20d`: total `+264.26%`, Sharpe `1.36`, MaxDD `16.09%`, 2026 `+0.41%`
+- 当前判断:
+  - sector tailwind rerank 的方向通过第一轮 focused robustness：不是单点 `0.020` 的孤立结果
+  - 可用 penalty 区间大致为 `0.018~0.025`；`0.015` 太弱，`bottom50` 太宽会过度惩罚
+  - `20d` 窗口是进攻 challenger，收益更高但回撤更深；当前默认候选仍保留 `10d / bottom40 / 0.02`
+  - 未完成项: static cadence offset、行业映射版本（申万/中信历史行业）、更细窗口/阈值 walk-forward
+
+### [AMV] P3 sector tailwind cadence check
+
+- 目标: 检查 P3 sector tailwind rerank 是否只是默认 static 起始 offset 占优。
+- 新增脚本: `scripts/amv_sector_tailwind_cadence.py`
+  - 口径: Python-side no-cost static cadence sensitivity
+  - 选择: `rank <= 3`, `is_signal`, `is_bull_regime`, skip open limit-up, no refill
+  - entry: shifted `signal.parquet` execution date open
+  - exit: entry date + `6` trading days close
+  - 注意: 该口径用于起始节奏敏感性，不替代 Rust account NAV
+- 产物:
+  - `reports/amv_p3_sector_tailwind_cadence.json`
+  - `reports/amv_p3_sector_tailwind_cadence_w20.json`
+  - `reports/canvases/amv-p3-sector-tailwind-cadence.canvas.tsx`
+- `10d / bottom40 / penalty=0.02`:
+  - raw P3 median/worst offset total: `+285.60%` / `+260.74%`
+  - rerank median/worst offset total: `+275.03%` / `+237.56%`
+  - positive delta offsets: `2/7`
+  - median delta: `-10.56pp`
+  - worst delta: `-24.16pp`
+  - 判断: 没有通过 cadence 检查，不能直接升级为默认 P3
+- `20d / bottom40 / penalty=0.02` challenger:
+  - rerank median/worst offset total: `+292.07%` / `+238.49%`
+  - positive delta offsets: `5/7`
+  - median delta: `+9.10pp`
+  - worst delta: `-22.25pp`
+  - 判断: 比 10d 更稳，但仍有单个 offset 明显受伤，且最差路径弱于 raw；只能作为 challenger
+- 当前判断:
+  - sector tailwind 的“弱行业离散扣分”不够平滑，默认 Rust 起点的漂亮结果有 cadence 偶然性
+  - 下一步若继续，应尝试连续型行业 rank penalty、`10d/20d` 混合项、或只在特定 AMV/行业状态下启用，而不是继续押注 `10d/bottom40/0.02`
+
+### [AMV] P3 sector tailwind complete expression
+
+- 目标: 不停在离散弱行业扣分失败点，改做更平滑、局部、更少扰动的行业表达。
+- 脚本更新:
+  - `scripts/amv_sector_tailwind_diagnostic.py`: 新增 `stock_ret_10d` 与 `stock_rel_sector_ret_10d`
+  - `scripts/amv_sector_tailwind_signal_export.py`: 新增 `--rank-source 5d/10d/20d/mix_10_20`, `--penalty-mode bucket/linear`, `--relative-confirm none/rel5_under0/rel10_under0/rel20_under0`
+- focused grid:
+  - `10d linear`, `mix10/20 linear`, `20d linear`, `mix10/20 linear + rel20_under0`
+  - Rust 配置: `backtest-engine/crates/amv-topn/config_6td_static_strict_top3_no_stop.toml`
+  - 汇总报告: `reports/amv_p3_sector_tailwind_complete_grid.json`
+  - Canvas: `reports/canvases/amv-p3-sector-tailwind-complete.canvas.tsx`
+- Rust 结果:
+  - raw P3: total `+201.69%`, Sharpe `1.225`, MaxDD `13.52%`
+  - `mix10/20 linear rel20 p0.03`: total `+219.55%`, Sharpe `1.279`, MaxDD `14.07%`, excess `+17.86pp`
+  - `mix10/20 linear rel20 p0.04`: total `+219.55%`, Sharpe `1.279`, MaxDD `14.07%`, excess `+17.86pp`
+  - `10d linear p0.04`: total `+218.69%`, Sharpe `1.265`, MaxDD `13.51%`, excess `+17.00pp`
+  - 直接 `mix10/20 linear` 或 `20d linear` 不加相对行业确认时效果明显变弱，说明“少动、只扣交集弱势样本”比宽泛行业弱势扣分更稳。
+- cadence:
+  - 报告: `reports/amv_p3_sector_tailwind_complete_cadence_p0p03.json`
+  - `mix10/20 linear rel20 p0.03` 的 Python no-cost 7 offset 结果: `7/7` 个 offset 优于 raw
+  - raw median/worst offset total: `+285.60%` / `+260.74%`
+  - rerank median/worst offset total: `+306.53%` / `+280.32%`
+  - median delta `+20.94pp`, worst delta `+19.59pp`
+- 当前判断:
+  - 行业因子没有被否决；被否决的是最早的离散 bucket 表达
+  - 推荐将 `mix10/20 + linear + rel20_under0 + p0.03` 升为 P3 主线 challenger，而不是直接替换默认 P3
+  - `p0.03` 与 `p0.04` 当前回测/cadence 结果相同，优先选择更保守的 `p0.03`
+  - 当前阶段先技术收口，不立即接历史行业分类数据源；原因是该项更偏数据工程，容易打断下一轮策略路线
+  - 历史行业分类/行业映射版本复核保留为最终验收项；完整走完下一轮路线后，再用申万/中信/历史成分数据复核静态东方财富行业映射带来的历史分类偏差
+
+### [AMV] Sector tailwind P3/PB3 初筛
+
+- 目标: 验证“板块/行业顺风”是否能解释 P3 假突破，并判断是否值得进入 P3 gating / rerank。
+- 新增脚本: `scripts/amv_sector_tailwind_diagnostic.py`
+  - 数据: 静态东方财富行业映射 `data/sector_map_em.csv` + QMT `v_stock_daily_qfq_qmt`
+  - 行业映射: `5,549` 只股票、`86` 个行业；QMT 日线匹配 `5,180` 只股票，缺失日线行数约 `0.10%`
+  - 口径: 行业因子在 `signal_date` 合成并 join 到交易，避免 T+1 open 使用 entry day 收盘信息
+  - 特征: 行业 5/10/20 日等权收益、收益横截面 rank、MA20 宽度、20/60 日新高占比、成交额扩张、个股相对行业强弱
+- 产物:
+  - JSON: `reports/amv_sector_tailwind_diagnostic.json`
+  - Canvas: `reports/canvases/amv-sector-tailwind-diagnostic.canvas.tsx`
+- P3 结果:
+  - 行业 10 日收益 rank top 30%: `123` 笔，PnL `+661.9K`，avg pnl `+1.78%`
+  - mid 30%: `84` 笔，PnL `+390.4K`，avg pnl `+1.60%`
+  - bottom 40%: `67` 笔，PnL `-43.9K`，avg pnl `+0.09%`
+  - trade-level what-if `skip_sector_bottom_40pct`: delta `+43.9K`，跳过 `67` 笔，误杀 `2` 笔 >20K 大赢家，避开 `6` 笔 <-20K 大亏损；年度上 2021/2024/2025/2026 为正，2022/2023 为负
+  - 严格只保留 `tailwind_ok` 不成立: 会跳过 `169` 笔合计 `+369.2K` 的交易，说明行业顺风适合作为弱过滤/加权，不适合作为硬 gate
+- PB3 结果:
+  - bottom 40% 行业 rank 交易仍合计 `+257.0K`，直接过滤会显著变差
+  - `aged/old + bottom industry` 也只是接近打平，delta `-6.5K`
+- 当前判断:
+  - 行业顺风对 P3 有初步价值，尤其能解释一部分弱行业假突破；下一步应做 P3 rerank / soft penalty，而不是简单删除所有非顺风行业
+  - PB3 是 pullback/reversion sleeve，不应套同一套顺风过滤
+  - 当前行业映射是静态东方财富行业，存在历史分类偏差；若后续信号稳定，应再换成申万/中信历史行业分类复核
+
+## 2026-05-27
+
+### [AMV] P3 + PB3 gated allocation 诊断
+
+- 目标: 从“单策略研究”收敛到当前最像实盘雏形的组合结构，验证 P3 static + PB3 rolling gated 在组合层是否改善 2025/2026 与回撤
+- 新增脚本: `scripts/amv_allocation_diagnostic.py`
+  - 输入: 三条 Rust `daily_equity.csv`
+    - P3 static strict: `20260520_092049_candidate_p3_k0p5_b0_c0_r0`
+    - PB3 rolling raw: `20260521_090945_pullback_p0_k0_pb3_cp1_rv0`
+    - PB3 rolling gated: `20260526_184023_pullback_p0_k0_pb3_cp1_rv0`
+  - 方法: 使用 daily return 做 daily rebalanced synthetic allocation
+  - 权重: P3 `100/90/80/70/60/50%`，PB3 为剩余权重
+- 产物:
+  - JSON: `reports/amv_p3_pb3_gated_allocation.json`
+  - Canvas: `reports/canvases/amv-p3-pb3-gated-allocation.canvas.tsx`
+- 相关性:
+  - P3 vs PB3 raw: `0.255`
+  - P3 vs PB3 gated: `0.260`
+  - PB3 raw vs PB3 gated: `0.958`
+  - 结论: gated PB3 仍然是同一个 pullback sleeve 的风控增强，不是新 sleeve
+- standalone:
+  - P3 static: total `+201.69%`, MaxDD `13.52%`, 2025 `+13.89%`, 2026 `-0.77%`
+  - PB3 raw: total `+99.62%`, MaxDD `20.70%`, 2025 `+29.73%`, 2026 `+15.15%`
+  - PB3 gated: total `+109.73%`, MaxDD `16.20%`, 2025 `+25.15%`, 2026 `+14.28%`
+- gated allocation:
+  - P3 90 / PB3 gated 10: total `+193.66%`, MaxDD `12.41%`, 2026 `+0.71%`
+  - P3 80 / PB3 gated 20: total `+185.25%`, MaxDD `11.64%`, 2026 `+2.20%`
+  - P3 70 / PB3 gated 30: total `+176.50%`, MaxDD `10.87%`, 2026 `+3.70%`
+  - P3 60 / PB3 gated 40: total `+167.47%`, MaxDD `10.10%`, 2026 `+5.20%`
+  - P3 50 / PB3 gated 50: total `+158.19%`, MaxDD `9.33%`, 2026 `+6.70%`
+- raw vs gated 同权重差异:
+  - gated 在全周期 total 上更好: 80/20 `+2.56pp`, 70/30 `+3.76pp`, 60/40 `+4.90pp`
+  - gated 对 MaxDD 基本小幅更优，但 50/50 时略差 `+0.66pp`
+  - gated 对 2025/2026 年度收益略弱于 raw: 80/20 的 2026 差异 `-0.15pp`
+- 当前判断:
+  - 组合层最自然候选是 `P3 80% / PB3 gated 20%`: 保留大部分 P3 收益，把 2026 转正到 `+2.20%`，MaxDD 降至 `11.64%`
+  - 若更重视回撤与 2026 修复，`70/30 gated` 更均衡，但全周期收益牺牲更明显
+  - PB3 gating 在组合层的价值主要是改善 PB3 自身全周期风险质量，不是提高 2025/2026 进攻性
+
+### [AMV] RSRS executable 初筛
+
+- 目标: 验证网红指标 RSRS 在 AMV bull pool 中是否有单因子价值，以及是否值得进入后续 P3/PB3 组合网格
+- 新增脚本: `scripts/amv_executable_rsrs_scan.py`
+- RSRS 构造:
+  - `beta = rolling_cov(low_adj, high_adj, N) / rolling_var(low_adj, N)`
+  - `r2 = rolling_corr(low_adj, high_adj, N)^2`
+  - `z = (beta - rolling_mean(beta, M)) / rolling_std(beta, M)`
+  - `r2adj = z * r2`
+  - `right = z * beta * r2`
+- 实现备注:
+  - RSRS 因子构造全程使用 Polars rolling expressions: `rolling_cov`, `rolling_var`, `rolling_corr`, `rolling_mean`, `rolling_std`
+  - 未用 numpy/pandas 实现回归
+  - 使用 `feature_start_date=2019-01-01` 做 warmup，再评估 `2021-01-01` 后样本，避免 `M=120/250` 长窗口起始样本不足
+- 扫描:
+  - 窗口: `(N=18, M=120)`, `(N=18, M=250)`
+  - 因子: `beta`, `z`, `z*R2`, `z*beta*R2`
+  - 同时评估 high/low 两个排序方向
+  - 评估口径: `T+1 open -> D+7 close`, Top3, skip close limit-up refill
+- 产物:
+  - artifact: `artifacts/amv_executable_rsrs_scan/20260527_133509/`
+  - 报告: `reports/amv_rsrs_executable_scan_summary.json`
+- 关键结果:
+  - 传统趋势方向 `rsrs_beta_18_high` 很弱: refill exec NAV `-4.89%`, ctc NAV `-26.82%`, stable positive years `1`
+  - `rsrs_beta_18_low` 明显更好: refill exec NAV `+50.12%`, 但 edge 仍弱且 2026 为负
+  - 最好 tradeoff: `rsrs_z_18_120_low`
+    - refill exec NAV `+99.88%`
+    - MaxDD `31.46%`
+    - ctc NAV `+72.56%`
+    - close limit-up day share `0.0%`
+    - high-open day share `0.53%`
+    - rank q95 `3`
+    - stable positive years `4`
+    - 2025 exec edge `+0.75%`, 2026 exec edge `+2.21%`
+  - `rsrs_z_18_120_high` 也有一定表现: refill exec NAV `+93.36%`, 但 2026 edge 为负
+- 当前判断:
+  - RSRS 不是涨停污染型因子；污染很低
+  - 但在 AMV bull pool 里，传统“高 RSRS 趋势突破”方向并不成立，低/标准化 RSRS 更像 pullback/reversion 线索
+  - 最好 RSRS 单因子仍弱于既有 PB3/PB1 pullback label 上限，且 MaxDD 偏大，不适合作为独立 sleeve 直接接 Rust
+  - 后续更合理用法: 把 `rsrs_z_18_120_low` 作为 PB/CP/RV 组合的辅助候选，或用于解释/过滤 P3 假突破；暂不做 RSRS 全量组合权重网格
+
+### [AMV] P3 early stop 接 Rust 验证
+
+- 目标: 将 P3 exit what-if 中“早期止损可能节省大额亏损”的想法接入 `bt-amv-topn` 真实账户回测
+- 代码:
+  - `bt-amv-topn` 新增 `[early_stop]` 配置段，默认关闭，不影响旧回测
+  - 新增 `ExitReason::EarlyStop`
+  - 支持 `trigger_hold_trading_days`, `loss_pct`, `require_previous_close_below_entry`
+  - 新增 `reserve_slot_until_max_hold`，用于 P3 static: early stop 后保留仓位槽到原 `max_hold_trading_days`，避免提前释放仓位后变成 refill 策略
+- 配置: `backtest-engine/crates/amv-topn/config_6td_static_strict_top3_early_stop_d2_prevneg.toml`
+  - `trigger_hold_trading_days = 2`
+  - `loss_pct = 0.03`
+  - `require_previous_close_below_entry = true`
+  - `reserve_slot_until_max_hold = true`
+- 结果报告: `reports/amv_p3_early_stop_rust_summary.json`
+  - raw P3 static strict: net `+201.69%`, gross `+260.86%`, MaxDD `13.52%`, trades `274`, WR `52.55%`
+  - early-stop P3: net `+134.75%`, gross `+185.77%`, MaxDD `12.78%`, trades `274`, WR `51.09%`
+  - 差异: net `-66.94pp`, gross `-75.09pp`, MaxDD 仅改善 `-0.75pp`
+  - 触发 early stop `27` 笔；相对原始持有，`15` 笔减少亏损、`12` 笔误杀/少赚，合计少赚 `149.2K`
+  - 典型误杀:
+    - `sz.002456` 2024-10-22: early `-27.3K` vs raw `+50.1K`, delta `-77.5K`
+    - `sh.601607` 2022-03-14: early `-8.3K` vs raw `+50.9K`, delta `-59.2K`
+    - `sz.002217` 2026-04-21: early `-43.6K` vs raw `-1.9K`, delta `-41.7K`
+- 关键发现:
+  - P3 的突破延续机制存在“先杀后拉”的强反转样本，`d1<0 + d2<-3%` 仍不足以识别真正坏票
+  - trade-level what-if 高估了止损价值；真实账户口径下，提前止损带来的资金路径、成本、误杀大反转共同压低收益
+  - 如果继续做 P3 风控，优先方向不应是简单价格止损，而是结合板块顺风/个股相对 AMV 弱势/跌破结构位的复合退出
+- 当前判断: 该 early-stop 规则被 Rust 否决，不进入 P3 默认配置
+
+### [AMV] PB3 rolling gating 稳健性快筛
+
+- 目标: 检查 PB3 AMV regime gate 是否只是 `aged / neg>=3 / amp>2.5` 的单点拟合
+- 新增脚本: `scripts/amv_pb3_gating_robustness.py`
+  - 输入: raw PB3 rolling Rust trades + raw signal parquet
+  - 口径: actual bought trades join `signal_date`，再 join AMV phase；所有 gate 特征都按 signal date 收盘已知信息计算
+  - 输出: `reports/amv_pb3_gating_robustness.json`
+- 扫描范围:
+  - duration gate: `aged`, `old`, `aged_or_old` 的非加速状态
+  - chaos gate: `amv_neg_streak in [2,3,4]` × `amplitude_pct > [2.0,2.5,3.0,3.5]`
+  - 组合: duration gate 单独、chaos 单独、duration OR chaos
+- 当前 Rust 已验证规则: `aged_nonaccel_or_chaos_n3_amp2p5`
+  - trade-level skip approximation: 跳过 `258/1650` 笔，跳过交易合计 PnL `-23.2K`，即贡献 `+23.2K`
+  - skipped trades 平均 `-0.535%`, WR `39.9%`
+  - 无 `>20K` 大赢家误杀
+  - 分年: `2022 +13.8K`, `2023 +56.1K`; 但 `2021 -6.3K`, `2024 -11.3K`, `2025 -23.8K`, `2026 -5.2K`
+- 最强 in-sample trade-level 规则:
+  - `aged_or_old_nonaccel_or_chaos_n3_amp3p0`: `+54.5K`, skip `20.1%`, 无大赢家误杀
+  - 但最差分年 `-48.4K`，明显更激进，不宜直接替换当前规则
+- 更稳但弱的 chaos-only:
+  - `chaos_n4_amp3p0`: 仅跳过 `0.55%` 交易，贡献 `+5.8K`，样本太少，更像风险提示而不是可单独使用的 gate
+- Walk-forward:
+  - 逐年用历史样本选规则，测试年合计 `+37.5K`，`3/5` 个测试年为正
+  - 当前固定规则同口径测试年合计 `+29.5K`，`2/5` 个测试年为正
+- 当前判断:
+  - PB3 gating 的方向不是纯随机：walk-forward 仍为正，且 Rust account 口径已经验证收益与回撤同步改善
+  - 但规则并不“年年有效”，核心贡献集中在 `2022/2023` 的 AMV 老化/混沌段
+  - 不建议立刻切到更激进的 `aged_or_old + amp3.0`；下一步如要推进，应只做少数候选 Rust 复核，并优先关注是否降低 MaxDD，而不是追求 trade-level PnL 最大化
 
 ## 2026-05-26
 
@@ -4832,4 +5345,3 @@
     - 固定单一进攻袖子后重新做二分类
     - 或提高 `attack_ok` 标签门槛，追求更高 precision
     - 或先补 `cash_ok`，减少“该避险却被迫在 base/attack 中选”的噪声
-

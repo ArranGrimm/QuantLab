@@ -1,0 +1,317 @@
+{
+  "generated_at": "2026-05-28 15:14:58",
+  "purpose": "P3 raw vs sector-tailwind rerank Python-side static cadence sensitivity; no costs.",
+  "assumptions": {
+    "start_date": "2021-01-01",
+    "hold_trading_days": 6,
+    "entry": "execution date open_adj from shifted signal.parquet",
+    "exit": "entry date + hold_trading_days close_adj",
+    "selection": "rank <= 3, is_signal, is_bull_regime, skip open limit-up, no refill",
+    "costs": "excluded"
+  },
+  "raw": {
+    "label": "P3 raw",
+    "signal_path": "D:\\WorkSpace\\Tinkering\\QuantLab\\artifacts\\amv_static_sleeve_signals\\20260520_092049_candidate_p3_k0p5_b0_c0_r0\\signal.parquet",
+    "signal_days": 541,
+    "daily_cycle_distribution": {
+      "mean_cycle_ret": 0.008593383842205342,
+      "median_cycle_ret": 0.0029897757441098203,
+      "worst_cycle_ret": -0.17494398013889925,
+      "best_cycle_ret": 0.3614046372434696,
+      "positive_day_share": 0.5526802218114603
+    },
+    "static_offset_summary": {
+      "offset_count": 7,
+      "worst_total_return": 2.607351052129617,
+      "median_total_return": 2.855951491343531,
+      "best_total_return": 2.977861991491931,
+      "mean_total_return": 2.8282719284291633,
+      "worst_max_drawdown": -0.08929623037810785,
+      "median_max_drawdown": -0.08929623037810774,
+      "best_max_drawdown": -0.08929623037810763,
+      "positive_paths": 7
+    },
+    "static_offset_paths": [
+      {
+        "offset": 0,
+        "cycles": 91,
+        "first_entry": "2021-01-04",
+        "last_entry": "2026-04-21",
+        "total_return": 2.94768623389173,
+        "max_drawdown": -0.08929623037810785,
+        "mean_cycle_ret": 0.015998689291717418,
+        "median_cycle_ret": 0.006931895495498479,
+        "worst_cycle_ret": -0.08615384615384625,
+        "best_cycle_ret": 0.15064562410329985
+      },
+      {
+        "offset": 1,
+        "cycles": 91,
+        "first_entry": "2021-01-05",
+        "last_entry": "2026-04-21",
+        "total_return": 2.9315975498846156,
+        "max_drawdown": -0.08929623037810785,
+        "mean_cycle_ret": 0.01594547754465664,
+        "median_cycle_ret": 0.006931895495498479,
+        "worst_cycle_ret": -0.08615384615384625,
+        "best_cycle_ret": 0.15064562410329985
+      },
+      {
+        "offset": 2,
+        "cycles": 91,
+        "first_entry": "2021-01-06",
+        "last_entry": "2026-04-21",
+        "total_return": 2.607351052129617,
+        "max_drawdown": -0.08929623037810774,
+        "mean_cycle_ret": 0.014982164883859582,
+        "median_cycle_ret": 0.006433485885798247,
+        "worst_cycle_ret": -0.08615384615384625,
+        "best_cycle_ret": 0.15064562410329985
+      },
+      {
+        "offset": 3,
+        "cycles": 90,
+        "first_entry": "2021-01-07",
+        "last_entry": "2026-04-21",
+        "total_return": 2.77322382668733,
+        "max_drawdown": -0.08929623037810774,
+        "mean_cycle_ret": 0.01564014722320176,
+        "median_cycle_ret": 0.006682690690648363,
+        "worst_cycle_ret": -0.08615384615384625,
+        "best_cycle_ret": 0.15064562410329985
+      },
+      {
+        "offset": 4,
+        "cycles": 90,
+        "first_entry": "2021-01-08",
+        "last_entry": "2026-04-21",
+        "total_return": 2.7042313535753886,
+        "max_drawdown": -0.08929623037810774,
+        "mean_cycle_ret": 0.015448553424381586,
+        "median_cycle_ret": 0.006682690690648363,
+        "worst_cycle_ret": -0.08615384615384625,
+        "best_cycle_ret": 0.15064562410329985
+      },
+      {
+        "offset": 5,
+        "cycles": 90,
+        "first_entry": "2021-01-11",
+        "last_entry": "2026-04-21",
+        "total_return": 2.855951491343531,
+        "max_drawdown": -0.08929623037810774,
+        "mean_cycle_ret": 0.015881396463395498,
+        "median_cycle_ret": 0.007195866871629783,
+        "worst_cycle_ret": -0.08615384615384625,
+        "best_cycle_ret": 0.15064562410329985
+      },
+      {
+        "offset": 6,
+        "cycles": 90,
+        "first_entry": "2021-01-12",
+        "last_entry": "2026-04-21",
+        "total_return": 2.977861991491931,
+        "max_drawdown": -0.08929623037810763,
+        "mean_cycle_ret": 0.016240834465508402,
+        "median_cycle_ret": 0.007195866871629783,
+        "worst_cycle_ret": -0.08615384615384625,
+        "best_cycle_ret": 0.15064562410329985
+      }
+    ]
+  },
+  "rerank": {
+    "label": "P3 sector tailwind 10d/bottom40/0.02",
+    "signal_path": "D:\\WorkSpace\\Tinkering\\QuantLab\\artifacts\\amv_static_sleeve_signals\\20260528_144538_p3_sector_w10_b0p4_penalty_0p02\\signal.parquet",
+    "signal_days": 541,
+    "daily_cycle_distribution": {
+      "mean_cycle_ret": 0.007594117315992288,
+      "median_cycle_ret": 0.0029031780729273184,
+      "worst_cycle_ret": -0.20666087057323373,
+      "best_cycle_ret": 0.3614046372434696,
+      "positive_day_share": 0.5434380776340111
+    },
+    "static_offset_summary": {
+      "offset_count": 7,
+      "worst_total_return": 2.375577813507185,
+      "median_total_return": 2.7503319478450226,
+      "best_total_return": 3.215651319855228,
+      "mean_total_return": 2.780849009531411,
+      "worst_max_drawdown": -0.11957113994714563,
+      "median_max_drawdown": -0.10564324683741722,
+      "best_max_drawdown": -0.10564324683741722,
+      "positive_paths": 7
+    },
+    "static_offset_paths": [
+      {
+        "offset": 0,
+        "cycles": 91,
+        "first_entry": "2021-01-04",
+        "last_entry": "2026-04-21",
+        "total_return": 3.180645308722463,
+        "max_drawdown": -0.10564324683741722,
+        "mean_cycle_ret": 0.016732564925323573,
+        "median_cycle_ret": 0.010346608165598145,
+        "worst_cycle_ret": -0.10564324683741722,
+        "best_cycle_ret": 0.15064562410329985
+      },
+      {
+        "offset": 1,
+        "cycles": 91,
+        "first_entry": "2021-01-05",
+        "last_entry": "2026-04-21",
+        "total_return": 2.8298078271309732,
+        "max_drawdown": -0.10564324683741733,
+        "mean_cycle_ret": 0.015698235763309774,
+        "median_cycle_ret": 0.010346608165598145,
+        "worst_cycle_ret": -0.10564324683741722,
+        "best_cycle_ret": 0.15064562410329985
+      },
+      {
+        "offset": 2,
+        "cycles": 91,
+        "first_entry": "2021-01-06",
+        "last_entry": "2026-04-21",
+        "total_return": 2.375577813507185,
+        "max_drawdown": -0.11957113994714563,
+        "mean_cycle_ret": 0.014323691836250388,
+        "median_cycle_ret": 0.01030202777639492,
+        "worst_cycle_ret": -0.10564324683741722,
+        "best_cycle_ret": 0.15064562410329985
+      },
+      {
+        "offset": 3,
+        "cycles": 90,
+        "first_entry": "2021-01-07",
+        "last_entry": "2026-04-21",
+        "total_return": 2.6512974753979335,
+        "max_drawdown": -0.10564324683741722,
+        "mean_cycle_ret": 0.01531231020143274,
+        "median_cycle_ret": 0.010324317970996533,
+        "worst_cycle_ret": -0.10564324683741722,
+        "best_cycle_ret": 0.15064562410329985
+      },
+      {
+        "offset": 4,
+        "cycles": 90,
+        "first_entry": "2021-01-08",
+        "last_entry": "2026-04-21",
+        "total_return": 2.462631374261072,
+        "max_drawdown": -0.10564324683741722,
+        "mean_cycle_ret": 0.014744900102884234,
+        "median_cycle_ret": 0.010324317970996533,
+        "worst_cycle_ret": -0.10564324683741722,
+        "best_cycle_ret": 0.15064562410329985
+      },
+      {
+        "offset": 5,
+        "cycles": 90,
+        "first_entry": "2021-01-11",
+        "last_entry": "2026-04-21",
+        "total_return": 2.7503319478450226,
+        "max_drawdown": -0.10564324683741722,
+        "mean_cycle_ret": 0.01560659203556218,
+        "median_cycle_ret": 0.010324317970996533,
+        "worst_cycle_ret": -0.10564324683741722,
+        "best_cycle_ret": 0.15064562410329985
+      },
+      {
+        "offset": 6,
+        "cycles": 90,
+        "first_entry": "2021-01-12",
+        "last_entry": "2026-04-21",
+        "total_return": 3.215651319855228,
+        "max_drawdown": -0.10564324683741722,
+        "mean_cycle_ret": 0.01692801620478612,
+        "median_cycle_ret": 0.011049104285310954,
+        "worst_cycle_ret": -0.10564324683741722,
+        "best_cycle_ret": 0.15064562410329985
+      }
+    ]
+  },
+  "pair_offset_paths": [
+    {
+      "offset": 0,
+      "raw_total_return": 2.94768623389173,
+      "rerank_total_return": 3.180645308722463,
+      "delta_total_return": 0.23295907483073286,
+      "raw_max_drawdown": -0.08929623037810785,
+      "rerank_max_drawdown": -0.10564324683741722,
+      "delta_max_drawdown": -0.01634701645930936,
+      "raw_cycles": 91,
+      "rerank_cycles": 91
+    },
+    {
+      "offset": 1,
+      "raw_total_return": 2.9315975498846156,
+      "rerank_total_return": 2.8298078271309732,
+      "delta_total_return": -0.1017897227536424,
+      "raw_max_drawdown": -0.08929623037810785,
+      "rerank_max_drawdown": -0.10564324683741733,
+      "delta_max_drawdown": -0.01634701645930947,
+      "raw_cycles": 91,
+      "rerank_cycles": 91
+    },
+    {
+      "offset": 2,
+      "raw_total_return": 2.607351052129617,
+      "rerank_total_return": 2.375577813507185,
+      "delta_total_return": -0.23177323862243204,
+      "raw_max_drawdown": -0.08929623037810774,
+      "rerank_max_drawdown": -0.11957113994714563,
+      "delta_max_drawdown": -0.03027490956903789,
+      "raw_cycles": 91,
+      "rerank_cycles": 91
+    },
+    {
+      "offset": 3,
+      "raw_total_return": 2.77322382668733,
+      "rerank_total_return": 2.6512974753979335,
+      "delta_total_return": -0.12192635128939644,
+      "raw_max_drawdown": -0.08929623037810774,
+      "rerank_max_drawdown": -0.10564324683741722,
+      "delta_max_drawdown": -0.01634701645930947,
+      "raw_cycles": 90,
+      "rerank_cycles": 90
+    },
+    {
+      "offset": 4,
+      "raw_total_return": 2.7042313535753886,
+      "rerank_total_return": 2.462631374261072,
+      "delta_total_return": -0.24159997931431665,
+      "raw_max_drawdown": -0.08929623037810774,
+      "rerank_max_drawdown": -0.10564324683741722,
+      "delta_max_drawdown": -0.01634701645930947,
+      "raw_cycles": 90,
+      "rerank_cycles": 90
+    },
+    {
+      "offset": 5,
+      "raw_total_return": 2.855951491343531,
+      "rerank_total_return": 2.7503319478450226,
+      "delta_total_return": -0.10561954349850833,
+      "raw_max_drawdown": -0.08929623037810774,
+      "rerank_max_drawdown": -0.10564324683741722,
+      "delta_max_drawdown": -0.01634701645930947,
+      "raw_cycles": 90,
+      "rerank_cycles": 90
+    },
+    {
+      "offset": 6,
+      "raw_total_return": 2.977861991491931,
+      "rerank_total_return": 3.215651319855228,
+      "delta_total_return": 0.2377893283632968,
+      "raw_max_drawdown": -0.08929623037810763,
+      "rerank_max_drawdown": -0.10564324683741722,
+      "delta_max_drawdown": -0.016347016459309582,
+      "raw_cycles": 90,
+      "rerank_cycles": 90
+    }
+  ],
+  "pair_summary": {
+    "offset_count": 7,
+    "positive_delta_offsets": 2,
+    "worst_delta_total_return": -0.24159997931431665,
+    "median_delta_total_return": -0.10561954349850833,
+    "best_delta_total_return": 0.2377893283632968,
+    "mean_delta_total_return": -0.04742291889775231
+  }
+}

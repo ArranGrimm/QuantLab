@@ -1,0 +1,732 @@
+{
+  "generated_at": "2026-05-28 14:24:11",
+  "method": "Static East Money industry map plus QMT daily adjusted prices. Sector factors are joined on signal_date to avoid entry-day close lookahead.",
+  "data": {
+    "qmt_db": "D:\\WorkSpace\\Tinkering\\QuantData\\Ashare\\qmt_data.duckdb",
+    "sector_map": "D:\\WorkSpace\\Tinkering\\QuantLab\\data\\sector_map_em.csv",
+    "sector_map_rows": 5549,
+    "industries": 86,
+    "start_date": "2019-01-01",
+    "daily_rows": 9215132
+  },
+  "tailwind_definition": {
+    "sector_ret_10d_rank_pct": ">= 0.65",
+    "sector_breadth_ma20": ">= 0.45",
+    "sector_amount_ratio_20": ">= 0.90"
+  },
+  "sleeves": {
+    "p3_static": {
+      "sleeve": "p3_static",
+      "label": "P3 static strict",
+      "total": {
+        "trades": 274,
+        "total_pnl": 1008459.88,
+        "avg_pnl_pct": 0.013133,
+        "win_rate": 0.525547
+      },
+      "missing_feature_trades": 0,
+      "by_tailwind_bucket": [
+        {
+          "sector_tailwind_bucket": "tailwind_ok",
+          "trades": 105,
+          "total_pnl": 639293.23,
+          "avg_pnl_pct": 0.020476,
+          "win_rate": 0.552381
+        },
+        {
+          "sector_tailwind_bucket": "tailwind_weak",
+          "trades": 169,
+          "total_pnl": 369166.64,
+          "avg_pnl_pct": 0.008571,
+          "win_rate": 0.508876
+        }
+      ],
+      "by_sector_rank_bucket": [
+        {
+          "sector_rank_bucket": "top_30pct",
+          "trades": 123,
+          "total_pnl": 661883.41,
+          "avg_pnl_pct": 0.017843,
+          "win_rate": 0.528455
+        },
+        {
+          "sector_rank_bucket": "mid_30pct",
+          "trades": 84,
+          "total_pnl": 390435.99,
+          "avg_pnl_pct": 0.015955,
+          "win_rate": 0.547619
+        },
+        {
+          "sector_rank_bucket": "bottom_40pct",
+          "trades": 67,
+          "total_pnl": -43859.53,
+          "avg_pnl_pct": 0.000949,
+          "win_rate": 0.492537
+        }
+      ],
+      "top_industries_by_pnl": [
+        {
+          "industry": "家电行业",
+          "trades": 4,
+          "total_pnl": 208240.19,
+          "avg_pnl_pct": 0.158004,
+          "win_rate": 0.5
+        },
+        {
+          "industry": "有色金属",
+          "trades": 7,
+          "total_pnl": 157226.39,
+          "avg_pnl_pct": 0.084472,
+          "win_rate": 0.571429
+        },
+        {
+          "industry": "通用设备",
+          "trades": 4,
+          "total_pnl": 146525.37,
+          "avg_pnl_pct": 0.083395,
+          "win_rate": 1.0
+        },
+        {
+          "industry": "银行",
+          "trades": 35,
+          "total_pnl": 104886.68,
+          "avg_pnl_pct": 0.00989,
+          "win_rate": 0.6
+        },
+        {
+          "industry": "电力行业",
+          "trades": 26,
+          "total_pnl": 99601.87,
+          "avg_pnl_pct": 0.019527,
+          "win_rate": 0.615385
+        },
+        {
+          "industry": "专业服务",
+          "trades": 1,
+          "total_pnl": 92770.52,
+          "avg_pnl_pct": 0.181854,
+          "win_rate": 1.0
+        },
+        {
+          "industry": "航空机场",
+          "trades": 1,
+          "total_pnl": 92363.04,
+          "avg_pnl_pct": 0.21449,
+          "win_rate": 1.0
+        },
+        {
+          "industry": "汽车整车",
+          "trades": 3,
+          "total_pnl": 68651.31,
+          "avg_pnl_pct": 0.075979,
+          "win_rate": 0.666667
+        },
+        {
+          "industry": "光学光电子",
+          "trades": 7,
+          "total_pnl": 63453.14,
+          "avg_pnl_pct": 0.03178,
+          "win_rate": 0.428571
+        },
+        {
+          "industry": "医药商业",
+          "trades": 4,
+          "total_pnl": 61594.55,
+          "avg_pnl_pct": 0.078748,
+          "win_rate": 1.0
+        },
+        {
+          "industry": "消费电子",
+          "trades": 2,
+          "total_pnl": 40951.12,
+          "avg_pnl_pct": 0.084522,
+          "win_rate": 0.5
+        },
+        {
+          "industry": "通信设备",
+          "trades": 5,
+          "total_pnl": 40293.09,
+          "avg_pnl_pct": 0.031714,
+          "win_rate": 0.8
+        }
+      ],
+      "bottom_industries_by_pnl": [
+        {
+          "industry": "石油行业",
+          "trades": 4,
+          "total_pnl": -22008.22,
+          "avg_pnl_pct": -0.0268,
+          "win_rate": 0.0
+        },
+        {
+          "industry": "综合行业",
+          "trades": 1,
+          "total_pnl": -22513.09,
+          "avg_pnl_pct": -0.04651,
+          "win_rate": 0.0
+        },
+        {
+          "industry": "水泥建材",
+          "trades": 1,
+          "total_pnl": -23246.5,
+          "avg_pnl_pct": -0.042665,
+          "win_rate": 0.0
+        },
+        {
+          "industry": "工程机械",
+          "trades": 1,
+          "total_pnl": -23964.52,
+          "avg_pnl_pct": -0.046426,
+          "win_rate": 0.0
+        },
+        {
+          "industry": "航天航空",
+          "trades": 2,
+          "total_pnl": -26307.96,
+          "avg_pnl_pct": -0.025063,
+          "win_rate": 0.0
+        },
+        {
+          "industry": "多元金融",
+          "trades": 6,
+          "total_pnl": -28337.75,
+          "avg_pnl_pct": -0.012805,
+          "win_rate": 0.333333
+        },
+        {
+          "industry": "造纸印刷",
+          "trades": 1,
+          "total_pnl": -28408.49,
+          "avg_pnl_pct": -0.060043,
+          "win_rate": 0.0
+        },
+        {
+          "industry": "电子元件",
+          "trades": 4,
+          "total_pnl": -28409.42,
+          "avg_pnl_pct": -0.006984,
+          "win_rate": 0.5
+        },
+        {
+          "industry": "中药",
+          "trades": 9,
+          "total_pnl": -31935.36,
+          "avg_pnl_pct": -0.006125,
+          "win_rate": 0.333333
+        },
+        {
+          "industry": "化纤行业",
+          "trades": 3,
+          "total_pnl": -44172.22,
+          "avg_pnl_pct": -0.035667,
+          "win_rate": 0.333333
+        },
+        {
+          "industry": "医疗服务",
+          "trades": 2,
+          "total_pnl": -47490.32,
+          "avg_pnl_pct": -0.0618,
+          "win_rate": 0.0
+        },
+        {
+          "industry": "贸易行业",
+          "trades": 4,
+          "total_pnl": -50078.4,
+          "avg_pnl_pct": -0.029446,
+          "win_rate": 0.25
+        }
+      ],
+      "rules": [
+        {
+          "rule": "skip_sector_tailwind_weak",
+          "skipped": {
+            "trades": 169,
+            "total_pnl": 369166.64,
+            "avg_pnl_pct": 0.008571,
+            "win_rate": 0.508876
+          },
+          "kept": {
+            "trades": 105,
+            "total_pnl": 639293.23,
+            "avg_pnl_pct": 0.020476,
+            "win_rate": 0.552381
+          },
+          "trade_level_delta": -369166.64,
+          "skipped_big_winner_gt_20k": 12,
+          "skipped_big_loser_lt_minus_20k": 10,
+          "yearly_trade_level_delta": {
+            "2021": 18549.53,
+            "2022": -133249.39,
+            "2023": -98895.9,
+            "2024": -153965.46,
+            "2025": -40443.11,
+            "2026": 38837.69
+          }
+        },
+        {
+          "rule": "skip_sector_bottom_40pct",
+          "skipped": {
+            "trades": 67,
+            "total_pnl": -43859.53,
+            "avg_pnl_pct": 0.000949,
+            "win_rate": 0.492537
+          },
+          "kept": {
+            "trades": 207,
+            "total_pnl": 1052319.4,
+            "avg_pnl_pct": 0.017077,
+            "win_rate": 0.536232
+          },
+          "trade_level_delta": 43859.53,
+          "skipped_big_winner_gt_20k": 2,
+          "skipped_big_loser_lt_minus_20k": 6,
+          "yearly_trade_level_delta": {
+            "2021": 31747.23,
+            "2022": -74080.72,
+            "2023": -45611.71,
+            "2024": 57663.91,
+            "2025": 63303.86,
+            "2026": 10836.97
+          }
+        },
+        {
+          "rule": "skip_sector_cold_breadth",
+          "skipped": {
+            "trades": 49,
+            "total_pnl": 96527.95,
+            "avg_pnl_pct": 0.007301,
+            "win_rate": 0.55102
+          },
+          "kept": {
+            "trades": 225,
+            "total_pnl": 911931.92,
+            "avg_pnl_pct": 0.014403,
+            "win_rate": 0.52
+          },
+          "trade_level_delta": -96527.95,
+          "skipped_big_winner_gt_20k": 3,
+          "skipped_big_loser_lt_minus_20k": 2,
+          "yearly_trade_level_delta": {
+            "2021": 35089.21,
+            "2022": -35284.6,
+            "2023": -81782.58,
+            "2024": -22304.34,
+            "2025": -21006.75,
+            "2026": 28761.1
+          }
+        },
+        {
+          "rule": "skip_aged_or_old_and_sector_weak",
+          "skipped": {
+            "trades": 63,
+            "total_pnl": 38945.97,
+            "avg_pnl_pct": 0.006946,
+            "win_rate": 0.460317
+          },
+          "kept": {
+            "trades": 211,
+            "total_pnl": 969513.9,
+            "avg_pnl_pct": 0.01498,
+            "win_rate": 0.545024
+          },
+          "trade_level_delta": -38945.97,
+          "skipped_big_winner_gt_20k": 7,
+          "skipped_big_loser_lt_minus_20k": 7,
+          "yearly_trade_level_delta": {
+            "2021": -13122.66,
+            "2022": -57215.04,
+            "2023": -114014.15,
+            "2024": 96886.23,
+            "2025": 48519.66
+          }
+        },
+        {
+          "rule": "skip_aged_or_old_and_sector_bottom",
+          "skipped": {
+            "trades": 24,
+            "total_pnl": -24054.31,
+            "avg_pnl_pct": 0.003982,
+            "win_rate": 0.458333
+          },
+          "kept": {
+            "trades": 250,
+            "total_pnl": 1032514.18,
+            "avg_pnl_pct": 0.014011,
+            "win_rate": 0.532
+          },
+          "trade_level_delta": 24054.31,
+          "skipped_big_winner_gt_20k": 2,
+          "skipped_big_loser_lt_minus_20k": 4,
+          "yearly_trade_level_delta": {
+            "2021": 2934.74,
+            "2022": -13666.7,
+            "2023": -64879.57,
+            "2024": 36811.6,
+            "2025": 62854.24
+          }
+        }
+      ]
+    },
+    "pb3_rolling": {
+      "sleeve": "pb3_rolling",
+      "label": "PB3 rolling raw",
+      "total": {
+        "trades": 1650,
+        "total_pnl": 498123.68,
+        "avg_pnl_pct": 0.01032,
+        "win_rate": 0.480606
+      },
+      "missing_feature_trades": 2,
+      "by_tailwind_bucket": [
+        {
+          "sector_tailwind_bucket": "tailwind_weak",
+          "trades": 1443,
+          "total_pnl": 385255.04,
+          "avg_pnl_pct": 0.009429,
+          "win_rate": 0.474012
+        },
+        {
+          "sector_tailwind_bucket": "tailwind_ok",
+          "trades": 207,
+          "total_pnl": 112868.64,
+          "avg_pnl_pct": 0.016527,
+          "win_rate": 0.52657
+        }
+      ],
+      "by_sector_rank_bucket": [
+        {
+          "sector_rank_bucket": "bottom_40pct",
+          "trades": 1043,
+          "total_pnl": 259559.68,
+          "avg_pnl_pct": 0.008614,
+          "win_rate": 0.467881
+        },
+        {
+          "sector_rank_bucket": "top_30pct",
+          "trades": 252,
+          "total_pnl": 137798.31,
+          "avg_pnl_pct": 0.017349,
+          "win_rate": 0.543651
+        },
+        {
+          "sector_rank_bucket": "mid_30pct",
+          "trades": 353,
+          "total_pnl": 103286.8,
+          "avg_pnl_pct": 0.010618,
+          "win_rate": 0.475921
+        },
+        {
+          "sector_rank_bucket": "no_data",
+          "trades": 2,
+          "total_pnl": -2521.12,
+          "avg_pnl_pct": -0.038306,
+          "win_rate": 0.0
+        }
+      ],
+      "top_industries_by_pnl": [
+        {
+          "industry": "电力行业",
+          "trades": 30,
+          "total_pnl": 37889.87,
+          "avg_pnl_pct": 0.02625,
+          "win_rate": 0.466667
+        },
+        {
+          "industry": "生物制品",
+          "trades": 54,
+          "total_pnl": 37677.07,
+          "avg_pnl_pct": 0.017467,
+          "win_rate": 0.444444
+        },
+        {
+          "industry": "通信设备",
+          "trades": 49,
+          "total_pnl": 37606.48,
+          "avg_pnl_pct": 0.02388,
+          "win_rate": 0.489796
+        },
+        {
+          "industry": "小金属",
+          "trades": 10,
+          "total_pnl": 27102.17,
+          "avg_pnl_pct": 0.090868,
+          "win_rate": 0.8
+        },
+        {
+          "industry": "化学制药",
+          "trades": 74,
+          "total_pnl": 25271.27,
+          "avg_pnl_pct": 0.012473,
+          "win_rate": 0.540541
+        },
+        {
+          "industry": "酿酒行业",
+          "trades": 25,
+          "total_pnl": 23354.52,
+          "avg_pnl_pct": 0.051621,
+          "win_rate": 0.56
+        },
+        {
+          "industry": "房地产开发",
+          "trades": 44,
+          "total_pnl": 22353.31,
+          "avg_pnl_pct": 0.022347,
+          "win_rate": 0.613636
+        },
+        {
+          "industry": "文化传媒",
+          "trades": 40,
+          "total_pnl": 21673.64,
+          "avg_pnl_pct": 0.022233,
+          "win_rate": 0.525
+        },
+        {
+          "industry": "医疗器械",
+          "trades": 54,
+          "total_pnl": 21352.47,
+          "avg_pnl_pct": 0.013653,
+          "win_rate": 0.462963
+        },
+        {
+          "industry": "半导体",
+          "trades": 97,
+          "total_pnl": 21315.74,
+          "avg_pnl_pct": 0.006713,
+          "win_rate": 0.443299
+        },
+        {
+          "industry": "电子元件",
+          "trades": 48,
+          "total_pnl": 20750.81,
+          "avg_pnl_pct": 0.012386,
+          "win_rate": 0.4375
+        },
+        {
+          "industry": "光伏设备",
+          "trades": 84,
+          "total_pnl": 20390.36,
+          "avg_pnl_pct": 0.01113,
+          "win_rate": 0.416667
+        }
+      ],
+      "bottom_industries_by_pnl": [
+        {
+          "industry": "食品饮料",
+          "trades": 30,
+          "total_pnl": -3891.81,
+          "avg_pnl_pct": -0.006208,
+          "win_rate": 0.466667
+        },
+        {
+          "industry": "教育",
+          "trades": 6,
+          "total_pnl": -5308.99,
+          "avg_pnl_pct": -0.034888,
+          "win_rate": 0.333333
+        },
+        {
+          "industry": "证券",
+          "trades": 17,
+          "total_pnl": -6128.98,
+          "avg_pnl_pct": -0.012925,
+          "win_rate": 0.411765
+        },
+        {
+          "industry": "航天航空",
+          "trades": 11,
+          "total_pnl": -7191.37,
+          "avg_pnl_pct": -0.01879,
+          "win_rate": 0.545455
+        },
+        {
+          "industry": "农药兽药",
+          "trades": 10,
+          "total_pnl": -7503.16,
+          "avg_pnl_pct": -0.01814,
+          "win_rate": 0.3
+        },
+        {
+          "industry": "银行",
+          "trades": 19,
+          "total_pnl": -7771.42,
+          "avg_pnl_pct": -0.012262,
+          "win_rate": 0.263158
+        },
+        {
+          "industry": "农牧饲渔",
+          "trades": 33,
+          "total_pnl": -7940.56,
+          "avg_pnl_pct": -0.009516,
+          "win_rate": 0.454545
+        },
+        {
+          "industry": "物流行业",
+          "trades": 19,
+          "total_pnl": -8554.74,
+          "avg_pnl_pct": -0.015185,
+          "win_rate": 0.315789
+        },
+        {
+          "industry": "装修建材",
+          "trades": 19,
+          "total_pnl": -8808.87,
+          "avg_pnl_pct": -0.018206,
+          "win_rate": 0.421053
+        },
+        {
+          "industry": "房地产服务",
+          "trades": 2,
+          "total_pnl": -9058.25,
+          "avg_pnl_pct": -0.184853,
+          "win_rate": 0.0
+        },
+        {
+          "industry": "化学制品",
+          "trades": 22,
+          "total_pnl": -11928.29,
+          "avg_pnl_pct": -0.017496,
+          "win_rate": 0.272727
+        },
+        {
+          "industry": "钢铁行业",
+          "trades": 22,
+          "total_pnl": -16207.37,
+          "avg_pnl_pct": -0.02653,
+          "win_rate": 0.272727
+        }
+      ],
+      "rules": [
+        {
+          "rule": "skip_sector_tailwind_weak",
+          "skipped": {
+            "trades": 1443,
+            "total_pnl": 385255.04,
+            "avg_pnl_pct": 0.009429,
+            "win_rate": 0.474012
+          },
+          "kept": {
+            "trades": 207,
+            "total_pnl": 112868.64,
+            "avg_pnl_pct": 0.016527,
+            "win_rate": 0.52657
+          },
+          "trade_level_delta": -385255.04,
+          "skipped_big_winner_gt_20k": 2,
+          "skipped_big_loser_lt_minus_20k": 0,
+          "yearly_trade_level_delta": {
+            "2021": 6607.84,
+            "2022": -47891.42,
+            "2023": 24044.68,
+            "2024": -152807.03,
+            "2025": -122909.87,
+            "2026": -92299.24
+          }
+        },
+        {
+          "rule": "skip_sector_bottom_40pct",
+          "skipped": {
+            "trades": 1045,
+            "total_pnl": 257038.57,
+            "avg_pnl_pct": 0.008524,
+            "win_rate": 0.466986
+          },
+          "kept": {
+            "trades": 605,
+            "total_pnl": 241085.12,
+            "avg_pnl_pct": 0.013421,
+            "win_rate": 0.504132
+          },
+          "trade_level_delta": -257038.57,
+          "skipped_big_winner_gt_20k": 2,
+          "skipped_big_loser_lt_minus_20k": 0,
+          "yearly_trade_level_delta": {
+            "2021": 6910.83,
+            "2022": -37557.24,
+            "2023": 34847.97,
+            "2024": -115923.0,
+            "2025": -102396.32,
+            "2026": -42920.8
+          }
+        },
+        {
+          "rule": "skip_sector_cold_breadth",
+          "skipped": {
+            "trades": 719,
+            "total_pnl": 161314.82,
+            "avg_pnl_pct": 0.007966,
+            "win_rate": 0.449235
+          },
+          "kept": {
+            "trades": 931,
+            "total_pnl": 336808.87,
+            "avg_pnl_pct": 0.012138,
+            "win_rate": 0.504834
+          },
+          "trade_level_delta": -161314.82,
+          "skipped_big_winner_gt_20k": 1,
+          "skipped_big_loser_lt_minus_20k": 0,
+          "yearly_trade_level_delta": {
+            "2021": 392.09,
+            "2022": -25357.37,
+            "2023": 58302.94,
+            "2024": -108047.01,
+            "2025": -22276.04,
+            "2026": -64329.43
+          }
+        },
+        {
+          "rule": "skip_aged_or_old_and_sector_weak",
+          "skipped": {
+            "trades": 647,
+            "total_pnl": 30188.3,
+            "avg_pnl_pct": 0.001529,
+            "win_rate": 0.44204
+          },
+          "kept": {
+            "trades": 1003,
+            "total_pnl": 467935.38,
+            "avg_pnl_pct": 0.015991,
+            "win_rate": 0.505484
+          },
+          "trade_level_delta": -30188.3,
+          "skipped_big_winner_gt_20k": 0,
+          "skipped_big_loser_lt_minus_20k": 0,
+          "yearly_trade_level_delta": {
+            "2021": -35030.05,
+            "2022": 8123.63,
+            "2023": 54171.44,
+            "2024": -5433.16,
+            "2025": -33558.57,
+            "2026": -18461.59
+          }
+        },
+        {
+          "rule": "skip_aged_or_old_and_sector_bottom",
+          "skipped": {
+            "trades": 465,
+            "total_pnl": 6523.25,
+            "avg_pnl_pct": 0.000154,
+            "win_rate": 0.423656
+          },
+          "kept": {
+            "trades": 1185,
+            "total_pnl": 491600.43,
+            "avg_pnl_pct": 0.014309,
+            "win_rate": 0.502954
+          },
+          "trade_level_delta": -6523.25,
+          "skipped_big_winner_gt_20k": 0,
+          "skipped_big_loser_lt_minus_20k": 0,
+          "yearly_trade_level_delta": {
+            "2021": -21827.34,
+            "2022": 540.77,
+            "2023": 58652.29,
+            "2024": -8005.34,
+            "2025": -27696.72,
+            "2026": -8186.9
+          }
+        }
+      ]
+    }
+  }
+}

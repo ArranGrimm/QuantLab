@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import math
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
@@ -36,14 +37,27 @@ def _read_csv(path: Path) -> list[dict[str, Any]]:
         return list(csv.DictReader(f))
 
 
+def _fs_path(path: Path) -> Path:
+    if os.name != "nt":
+        return path
+    resolved = path.resolve(strict=False)
+    text = str(resolved)
+    if text.startswith("\\\\?\\"):
+        return Path(text)
+    if text.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + text.lstrip("\\"))
+    return Path("\\\\?\\" + text)
+
+
 def _parse_date(value: str) -> date:
     return date.fromisoformat(value)
 
 
 def _load_artifact(path: Path, label: str) -> BacktestArtifact:
-    report_path = path / "report.json"
-    trades_path = path / "trades.csv"
-    equity_path = path / "daily_equity.csv"
+    load_path = _fs_path(path)
+    report_path = load_path / "report.json"
+    trades_path = load_path / "trades.csv"
+    equity_path = load_path / "daily_equity.csv"
     missing = [p.name for p in (report_path, trades_path, equity_path) if not p.exists()]
     if missing:
         raise FileNotFoundError(f"{path} is missing required files: {', '.join(missing)}")
@@ -305,9 +319,9 @@ def _pearson(left: list[float], right: list[float]) -> float | None:
         return None
     mean_l = sum(left) / n
     mean_r = sum(right) / n
-    cov = sum((l - mean_l) * (r - mean_r) for l, r in zip(left, right))
-    var_l = sum((l - mean_l) ** 2 for l in left)
-    var_r = sum((r - mean_r) ** 2 for r in right)
+    cov = sum((left_value - mean_l) * (right_value - mean_r) for left_value, right_value in zip(left, right))
+    var_l = sum((left_value - mean_l) ** 2 for left_value in left)
+    var_r = sum((right_value - mean_r) ** 2 for right_value in right)
     denom = math.sqrt(var_l * var_r)
     return None if denom == 0 else cov / denom
 

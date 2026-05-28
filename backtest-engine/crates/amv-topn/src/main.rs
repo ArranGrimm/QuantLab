@@ -269,6 +269,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "sell_on_bear_regime": config.sell_on_bear_regime,
                 "stop_loss_enabled": config.stop_loss_enabled,
                 "stop_loss_pct": config.stop_loss_pct,
+                "early_stop_enabled": config.early_stop_enabled,
+                "early_stop_trigger_hold_trading_days": config.early_stop_trigger_hold_trading_days,
+                "early_stop_loss_pct": config.early_stop_loss_pct,
+                "early_stop_require_previous_close_below_entry": config.early_stop_require_previous_close_below_entry,
+                "early_stop_reserve_slot_until_max_hold": config.early_stop_reserve_slot_until_max_hold,
                 "trailing_enabled": config.trailing_enabled,
                 "trailing_activation_pct": config.trailing_activation_pct,
                 "trailing_pct": config.trailing_pct,
@@ -374,6 +379,29 @@ fn print_config(config: &AmvTopnConfig) {
         }
     );
     println!(
+        "Early Stop: d{} < -{:.1}%{} ({})",
+        config.early_stop_trigger_hold_trading_days,
+        config.early_stop_loss_pct * 100.0,
+        if config.early_stop_require_previous_close_below_entry {
+            " and previous close < entry"
+        } else {
+            ""
+        },
+        if config.early_stop_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
+    );
+    println!(
+        "Early Stop Reserve Slot: {}",
+        if config.early_stop_reserve_slot_until_max_hold {
+            "ON"
+        } else {
+            "OFF"
+        }
+    );
+    println!(
         "Trailing Stop: Activate={:.0}%, Trail={:.0}% ({})",
         config.trailing_activation_pct * 100.0,
         config.trailing_pct * 100.0,
@@ -437,6 +465,7 @@ fn build_market_data(
         .enumerate()
         .map(|(idx, date)| (*date, idx as i32))
         .collect();
+    market_data.trading_dates = all_dates.clone();
     Ok((market_data, all_dates))
 }
 
@@ -507,6 +536,33 @@ fn format_config(config: &AmvTopnConfig, trading_days: usize) -> String {
         "Stop Loss:        {:.1}% ({})",
         config.stop_loss_pct * 100.0,
         if config.stop_loss_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Early Stop:       d{} < -{:.1}%{} ({})",
+        config.early_stop_trigger_hold_trading_days,
+        config.early_stop_loss_pct * 100.0,
+        if config.early_stop_require_previous_close_below_entry {
+            " and previous close < entry"
+        } else {
+            ""
+        },
+        if config.early_stop_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Early Stop Reserve Slot: {}",
+        if config.early_stop_reserve_slot_until_max_hold {
             "ON"
         } else {
             "OFF"
@@ -591,6 +647,11 @@ fn append_amv_topn_registry_entry(
         "sell_on_bear_regime": config.sell_on_bear_regime,
         "stop_loss_enabled": config.stop_loss_enabled,
         "stop_loss_pct": config.stop_loss_pct,
+        "early_stop_enabled": config.early_stop_enabled,
+        "early_stop_trigger_hold_trading_days": config.early_stop_trigger_hold_trading_days,
+        "early_stop_loss_pct": config.early_stop_loss_pct,
+        "early_stop_require_previous_close_below_entry": config.early_stop_require_previous_close_below_entry,
+        "early_stop_reserve_slot_until_max_hold": config.early_stop_reserve_slot_until_max_hold,
         "trailing_enabled": config.trailing_enabled,
         "trailing_activation_pct": config.trailing_activation_pct,
         "trailing_pct": config.trailing_pct,
@@ -623,6 +684,9 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
     {
         let mut query = world.query::<(Entity, &Position)>();
         for (entity, position) in query.iter(world) {
+            if position.shares == 0 {
+                continue;
+            }
             if let Some(prices) = market_data.prices.get(&position.code) {
                 let exit_price = prices
                     .iter()

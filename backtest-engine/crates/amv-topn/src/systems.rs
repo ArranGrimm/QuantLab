@@ -131,6 +131,12 @@ pub fn check_exit_conditions(
             None => continue,
         };
         let hold_trading_days = current_trade_index - position.entry_trade_index;
+        if position.shares == 0 {
+            if hold_trading_days >= config.max_hold_trading_days {
+                commands.entity(entity).remove::<Position>();
+            }
+            continue;
+        }
         // A-share T+1: a position opened this morning cannot be sold at today's close.
         if hold_trading_days <= 0 {
             continue;
@@ -146,7 +152,21 @@ pub fn check_exit_conditions(
 
         let mut should_sell = false;
         let mut exit_reason = ExitReason::MaxHoldDays;
-        if config.stop_loss_enabled
+        if config.early_stop_enabled
+            && hold_trading_days == config.early_stop_trigger_hold_trading_days
+            && bar.close < position.entry_price * (1.0 - config.early_stop_loss_pct)
+            && (!config.early_stop_require_previous_close_below_entry
+                || previous_close_below_entry(
+                    &market_data,
+                    &position.code,
+                    position.entry_trade_index,
+                    hold_trading_days,
+                    position.entry_price,
+                ))
+        {
+            should_sell = true;
+            exit_reason = ExitReason::EarlyStop;
+        } else if config.stop_loss_enabled
             && bar.close <= position.entry_price * (1.0 - config.stop_loss_pct)
         {
             should_sell = true;
@@ -209,9 +229,40 @@ pub fn check_exit_conditions(
                 hold_trading_days,
                 exit_reason,
             });
-            commands.entity(entity).remove::<Position>();
+            if exit_reason == ExitReason::EarlyStop && config.early_stop_reserve_slot_until_max_hold
+            {
+                // Preserve the static cadence slot after an early stop, so the freed
+                // cash does not create a different refill-style strategy.
+                position.shares = 0;
+                position.cost = 0.0;
+            } else {
+                commands.entity(entity).remove::<Position>();
+            }
         }
     }
+}
+
+fn previous_close_below_entry(
+    market_data: &MarketData,
+    code: &str,
+    entry_trade_index: i32,
+    hold_trading_days: i32,
+    entry_price: f64,
+) -> bool {
+    let previous_index = entry_trade_index + hold_trading_days - 1;
+    if previous_index < 0 {
+        return false;
+    }
+    let previous_date = match market_data.trading_dates.get(previous_index as usize) {
+        Some(date) => date,
+        None => return false,
+    };
+    market_data
+        .prices
+        .get(code)
+        .and_then(|prices| prices.get(previous_date))
+        .map(|bar| bar.close < entry_price)
+        .unwrap_or(false)
 }
 
 pub fn update_stats(

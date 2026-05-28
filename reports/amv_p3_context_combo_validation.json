@@ -1,0 +1,137 @@
+{
+  "generated_at": "2026-05-28 17:52:00",
+  "purpose": "Validate second-stage medium128 trend-quality neighborhood and interaction with first-stage sector-tailwind challenger.",
+  "base": {
+    "artifact": "20260520_092049_candidate_p3_k0p5_b0_c0_r0",
+    "label": "raw P3 candidate_p3_k0p5_b0_c0_r0",
+    "total_return_pct": 201.69197502379618,
+    "max_drawdown_pct": 13.522221809970919,
+    "win_rate_pct": 52.55474452554745,
+    "total_trades": 274
+  },
+  "medium_neighborhood": [
+    {
+      "artifact": "20260528_174416_p3_medium128_quality_linear_t0p5_p0p025",
+      "medium_penalty": 0.025,
+      "total_return_pct": 251.32386028606155,
+      "max_drawdown_pct": 15.329140168416938,
+      "win_rate_pct": 54.74452554744526,
+      "delta_total_return_pct_vs_raw": 49.63188526226537,
+      "delta_max_drawdown_pct_vs_raw": 1.8069183584460192
+    },
+    {
+      "artifact": "20260528_171853_p3_medium128_quality_linear_t0p5_p0p03",
+      "medium_penalty": 0.03,
+      "total_return_pct": 264.89797074875474,
+      "max_drawdown_pct": 14.048176962270537,
+      "win_rate_pct": 54.379562043795616,
+      "delta_total_return_pct_vs_raw": 63.20599572495857,
+      "delta_max_drawdown_pct_vs_raw": 0.525955152299618
+    },
+    {
+      "artifact": "20260528_174421_p3_medium128_quality_linear_t0p5_p0p035",
+      "medium_penalty": 0.035,
+      "total_return_pct": 240.96501518803368,
+      "max_drawdown_pct": 16.072280406714768,
+      "win_rate_pct": 53.64963503649635,
+      "delta_total_return_pct_vs_raw": 39.2730401642375,
+      "delta_max_drawdown_pct_vs_raw": 2.5500585967438495
+    },
+    {
+      "artifact": "20260528_174425_p3_medium128_quality_linear_t0p5_p0p04",
+      "medium_penalty": 0.04,
+      "total_return_pct": 225.43068719636113,
+      "max_drawdown_pct": 16.13001037405758,
+      "win_rate_pct": 53.64963503649635,
+      "delta_total_return_pct_vs_raw": 23.73871217256495,
+      "delta_max_drawdown_pct_vs_raw": 2.6077885640866606
+    }
+  ],
+  "medium_neighborhood_verdict": "p0.03 is the local peak. p0.025 remains strong, but p0.035 and p0.04 degrade return and expand MaxDD, so the effect is not simply 'stronger penalty is better'.",
+  "context_combo_grid": [
+    {
+      "artifact": "20260528_174808_p3_ctx_sectormix1020_linear_b0p4_sp0p02_medium128_linear_t0p5_mp0p03_rel20_under0",
+      "sector_penalty": 0.02,
+      "medium_penalty": 0.03,
+      "total_return_pct": 272.0628127835288,
+      "max_drawdown_pct": 14.047346566220826,
+      "win_rate_pct": 54.74452554744526,
+      "total_trades": 274,
+      "delta_total_return_pct_vs_raw": 70.37083775973262,
+      "delta_max_drawdown_pct_vs_raw": 0.5251247562499067,
+      "delta_total_return_pct_vs_medium_p0p03": 7.164842034774047,
+      "delta_max_drawdown_pct_vs_medium_p0p03": -0.0008303960497109497
+    },
+    {
+      "artifact": "20260528_174814_p3_ctx_sectormix1020_linear_b0p4_sp0p03_medium128_linear_t0p5_mp0p03_rel20_under0",
+      "sector_penalty": 0.03,
+      "medium_penalty": 0.03,
+      "total_return_pct": 247.50816916266126,
+      "max_drawdown_pct": 14.047872858517598,
+      "win_rate_pct": 54.01459854014598,
+      "total_trades": 274,
+      "delta_total_return_pct_vs_raw": 45.81619413886508,
+      "delta_max_drawdown_pct_vs_raw": 0.5256510485466792,
+      "delta_total_return_pct_vs_medium_p0p03": -17.38980158609348,
+      "delta_max_drawdown_pct_vs_medium_p0p03": -0.0003041037529384488
+    }
+  ],
+  "best_combo": {
+    "artifact": "20260528_174808_p3_ctx_sectormix1020_linear_b0p4_sp0p02_medium128_linear_t0p5_mp0p03_rel20_under0",
+    "label": "sector mix10/20 linear rel20_under0 p0.02 + medium128 quality linear p0.03",
+    "reason": "Improves both raw P3 and medium-only p0.03 while keeping MaxDD essentially unchanged versus medium-only."
+  },
+  "attribution_vs_raw": {
+    "report": "reports/amv_p3_context_combo_attribution.json",
+    "return_delta_pct": 70.37083775973262,
+    "maxdd_delta_pct": 0.5251247562499067,
+    "exact_overlap_count": 226,
+    "left_unique_count": 48,
+    "right_unique_count": 48,
+    "left_unique_pnl": -83838.171772,
+    "right_unique_pnl": 163075.887857,
+    "unique_delta_pnl": 246914.059629,
+    "common_delta_pnl": 104940.12916800007,
+    "yearly_delta_pct": {
+      "2021": 4.635670421200032,
+      "2022": -0.7878456692648825,
+      "2023": 3.4390006184211543,
+      "2024": 11.06903054818509,
+      "2025": 9.23507115245945,
+      "2026": -0.566215146566218
+    },
+    "top_positive_trade_month_delta": {
+      "month": "2025-08",
+      "delta_pnl": 144210.207108
+    },
+    "top_negative_trade_month_delta": {
+      "month": "2026-01",
+      "delta_pnl": -110431.45328
+    }
+  },
+  "attribution_vs_medium": {
+    "report": "reports/amv_p3_context_combo_vs_medium_attribution.json",
+    "return_delta_pct": 7.164842034774047,
+    "maxdd_delta_pct": -0.0008303960497109497,
+    "exact_overlap_count": 272,
+    "left_unique_pnl": -13210.898797,
+    "right_unique_pnl": 2099.366348,
+    "unique_delta_pnl": 15310.265145
+  },
+  "cadence": {
+    "report": "reports/amv_p3_context_combo_cadence.json",
+    "type": "Python-side no-cost static offset sensitivity",
+    "positive_delta_offsets": 7,
+    "offset_count": 7,
+    "raw_worst_total_return_pct": 260.7351052129617,
+    "raw_median_total_return_pct": 285.5951491343531,
+    "raw_best_total_return_pct": 297.7861991491931,
+    "combo_worst_total_return_pct": 292.9511500526252,
+    "combo_median_total_return_pct": 316.54987692802594,
+    "combo_best_total_return_pct": 340.99384033914024,
+    "worst_delta_total_return_pct": 29.736752003268395,
+    "median_delta_total_return_pct": 31.691154066455596,
+    "best_delta_total_return_pct": 43.20764118994713
+  },
+  "current_verdict": "Second-stage validation passed. Medium128 p0.03 is locally stable, and sector p0.02 adds a small complementary improvement on top. The remaining unresolved issue is still 2026-01 sacrifice; do not replace default P3 without forward monitoring and final route comparison."
+}

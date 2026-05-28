@@ -1,0 +1,283 @@
+{
+  "generated_at": "2026-05-27",
+  "strategy": "P3/K0.5/R0 static strict Top3",
+  "rule": {
+    "name": "d2_loss_gt_3pct_and_d1_negative",
+    "trigger_hold_trading_days": 2,
+    "loss_pct": 0.03,
+    "require_previous_close_below_entry": true,
+    "reserve_slot_until_max_hold": true
+  },
+  "artifacts": {
+    "raw_report": "D:/WorkSpace/Tinkering/QuantLab/artifacts/amv_static_sleeve_signals/20260520_092049_candidate_p3_k0p5_b0_c0_r0/backtests/6td_static_strict_top3_no_stop_20260520_092208_801",
+    "early_stop_report": "D:/WorkSpace/Tinkering/QuantLab/artifacts/amv_static_sleeve_signals/20260520_092049_candidate_p3_k0p5_b0_c0_r0/backtests/6td_static_strict_top3_early_stop_d2_prevneg_20260527_122458_919"
+  },
+  "raw": {
+    "total_return_pct": 201.69197502379618,
+    "gross_return_pct": 260.8612306679436,
+    "max_drawdown_pct": 13.522221809970919,
+    "total_trades": 274,
+    "win_rate_pct": 52.55474452554745,
+    "total_costs": 295846.2782207369,
+    "yearly_equity_return_pct": {
+      "2021": 8.81,
+      "2022": 40.45,
+      "2023": 19.51,
+      "2024": 45.66,
+      "2025": 13.89,
+      "2026": -0.77
+    }
+  },
+  "early_stop": {
+    "total_return_pct": 134.75189153120382,
+    "gross_return_pct": 185.76788750680774,
+    "max_drawdown_pct": 12.776671433101965,
+    "total_trades": 274,
+    "win_rate_pct": 51.09489051094891,
+    "total_costs": 255079.97987801975,
+    "yearly_equity_return_pct": {
+      "2021": 10.08,
+      "2022": 21.49,
+      "2023": 20.84,
+      "2024": 31.12,
+      "2025": 15.18,
+      "2026": -4.15
+    },
+    "early_stop_trades": 27,
+    "early_stop_delta_vs_raw_trade_pnl": -149150.96,
+    "early_stop_miskilled_winners": 12,
+    "early_stop_saved_losers": 15,
+    "early_stop_top_negative_deltas": [
+      {
+        "code": "sz.002456",
+        "entry_date": "2024-10-22",
+        "early_exit_date": "2024-10-24",
+        "early_pnl": -27313.746,
+        "early_pnl_pct": -0.09499675,
+        "raw_exit_date": "2024-10-30",
+        "raw_pnl": 50138.8825,
+        "raw_pnl_pct": 0.14662339,
+        "pnl_delta_vs_raw": -77452.62849999999
+      },
+      {
+        "code": "sh.601607",
+        "entry_date": "2022-03-14",
+        "early_exit_date": "2022-03-16",
+        "early_pnl": -8335.592021,
+        "early_pnl_pct": -0.04561592,
+        "raw_exit_date": "2022-03-22",
+        "raw_pnl": 50867.836216,
+        "raw_pnl_pct": 0.28107314,
+        "pnl_delta_vs_raw": -59203.428237
+      },
+      {
+        "code": "sz.002217",
+        "entry_date": "2026-04-21",
+        "early_exit_date": "2026-04-23",
+        "early_pnl": -43626.849,
+        "early_pnl_pct": -0.10087391,
+        "raw_exit_date": "2026-04-29",
+        "raw_pnl": -1881.4495,
+        "raw_pnl_pct": -0.00349563,
+        "pnl_delta_vs_raw": -41745.3995
+      },
+      {
+        "code": "sh.600563",
+        "entry_date": "2024-10-11",
+        "early_exit_date": "2024-10-15",
+        "early_pnl": -11091.880508,
+        "early_pnl_pct": -0.03897891,
+        "raw_exit_date": "2024-10-21",
+        "raw_pnl": 20617.617205,
+        "raw_pnl_pct": 0.06310519,
+        "pnl_delta_vs_raw": -31709.497712999997
+      },
+      {
+        "code": "sz.000876",
+        "entry_date": "2022-06-28",
+        "early_exit_date": "2022-06-30",
+        "early_pnl": -13452.766738,
+        "early_pnl_pct": -0.06749132,
+        "raw_exit_date": "2022-07-06",
+        "raw_pnl": 6891.54484,
+        "raw_pnl_pct": 0.03124489,
+        "pnl_delta_vs_raw": -20344.311578
+      },
+      {
+        "code": "sz.000791",
+        "entry_date": "2024-05-14",
+        "early_exit_date": "2024-05-16",
+        "early_pnl": -25883.867718,
+        "early_pnl_pct": -0.09929099,
+        "raw_exit_date": "2024-05-22",
+        "raw_pnl": -8891.668995,
+        "raw_pnl_pct": -0.03042119,
+        "pnl_delta_vs_raw": -16992.198723
+      },
+      {
+        "code": "sh.600888",
+        "entry_date": "2021-08-03",
+        "early_exit_date": "2021-08-05",
+        "early_pnl": -27221.253118,
+        "early_pnl_pct": -0.14113436,
+        "raw_exit_date": "2021-08-11",
+        "raw_pnl": -16179.077291,
+        "raw_pnl_pct": -0.08516127,
+        "pnl_delta_vs_raw": -11042.175827000001
+      },
+      {
+        "code": "sz.000709",
+        "entry_date": "2024-04-19",
+        "early_exit_date": "2024-04-23",
+        "early_pnl": -9553.883638,
+        "early_pnl_pct": -0.03491694,
+        "raw_exit_date": "2024-04-29",
+        "raw_pnl": -2426.64622,
+        "raw_pnl_pct": -0.00798439,
+        "pnl_delta_vs_raw": -7127.237417999999
+      },
+      {
+        "code": "sz.000516",
+        "entry_date": "2024-11-13",
+        "early_exit_date": "2024-11-15",
+        "early_pnl": -46629.96,
+        "early_pnl_pct": -0.12614232,
+        "raw_exit_date": "2024-11-21",
+        "raw_pnl": -41925.429,
+        "raw_pnl_pct": -0.08934831,
+        "pnl_delta_vs_raw": -4704.531000000003
+      },
+      {
+        "code": "sh.600219",
+        "entry_date": "2021-07-23",
+        "early_exit_date": "2021-07-27",
+        "early_pnl": -7868.576093,
+        "early_pnl_pct": -0.04153015,
+        "raw_exit_date": "2021-08-02",
+        "raw_pnl": -3462.183885,
+        "raw_pnl_pct": -0.01870944,
+        "pnl_delta_vs_raw": -4406.392207999999
+      }
+    ],
+    "early_stop_top_positive_deltas": [
+      {
+        "code": "sz.002493",
+        "entry_date": "2024-11-14",
+        "early_exit_date": "2024-11-18",
+        "early_pnl": -12584.772491,
+        "early_pnl_pct": -0.03378155,
+        "raw_exit_date": "2024-11-22",
+        "raw_pnl": -36811.595048,
+        "raw_pnl_pct": -0.07774498,
+        "pnl_delta_vs_raw": 24226.822557000003
+      },
+      {
+        "code": "sh.603919",
+        "entry_date": "2024-03-18",
+        "early_exit_date": "2024-03-20",
+        "early_pnl": -9918.997751,
+        "early_pnl_pct": -0.03544056,
+        "raw_exit_date": "2024-03-26",
+        "raw_pnl": -27038.109298,
+        "raw_pnl_pct": -0.08602004,
+        "pnl_delta_vs_raw": 17119.111547
+      },
+      {
+        "code": "sz.002831",
+        "entry_date": "2024-11-14",
+        "early_exit_date": "2024-11-18",
+        "early_pnl": -14072.614611,
+        "early_pnl_pct": -0.03794824,
+        "raw_exit_date": "2024-11-22",
+        "raw_pnl": -28408.491242,
+        "raw_pnl_pct": -0.06004285,
+        "pnl_delta_vs_raw": 14335.876631
+      },
+      {
+        "code": "sh.600755",
+        "entry_date": "2025-08-27",
+        "early_exit_date": "2025-08-29",
+        "early_pnl": -19089.56,
+        "early_pnl_pct": -0.04655446,
+        "raw_exit_date": "2025-09-04",
+        "raw_pnl": -33404.976,
+        "raw_pnl_pct": -0.06500825,
+        "pnl_delta_vs_raw": 14315.416000000001
+      },
+      {
+        "code": "sz.000564",
+        "entry_date": "2023-03-22",
+        "early_exit_date": "2023-03-24",
+        "early_pnl": -8444.0645,
+        "early_pnl_pct": -0.03866637,
+        "raw_exit_date": "2023-03-30",
+        "raw_pnl": -18437.256,
+        "raw_pnl_pct": -0.07383712,
+        "pnl_delta_vs_raw": 9993.1915
+      },
+      {
+        "code": "sz.002608",
+        "entry_date": "2025-08-26",
+        "early_exit_date": "2025-08-28",
+        "early_pnl": -17397.585,
+        "early_pnl_pct": -0.04230422,
+        "raw_exit_date": "2025-09-03",
+        "raw_pnl": -26333.2235,
+        "raw_pnl_pct": -0.05106745,
+        "pnl_delta_vs_raw": 8935.638500000001
+      },
+      {
+        "code": "sh.600406",
+        "entry_date": "2025-04-10",
+        "early_exit_date": "2025-04-14",
+        "early_pnl": -20230.402717,
+        "early_pnl_pct": -0.05170052,
+        "raw_exit_date": "2025-04-18",
+        "raw_pnl": -27636.013517,
+        "raw_pnl_pct": -0.05615643,
+        "pnl_delta_vs_raw": 7405.610799999999
+      },
+      {
+        "code": "sz.000987",
+        "entry_date": "2026-04-30",
+        "early_exit_date": "2026-05-07",
+        "early_pnl": -13831.0575,
+        "early_pnl_pct": -0.03480509,
+        "raw_exit_date": "2026-05-08",
+        "raw_pnl": -21136.0695,
+        "raw_pnl_pct": -0.0412829,
+        "pnl_delta_vs_raw": 7305.012000000001
+      },
+      {
+        "code": "sh.600733",
+        "entry_date": "2021-04-21",
+        "early_exit_date": "2021-04-23",
+        "early_pnl": -10829.8345,
+        "early_pnl_pct": -0.06630325,
+        "raw_exit_date": "2021-04-29",
+        "raw_pnl": -17492.809,
+        "raw_pnl_pct": -0.10709582,
+        "pnl_delta_vs_raw": 6662.9745
+      },
+      {
+        "code": "sz.000725",
+        "entry_date": "2021-07-14",
+        "early_exit_date": "2021-07-16",
+        "early_pnl": -7255.772094,
+        "early_pnl_pct": -0.04335581,
+        "raw_exit_date": "2021-07-22",
+        "raw_pnl": -13283.707191,
+        "raw_pnl_pct": -0.08026337,
+        "pnl_delta_vs_raw": 6027.935097
+      }
+    ]
+  },
+  "delta": {
+    "total_return_pct_pp": -66.94008349259235,
+    "gross_return_pct_pp": -75.09334316113583,
+    "max_drawdown_pct_pp": -0.7455503768689535,
+    "total_trades": 0,
+    "win_rate_pct_pp": -1.459854014598541,
+    "total_costs": -40766.29834271714
+  }
+}
