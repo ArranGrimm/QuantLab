@@ -34,6 +34,12 @@
   - 当前判断: 第二阶段验收复核通过，可阶段性收口；最佳组合上下文 rerank 是当前最强 P3 challenger，但仍不直接替换默认 P3
   - 报告: `reports/amv_p3_context_combo_validation.json`, `reports/amv_p3_context_combo_attribution.json`, `reports/amv_p3_context_combo_cadence.json`
   - Canvas: `reports/canvases/amv-medium-trend-quality-diagnostic.canvas.tsx`
+- P3 annual restart cadence 风险复核:
+  - 快速报告: `reports/amv_p3_annual_restart_cadence_quick.json`
+  - raw P3 在 2021-2025 每年独立重启 offset 均为 `7/7` 正收益；2026 只有 `2/7`，median `-2.16%`
+  - `medium128 p0.03` 将 2026 改善到 `5/7`，median `+1.85%`，但 2026 worst offset 仍为 `-9.72%`
+  - 当前判断: raw P3 未被 annual restart 直接推翻，但 2026 路径脆弱性是真风险；上下文增强不能只看全样本 total
+  - 明确待办: 在有完整行业映射/信号 artifact 的设备上补跑 `sector complete` 与 `context combo` annual restart，重点看 2026 worst offset 和 positive offsets
 - 下一轮上下文因子路线:
   - 当前约定: 不马上补组合层 allocation，先继续完成 A 股上下文因子路线
   - 第一阶段: 板块顺风 + 市场赚钱效应，直接对应 P3 的假突破与 2026 弱段

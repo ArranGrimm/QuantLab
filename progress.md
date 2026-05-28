@@ -17,6 +17,7 @@
 - AMV P3 sector tailwind robustness: focused grid 显示方向不是单点好运气。`10d/bottom40` 下 `penalty=0.018~0.025` 均明显优于 raw P3；`bottom50` 过度惩罚导致 total `+138.70%`、MaxDD `20.65%`；`20d` 窗口 total 更高 `+264.26%` 但 MaxDD 扩到 `16.09%`。当前最均衡仍是 `10d / bottom40 / penalty=0.02`。
 - AMV P3 sector tailwind cadence: no-cost 7 offset 检查推翻了直接升级 `10d/bottom40/0.02` 的想法，只有 `2/7` 个 offset 优于 raw，median delta `-10.56pp`。`20d/bottom40/0.02` 相对更稳，`5/7` 个 offset 优于 raw，median delta `+9.10pp`，但最差 offset `-22.25pp` 且 drawdown 可到 `15.42%`，暂只能作为 challenger。
 - AMV P3 sector tailwind complete expression: 将离散 bucket 扣分改为连续型行业 rank penalty，并加入 `10d/20d` 混合与个股相对行业弱势确认。推荐候选 `mix10/20 + linear + rel20_under0 + p0.03`: Rust total `+219.55%`, Sharpe `1.279`, MaxDD `14.07%`，相对 raw P3 `+17.86pp`；Python no-cost cadence `7/7` 个 offset 优于 raw，median delta `+20.94pp`。行业因子可升为 P3 主线 challenger；当前阶段暂不启动历史行业分类数据工程，完整走完下一轮策略路线后再作为最终验收复核。
+- AMV P3 annual restart cadence 快速诊断: 新增 `scripts/amv_annual_restart_cadence.py` 与 `reports/amv_p3_annual_restart_cadence_quick.json`。raw P3 在 2021-2025 每年独立重启 offset 均为 `7/7` 正收益，但 2026 只有 `2/7`、median `-2.16%`；`medium128 p0.03` 将 2026 改善到 `5/7`、median `+1.85%`，但最差 offset 仍为 `-9.72%`。明确待办: 在有完整行业映射/信号 artifact 的设备上补跑 `sector complete` 与 `context combo` annual restart，尤其检查 2026 最差 offset。
 - AMV P/K/M Rust 验证: 标签侧动量增强未兑现为更好主基线；可解释为 2025 补充袖子，但未解决 2026。
 - AMV 年度权重网格: 2025/2026 弱势更像旧 `P2/K0.5/R0` 缺少动量项，但该结论已被 Rust 验证降级为标签侧线索。
 - AMV 手数修正后主基线: `manual_p2_k0p5_r0_6td` 更新为净收益 `+170.80%`, MaxDD `15.30%`。
@@ -42,6 +43,44 @@
 - bt-amv-topn duplicate lot 诊断: 新增 `allow_duplicate_positions` 配置，默认 `false` 保持旧口径；duplicate rolling 诊断显示 `trend P1/K1/PB1/CP0/RV1` 从 `+60.17%` 升至 `+106.50%`，PB3 仅从 `+99.62%` 小升至 `+102.93%`，坐实 trend-only 的主要损耗来自 no-repeat 持仓语义。
 
 ## 2026-05-28
+
+### [AMV] P3 annual restart cadence 快速诊断
+
+- 背景:
+  - 用户指出此前 static cadence sensitivity 只改变 2021 起始 offset，本质上仍是一条连续 6td 节奏的相位平移
+  - 真正担心是: 2022/2023/2024/2025/2026 如果每年独立重启，P3 是否仍稳；这比全样本起点敏感性更贴近实盘中断/重启风险
+- 新增脚本:
+  - `scripts/amv_annual_restart_cadence.py`
+  - 口径: Python-side no-cost；每年单独重启；每年 offset `0..6`；`T+1 open -> D+7 close`；跳过执行日开盘涨停；不含成本
+- 当前 Mac 限制:
+  - 本机缺少另一台设备上的 sector/context signal artifacts，且 `sector_map_em.csv` 不存在
+  - 东方财富行业映射网络刷新失败，因此今晚只快速跑 `raw P3` 与 `medium128 p0.03`
+  - sector complete 与 context combo annual restart 留待有完整行业映射/信号 artifact 的设备补跑
+- 信号:
+  - raw P3: `artifacts/amv_static_sleeve_signals/20260528_213312_candidate_p3_k0p5_b0_c0_r0/`
+  - medium128: `artifacts/amv_static_sleeve_signals/20260528_213422_p3_medium128_quality_linear_t0p5_p0p03/`
+- 报告:
+  - `reports/amv_p3_annual_restart_cadence_quick.json`
+- raw P3 annual restart:
+  - 2021: worst `+5.06%`, median `+12.30%`, best `+15.85%`, positive `7/7`
+  - 2022: worst `+26.04%`, median `+39.97%`, best `+51.44%`, positive `7/7`
+  - 2023: worst `+13.83%`, median `+21.86%`, best `+41.43%`, positive `7/7`
+  - 2024: worst `+40.67%`, median `+44.89%`, best `+53.18%`, positive `7/7`
+  - 2025: worst `+2.45%`, median `+4.62%`, best `+19.55%`, positive `7/7`
+  - 2026: worst `-8.55%`, median `-2.16%`, best `+14.57%`, positive `2/7`
+- medium128 p0.03 annual restart:
+  - 2021: worst `+11.85%`, median `+18.57%`, best `+25.53%`, positive `7/7`
+  - 2022: worst `+24.42%`, median `+38.17%`, best `+49.49%`, positive `7/7`
+  - 2023: worst `+6.87%`, median `+19.54%`, best `+31.58%`, positive `7/7`
+  - 2024: worst `+46.95%`, median `+50.84%`, best `+59.47%`, positive `7/7`
+  - 2025: worst `+1.58%`, median `+4.91%`, best `+36.17%`, positive `7/7`
+  - 2026: worst `-9.72%`, median `+1.85%`, best `+16.20%`, positive `5/7`
+- 初步判断:
+  - raw P3 并没有被 annual restart 直接推翻: 2021-2025 每年 `7/7` offset 为正，说明它不是单纯依赖 2021 初始 cadence
+  - 但 2026 暴露出明显路径脆弱性: raw P3 只有 `2/7` offset 为正，median 为负
+  - medium128 改善了 2026 的正 offset 数量和 median，但没有改善 2026 最差 offset；同时略弱于 raw 的年份包括 2022/2023
+  - 结论不是“P3 可放心升级”，而是“P3 的年度重启风险主要集中在 2026；上下文增强需要重点看是否修复 2026，而不能只看全样本总收益”
+  - 下一步必须补跑 sector complete 与 context combo 的 annual restart；若 context combo 仍在 2026 最差 offset 上受伤，则不能作为默认主策略，只能作为 challenger/forward 监控
 
 ### [AMV] 下一轮上下文因子路线
 
