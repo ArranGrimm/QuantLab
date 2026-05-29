@@ -23,14 +23,14 @@ from scripts.amv_bull_pool_export_signals import (
     _rel_path,
     build_feature_frame,
 )
-from scripts.amv_limit_ecology_diagnostic import (
+from strategies.amv.factors.limit_ecology import (
     LIMIT_TOLERANCE,
     add_limit_ecology_features,
     load_raw_daily,
 )
-from scripts.amv_medium_trend_quality_diagnostic import add_medium_trend_features
 from scripts.amv_regime_phase_diagnostic import build_amv_phase_frame
 from scripts.amv_static_sleeve_signal_export import timestamp_token
+from strategies.amv.factors.medium_trend_quality import add_medium_trend_features
 
 
 DEFAULT_OUTPUT_ROOT = ROOT / "artifacts" / "amv_static_sleeve_signals"

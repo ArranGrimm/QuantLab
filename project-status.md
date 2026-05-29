@@ -6,6 +6,14 @@
 
 ## 当前决策摘要
 
+- 项目产品化整理:
+  - 第一阅读入口改为 `CURRENT_STATE.md`；统一 agent 指令入口为 `AGENTS.md`，`CLAUDE.md` 仅保留指向 `AGENTS.md` 的壳
+  - 面向使用者的整理文档默认中文；`project-status.md` 保留详细看板，`progress.md` 保留倒序流水
+  - 日常入口新增 `scripts/qlab.py`: `status`, `export`, `backtest`, `compare`, `attribution`
+  - `qlab export ref/p3/context/pb3-gated/limit-weakgate` 已接入 `strategies/amv` native workflow，并复现 raw execution ground truth
+  - Python 边界已合并进 `AGENTS.md`: `strategies/` 放策略定义与 registry，`utils/` 放通用底层工具，`scripts/` 收敛为命令入口
+  - 脚本状态清单: `docs/script-inventory.md`; 第二阶段删除/迁移门禁: `docs/cleanup-plan.md`
+  - 当前优先级: 暂停新增策略探索，先验证新入口稳定，再进入第二阶段迁移/删除
 - 当前主策略底座: `manual_p2_k0p5_r0_6td`
   - raw execution 复跑后，reference `+145.10%` / MaxDD `18.97%`
   - `candidate_p3_k0p5_b0_c0_r0` raw execution 为 `+172.37%` / MaxDD `13.53%`，相对 reference 仍有 `+27.27pp` 收益优势且回撤更低

@@ -11,8 +11,8 @@ from typing import Any
 import polars as pl
 
 from scripts.amv_bull_pool_export_signals import DEFAULT_QMT_DB, ROOT
-from scripts.amv_limit_ecology_diagnostic import LIMIT_TOLERANCE
 from scripts.amv_limit_ecology_signal_export import build_limit_ecology_market
+from strategies.amv.factors.limit_ecology import LIMIT_TOLERANCE
 
 
 BASE_SIGNAL = ROOT / "artifacts" / "amv_static_sleeve_signals" / "20260529_111655_limit_first_board_pullback"

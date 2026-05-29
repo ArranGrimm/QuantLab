@@ -19,7 +19,7 @@ from scripts.amv_bull_pool_ranker_lab import (
     add_combo_scores,
     build_dataset,
 )
-from scripts.amv_yearly_weight_grid import build_rankers
+from strategies.amv.rankers import build_rankers
 
 
 DEFAULT_OUTPUT_ROOT = RANKER_OUTPUT_ROOT.parent / "amv_executable_weight_grid"

@@ -21,8 +21,8 @@ from scripts.amv_limit_ecology_drawdown_attribution import (
     top_records,
 )
 from scripts.amv_limit_ecology_signal_export import build_limit_ecology_market, sleeve_candidate_and_score
-from scripts.amv_market_sentiment_diagnostic import build_market_sentiment_features
 from scripts.amv_regime_phase_diagnostic import build_amv_phase_frame
+from strategies.amv.factors.market_sentiment import build_market_sentiment_features
 
 
 DEFAULT_OUTPUT = ROOT / "reports" / "amv_limit_first_board_weak_window_diagnostic.json"

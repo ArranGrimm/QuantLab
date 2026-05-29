@@ -21,7 +21,7 @@ from scripts.amv_limit_ecology_drawdown_attribution import (
     top_records,
 )
 from scripts.amv_limit_ecology_signal_export import build_limit_ecology_market
-from scripts.amv_medium_trend_quality_diagnostic import add_medium_trend_features
+from strategies.amv.factors.medium_trend_quality import add_medium_trend_features
 
 
 DEFAULT_OUTPUT = ROOT / "reports" / "amv_limit_first_board_medium128_diagnostic.json"

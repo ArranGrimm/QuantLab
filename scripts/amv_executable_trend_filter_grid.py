@@ -26,7 +26,7 @@ from scripts.amv_executable_weight_grid import (
     _top_rows,
     evaluate_ranker,
 )
-from scripts.amv_yearly_weight_grid import build_rankers as build_yearly_rankers
+from strategies.amv.rankers import build_rankers as build_yearly_rankers
 from scripts.b1_executable_base_lab import _base_b1_expr, _base_definition, _build_b1_indicators
 
 

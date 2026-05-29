@@ -26,9 +26,9 @@ from scripts.amv_market_sentiment_diagnostic import (
     summarize_by,
     summarize_trades,
 )
-from scripts.amv_medium_trend_quality_diagnostic import _safe_div
 from scripts.amv_regime_phase_diagnostic import build_amv_phase_frame
-from scripts.amv_sector_tailwind_signal_export import build_market_frame
+from strategies.amv.factors.medium_trend_quality import safe_div
+from strategies.amv.market import build_market_frame
 
 
 DEFAULT_OUTPUT = ROOT / "reports" / "amv_liquidity_trend_refinement_diagnostic.json"
@@ -66,9 +66,9 @@ def add_refinement_features(market: pl.DataFrame) -> pl.DataFrame:
         )
         .with_columns(
             [
-                _safe_div(pl.col("amount"), pl.col("amount_ma20_raw")).alias("amount_ratio_1_20"),
-                _safe_div(pl.col("amount_ma5"), pl.col("amount_ma20_raw")).alias("amount_ratio_5_20"),
-                _safe_div(pl.col("amount_ma20_raw"), pl.col("amount_ma60")).alias("amount_ratio_20_60"),
+                safe_div(pl.col("amount"), pl.col("amount_ma20_raw")).alias("amount_ratio_1_20"),
+                safe_div(pl.col("amount_ma5"), pl.col("amount_ma20_raw")).alias("amount_ratio_5_20"),
+                safe_div(pl.col("amount_ma20_raw"), pl.col("amount_ma60")).alias("amount_ratio_20_60"),
                 ((pl.col("ma20") > pl.col("ma60")) & (pl.col("ma60") > pl.col("ma120"))).alias(
                     "ma_stack_bullish"
                 ),
@@ -86,7 +86,7 @@ def add_refinement_features(market: pl.DataFrame) -> pl.DataFrame:
         high = pl.col("close_adj").rolling_max(window).over("code")
         low = pl.col("close_adj").rolling_min(window).over("code")
         dd = pl.col("close_adj") / high - 1.0
-        pos = _safe_div(pl.col("close_adj") - low, high - low)
+        pos = safe_div(pl.col("close_adj") - low, high - low)
         corr = pl.rolling_corr(
             pl.col("time_idx"),
             pl.col("close_adj"),

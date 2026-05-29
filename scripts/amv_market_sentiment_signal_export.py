@@ -22,8 +22,9 @@ from typing import Any
 import polars as pl
 
 from scripts.amv_bull_pool_export_signals import DEFAULT_QMT_DB, ROOT, _finite_expr, _git_commit, _rel_path
-from scripts.amv_sector_tailwind_signal_export import build_market_frame
 from scripts.amv_static_sleeve_signal_export import pullback_combo_score_expr
+from strategies.amv.factors.market_sentiment import add_market_sentiment_features
+from strategies.amv.market import build_market_frame
 
 
 DEFAULT_OUTPUT_ROOT = ROOT / "artifacts" / "amv_static_sleeve_signals"
@@ -31,96 +32,6 @@ DEFAULT_OUTPUT_ROOT = ROOT / "artifacts" / "amv_static_sleeve_signals"
 
 def threshold_token(value: float) -> str:
     return str(value).replace(".", "p").replace("-", "m")
-
-
-def price_limit_pct_expr() -> pl.Expr:
-    is_20pct_board = (
-        pl.col("code").str.starts_with("sz.300")
-        | pl.col("code").str.starts_with("sz.301")
-        | pl.col("code").str.starts_with("sh.688")
-        | pl.col("code").str.starts_with("sh.689")
-        | pl.col("code").str.starts_with("300")
-        | pl.col("code").str.starts_with("301")
-        | pl.col("code").str.starts_with("688")
-        | pl.col("code").str.starts_with("689")
-    )
-    return pl.when(is_20pct_board).then(0.20).otherwise(0.10)
-
-
-def build_sentiment_features(market: pl.DataFrame, args: argparse.Namespace) -> pl.DataFrame:
-    stock = (
-        market.sort(["code", "date"])
-        .with_columns(
-            [
-                (pl.col("close_adj") / pl.col("pre_close_adj") - 1.0).alias("ret_1d"),
-                (pl.col("open_adj") / pl.col("pre_close_adj") - 1.0).alias("open_gap"),
-                price_limit_pct_expr().alias("limit_pct"),
-                pl.col("close_adj").rolling_max(20).over("code").alias("high_close_20d"),
-            ]
-        )
-        .with_columns(
-            [
-                ((pl.col("ret_1d") >= (pl.col("limit_pct") - args.price_limit_tolerance))).alias(
-                    "is_close_limit_up"
-                ),
-                ((pl.col("ret_1d") <= (-pl.col("limit_pct") + args.price_limit_tolerance))).alias(
-                    "is_close_limit_down"
-                ),
-                (
-                    (pl.col("high_adj") / pl.col("pre_close_adj") - 1.0)
-                    >= (pl.col("limit_pct") - args.price_limit_tolerance)
-                ).alias("touched_limit_up"),
-                (pl.col("close_adj") >= pl.col("high_close_20d")).alias("is_new_high_20"),
-                (pl.col("close_adj") / pl.col("high_close_20d") - 1.0).alias("drawdown_from_20d_high"),
-                (pl.col("ret_20d").rank("average").over("date") / pl.len().over("date")).alias("ret_20d_rank_pct"),
-            ]
-        )
-        .with_columns(
-            [
-                (pl.col("touched_limit_up") & ~pl.col("is_close_limit_up")).alias("is_failed_limit_up"),
-                (pl.col("ret_20d_rank_pct") >= 0.80).alias("is_strong_20d_stock"),
-                pl.col("is_close_limit_up").shift(1).over("code").fill_null(False).alias("was_limit_up_yesterday"),
-            ]
-        )
-    )
-
-    daily = (
-        stock.group_by("date")
-        .agg(
-            [
-                pl.len().alias("market_stock_count"),
-                pl.col("is_close_limit_up").sum().alias("limit_up_count"),
-                pl.col("is_close_limit_down").sum().alias("limit_down_count"),
-                pl.col("touched_limit_up").sum().alias("touched_limit_up_count"),
-                pl.col("is_failed_limit_up").sum().alias("failed_limit_up_count"),
-                pl.col("is_new_high_20").mean().alias("new_high_20_ratio"),
-                pl.col("drawdown_from_20d_high")
-                .filter(pl.col("is_strong_20d_stock"))
-                .median()
-                .alias("strong_stock_drawdown_20d_median"),
-                pl.col("ret_1d")
-                .filter(pl.col("was_limit_up_yesterday"))
-                .mean()
-                .alias("yday_limit_up_close_premium"),
-            ]
-        )
-        .with_columns(
-            (
-                pl.col("failed_limit_up_count")
-                / pl.when(pl.col("touched_limit_up_count") > 0).then(pl.col("touched_limit_up_count")).otherwise(1)
-            ).alias("failed_limit_up_ratio")
-        )
-        .sort("date")
-    )
-
-    return daily.with_columns(
-        [
-            (pl.col("new_high_20_ratio").rank("average") / pl.len()).alias("new_high_20_ratio_rank_pct"),
-            (pl.col("yday_limit_up_close_premium").rank("average") / pl.len()).alias(
-                "yday_limit_up_close_premium_rank_pct"
-            ),
-        ]
-    )
 
 
 def build_signal(
@@ -380,7 +291,10 @@ def main() -> int:
     print("Building P3 market feature frame ...")
     market = build_market_frame(args)
     print("Building market sentiment features ...")
-    sentiment = build_sentiment_features(market, args)
+    sentiment = add_market_sentiment_features(
+        market,
+        price_limit_tolerance=args.price_limit_tolerance,
+    )
     export, selected, summary = build_signal(market, sentiment, args=args)
     meta_path = write_signal_artifact(
         output_root=args.output_root,

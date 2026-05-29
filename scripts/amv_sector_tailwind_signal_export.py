@@ -18,11 +18,16 @@ import polars as pl
 from scripts.amv_bull_pool_export_signals import DEFAULT_QMT_DB, ROOT, _finite_expr, _git_commit, _rel_path
 from scripts.amv_sector_tailwind_diagnostic import (
     DEFAULT_SECTOR_MAP,
-    build_sector_tailwind_features,
-    load_daily_with_industry,
-    load_sector_map,
 )
 from scripts.amv_static_sleeve_signal_export import pullback_combo_score_expr
+from strategies.amv.factors.sector_tailwind import (
+    build_sector_features,
+    rank_source_token,
+    relative_confirm_expr,
+    sector_rank_expr,
+    threshold_token,
+)
+from strategies.amv.market import build_market_frame
 
 
 DEFAULT_OUTPUT_ROOT = ROOT / "artifacts" / "amv_static_sleeve_signals"
@@ -36,14 +41,6 @@ def penalty_token(value: float) -> str:
     return str(value).replace(".", "p").replace("-", "m")
 
 
-def threshold_token(value: float) -> str:
-    return str(value).replace(".", "p").replace("-", "m")
-
-
-def rank_source_token(value: str) -> str:
-    return value.replace("_", "")
-
-
 def parse_penalties(value: str) -> list[float]:
     penalties = [float(part.strip()) for part in value.split(",") if part.strip()]
     if not penalties:
@@ -51,62 +48,6 @@ def parse_penalties(value: str) -> list[float]:
     if any(penalty < 0.0 for penalty in penalties):
         raise argparse.ArgumentTypeError("penalties must be non-negative")
     return penalties
-
-
-def build_market_frame(args: argparse.Namespace) -> pl.DataFrame:
-    from scripts.amv_static_sleeve_signal_export import build_feature_frame
-
-    return build_feature_frame(args)
-
-
-def build_sector_features(args: argparse.Namespace) -> pl.DataFrame:
-    sector_map = load_sector_map(
-        args.sector_map,
-        refresh=args.refresh_sector_map,
-        request_sleep=args.sector_map_request_sleep,
-    )
-    daily = load_daily_with_industry(args.qmt_db, sector_map, args.sector_start_date)
-    return build_sector_tailwind_features(daily).select(
-        [
-            "date",
-            "code",
-            "industry",
-            "sector_ret_5d_rank_pct",
-            "sector_ret_10d_rank_pct",
-            "sector_ret_20d_rank_pct",
-            "stock_rel_sector_ret_5d",
-            "stock_rel_sector_ret_10d",
-            "stock_rel_sector_ret_20d",
-            "sector_breadth_ma20",
-            "sector_amount_ratio_20",
-            "sector_tailwind_ok",
-        ]
-    )
-
-
-def sector_rank_expr(args: argparse.Namespace) -> pl.Expr:
-    if args.rank_source == "5d":
-        return pl.col("sector_ret_5d_rank_pct")
-    if args.rank_source == "10d":
-        return pl.col("sector_ret_10d_rank_pct")
-    if args.rank_source == "20d":
-        return pl.col("sector_ret_20d_rank_pct")
-    if args.rank_source == "mix_10_20":
-        return (pl.col("sector_ret_10d_rank_pct") + pl.col("sector_ret_20d_rank_pct")) / 2.0
-    raise ValueError(f"unknown rank source: {args.rank_source}")
-
-
-def relative_confirm_expr(args: argparse.Namespace) -> pl.Expr:
-    if args.relative_confirm == "none":
-        return pl.lit(True)
-    if args.relative_confirm == "rel5_under0":
-        return pl.col("stock_rel_sector_ret_5d").fill_null(0.0) < 0.0
-    if args.relative_confirm == "rel10_under0":
-        return pl.col("stock_rel_sector_ret_10d").fill_null(0.0) < 0.0
-    if args.relative_confirm == "rel20_under0":
-        return pl.col("stock_rel_sector_ret_20d").fill_null(0.0) < 0.0
-    raise ValueError(f"unknown relative confirm: {args.relative_confirm}")
-
 
 def build_signal_for_penalty(
     market: pl.DataFrame,

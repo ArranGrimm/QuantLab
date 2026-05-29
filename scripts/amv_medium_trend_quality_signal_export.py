@@ -16,8 +16,8 @@ from typing import Any
 import polars as pl
 
 from scripts.amv_bull_pool_export_signals import DEFAULT_QMT_DB, ROOT, _finite_expr, _git_commit, _rel_path
-from scripts.amv_medium_trend_quality_diagnostic import add_medium_trend_features
-from scripts.amv_sector_tailwind_signal_export import build_market_frame
+from strategies.amv.factors.medium_trend_quality import add_medium_trend_features
+from strategies.amv.market import build_market_frame
 from scripts.amv_static_sleeve_signal_export import pullback_combo_score_expr
 
 

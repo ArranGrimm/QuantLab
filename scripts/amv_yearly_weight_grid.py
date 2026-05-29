@@ -3,14 +3,13 @@ from __future__ import annotations
 import argparse
 import copy
 import json
-import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from scripts.amv_bull_pool_combo_grid import _build_grid_rankers, _parse_int_list
+from scripts.amv_bull_pool_combo_grid import _parse_int_list
 from scripts.amv_bull_pool_ranker_lab import (
     DEFAULT_OUTPUT_ROOT as RANKER_OUTPUT_ROOT,
     DEFAULT_QMT_DB,
@@ -18,205 +17,10 @@ from scripts.amv_bull_pool_ranker_lab import (
     build_dataset,
 )
 from scripts.amv_bull_pool_yearly_factor_analysis import evaluate_ranker_by_year
+from strategies.amv.rankers import build_rankers
 
 
 DEFAULT_OUTPUT_ROOT = RANKER_OUTPUT_ROOT.parent / "amv_bull_pool_yearly_weight_grid"
-
-
-def _weight_token(value: float) -> str:
-    return f"{value:g}".replace(".", "p")
-
-
-def _component(
-    factor: str,
-    *,
-    higher_is_better: bool,
-    weight: float,
-) -> dict[str, Any]:
-    return {
-        "factor": factor,
-        "higher_is_better": higher_is_better,
-        "weight": weight,
-    }
-
-
-def _reference_ranker() -> dict[str, Any]:
-    return {
-        "id": "ref_p2_k0p5_r0",
-        "label": "当前基线 P2/K0.5/R0",
-        "group": "reference",
-        "components": [
-            _component("price_pos_20d", higher_is_better=True, weight=2.0),
-            _component("close_to_high_20d", higher_is_better=False, weight=2.0),
-            _component("KLEN", higher_is_better=False, weight=0.5),
-            _component("KMID2", higher_is_better=True, weight=0.5),
-        ],
-    }
-
-
-def _single_factor_rankers() -> list[dict[str, Any]]:
-    return [
-        {
-            "id": "single_price_pos_20d",
-            "label": "单因子 20日高位",
-            "group": "single_price",
-            "factor": "price_pos_20d",
-            "descending": True,
-        },
-        {
-            "id": "single_near_high_20d",
-            "label": "单因子 接近20日新高",
-            "group": "single_price",
-            "factor": "close_to_high_20d",
-            "descending": False,
-        },
-        {
-            "id": "single_klen_contract",
-            "label": "单因子 K线振幅收缩",
-            "group": "single_kbar",
-            "factor": "KLEN",
-            "descending": False,
-        },
-        {
-            "id": "single_kmid2_strong",
-            "label": "单因子 实体占比偏强",
-            "group": "single_kbar",
-            "factor": "KMID2",
-            "descending": True,
-        },
-        {
-            "id": "single_ret_5d",
-            "label": "单因子 5日动量",
-            "group": "single_momentum",
-            "factor": "ret_5d",
-            "descending": True,
-        },
-        {
-            "id": "single_ret_20d",
-            "label": "单因子 20日动量",
-            "group": "single_momentum",
-            "factor": "ret_20d",
-            "descending": True,
-        },
-        {
-            "id": "single_atr_14_pct_low",
-            "label": "单因子 ATR低风险",
-            "group": "single_risk",
-            "factor": "atr_14_pct",
-            "descending": False,
-        },
-        {
-            "id": "single_panic_vol_low",
-            "label": "单因子 卖压低",
-            "group": "single_risk",
-            "factor": "panic_vol_ratio_20d",
-            "descending": False,
-        },
-    ]
-
-
-def _pkm_grid_rankers() -> list[dict[str, Any]]:
-    rankers: list[dict[str, Any]] = []
-    price_weights = (0.0, 1.0, 2.0, 3.0)
-    kbar_weights = (0.0, 0.5, 1.0, 2.0)
-    momentum_weights = (0.0, 0.5, 1.0, 2.0)
-    seen_ratios: set[tuple[int, int, int]] = set()
-
-    for price_weight in price_weights:
-        for kbar_weight in kbar_weights:
-            for momentum_weight in momentum_weights:
-                if price_weight == 0 and kbar_weight == 0 and momentum_weight == 0:
-                    continue
-                ratio = (
-                    int(round(price_weight * 2)),
-                    int(round(kbar_weight * 2)),
-                    int(round(momentum_weight * 2)),
-                )
-                divisor = math.gcd(math.gcd(ratio[0], ratio[1]), ratio[2]) or 1
-                ratio = tuple(item // divisor for item in ratio)
-                if ratio in seen_ratios:
-                    continue
-                seen_ratios.add(ratio)
-
-                components: list[dict[str, Any]] = []
-                if price_weight > 0:
-                    components.extend(
-                        [
-                            _component(
-                                "price_pos_20d",
-                                higher_is_better=True,
-                                weight=price_weight,
-                            ),
-                            _component(
-                                "close_to_high_20d",
-                                higher_is_better=False,
-                                weight=price_weight,
-                            ),
-                        ]
-                    )
-                if kbar_weight > 0:
-                    components.extend(
-                        [
-                            _component("KLEN", higher_is_better=False, weight=kbar_weight),
-                            _component("KMID2", higher_is_better=True, weight=kbar_weight),
-                        ]
-                    )
-                if momentum_weight > 0:
-                    components.extend(
-                        [
-                            _component("ret_5d", higher_is_better=True, weight=momentum_weight),
-                            _component("ret_20d", higher_is_better=True, weight=momentum_weight),
-                        ]
-                    )
-
-                rankers.append(
-                    {
-                        "id": (
-                            "grid_pkm"
-                            f"_p{_weight_token(price_weight)}"
-                            f"_k{_weight_token(kbar_weight)}"
-                            f"_m{_weight_token(momentum_weight)}"
-                        ),
-                        "label": (
-                            "P/K/M网格 "
-                            f"P{price_weight:g}/K{kbar_weight:g}/M{momentum_weight:g}"
-                        ),
-                        "group": "grid_pkm",
-                        "weights": {
-                            "price": price_weight,
-                            "kbar": kbar_weight,
-                            "momentum": momentum_weight,
-                            "risk": 0.0,
-                        },
-                        "components": components,
-                    }
-                )
-
-    return rankers
-
-
-def _legacy_pkr_rankers() -> list[dict[str, Any]]:
-    rankers = _build_grid_rankers()
-    for ranker in rankers:
-        ranker["group"] = "grid_pkr"
-        ranker["label"] = ranker["label"].replace("高位+K线确认 ", "P/K/R网格 ")
-        if "weights" in ranker:
-            ranker["weights"] = {
-                "price": ranker["weights"].get("price", 0.0),
-                "kbar": ranker["weights"].get("kbar", 0.0),
-                "momentum": 0.0,
-                "risk": ranker["weights"].get("risk", 0.0),
-            }
-    return rankers
-
-
-def build_rankers() -> list[dict[str, Any]]:
-    return [
-        _reference_ranker(),
-        *_single_factor_rankers(),
-        *_legacy_pkr_rankers(),
-        *_pkm_grid_rankers(),
-    ]
 
 
 def _year_row(result: dict[str, Any], year: int) -> dict[str, Any] | None:
