@@ -74,6 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let df = LazyFrame::scan_parquet(&args.data, Default::default())?.collect()?;
     println!("Loaded {} rows", df.height());
     let (market_data, mut trading_dates) = build_market_data(&df)?;
+    println!("Execution price basis: {}", market_data.price_basis);
 
     let original_len = trading_dates.len();
     if let Some(start) = config.start_date {
@@ -229,14 +230,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if !args.output_dir.is_empty() {
         let config = app.world().resource::<AmvTopnConfig>();
+        let market_data = app.world().resource::<MarketData>();
         let config_text = format_config(config, trading_dates.len());
         let extra_text = format!(
             "--- Strategy Stats ---\n\
+             Execution Price Basis: {}\n\
              Signal Rows:       {}\n\
              Limit Up Blocked:  {} ({} days)\n\
              Open Gap Blocked:  {} ({} days)\n\
              Require Bull Regime: {}\n\
              Bull Regime Blocked Signals: {} ({} days)\n",
+            market_data.price_basis,
             signal_rows,
             limit_up_blocked,
             limit_up_days,
@@ -280,9 +284,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "commission_rate": config.cost_model.commission_rate,
                 "stamp_duty_rate": config.cost_model.stamp_duty_rate,
                 "slippage_pct": config.cost_model.slippage_pct,
+                "execution_price_basis": market_data.price_basis.as_str(),
             }),
             Some(extra_text.as_str()),
             Some(json!({
+                "execution_price_basis": market_data.price_basis.as_str(),
                 "signal_rows": signal_rows,
                 "limit_up_blocked": limit_up_blocked,
                 "limit_up_days": limit_up_days,
@@ -429,6 +435,34 @@ fn build_market_data(
     let high_adj = df.column("high_adj")?.f64()?;
     let close_adj = df.column("close_adj")?.f64()?;
     let pre_close_adj = df.column("pre_close_adj")?.f64()?;
+    let has_raw_prices = ["open_raw", "high_raw", "close_raw", "pre_close_raw"]
+        .iter()
+        .all(|name| df.get_column_names().iter().any(|col| col.as_str() == *name));
+    let open_raw = if has_raw_prices {
+        Some(df.column("open_raw")?.f64()?)
+    } else {
+        None
+    };
+    let high_raw = if has_raw_prices {
+        Some(df.column("high_raw")?.f64()?)
+    } else {
+        None
+    };
+    let close_raw = if has_raw_prices {
+        Some(df.column("close_raw")?.f64()?)
+    } else {
+        None
+    };
+    let pre_close_raw = if has_raw_prices {
+        Some(df.column("pre_close_raw")?.f64()?)
+    } else {
+        None
+    };
+    market_data.price_basis = if has_raw_prices {
+        "raw_ohlc_pre_close".to_string()
+    } else {
+        "adjusted_ohlc_fallback".to_string()
+    };
     let score = df.column("score")?.f64()?;
     let rank_casted = df.column("rank")?.cast(&DataType::UInt32)?;
     let rank = rank_casted.u32()?;
@@ -439,11 +473,31 @@ fn build_market_data(
         let code = codes.get(i).ok_or("Missing code")?;
         let date_days = dates.get(i).ok_or("Missing date")?;
         let date = bt_core::epoch_days_to_date(date_days).ok_or("Invalid date")?;
+        let open_adj_value = open_adj.get(i).unwrap_or(0.0);
+        let high_adj_value = high_adj.get(i).unwrap_or(0.0);
+        let close_adj_value = close_adj.get(i).unwrap_or(0.0);
+        let pre_close_adj_value = pre_close_adj.get(i).unwrap_or(0.0);
         let bar = PriceBar {
-            open: open_adj.get(i).unwrap_or(0.0),
-            high: high_adj.get(i).unwrap_or(0.0),
-            close: close_adj.get(i).unwrap_or(0.0),
-            pre_close: pre_close_adj.get(i).unwrap_or(0.0),
+            open: open_raw
+                .as_ref()
+                .and_then(|col| col.get(i))
+                .unwrap_or(open_adj_value),
+            high: high_raw
+                .as_ref()
+                .and_then(|col| col.get(i))
+                .unwrap_or(high_adj_value),
+            close: close_raw
+                .as_ref()
+                .and_then(|col| col.get(i))
+                .unwrap_or(close_adj_value),
+            pre_close: pre_close_raw
+                .as_ref()
+                .and_then(|col| col.get(i))
+                .unwrap_or(pre_close_adj_value),
+            open_adj: open_adj_value,
+            high_adj: high_adj_value,
+            close_adj: close_adj_value,
+            pre_close_adj: pre_close_adj_value,
             score: score.get(i).unwrap_or(0.0),
             rank: rank.get(i).unwrap_or(9999u32),
             is_signal: is_signal.get(i).unwrap_or(false),

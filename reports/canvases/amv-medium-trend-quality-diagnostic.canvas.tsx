@@ -63,6 +63,13 @@ const yearlyReturns = [
   ['2026', '-0.77%', '-1.34%', '-0.57pp', 'still weak'],
 ];
 
+const annualRestart2026 = [
+  ['Raw P3', '-8.55%', '-2.16%', '+14.57%', '2/7'],
+  ['Sector complete', '-8.49%', '-4.67%', '+15.68%', '2/7'],
+  ['128d structure/quality p0.03', '-9.72%', '+1.85%', '+16.20%', '5/7'],
+  ['Context combo', '-9.72%', '+1.85%', '+16.20%', '5/7'],
+];
+
 export default function AmvMediumTrendQualityDiagnostic() {
   return (
     <Stack gap={20}>
@@ -104,6 +111,26 @@ export default function AmvMediumTrendQualityDiagnostic() {
         <Callout tone="warning" title="分年解释">
           组合不是单年撑起来：2024 和 2025 是主贡献，2021 / 2023 也正贡献。
           2026 仍小幅弱于 raw，关键拖累是 2026-01 trade delta 约 <Code>-110.4K</Code>。
+        </Callout>
+      </Grid>
+
+      <Grid columns="1.2fr 0.8fr" gap={18}>
+        <Stack gap={10}>
+          <H2>Annual Restart 2026</H2>
+          <Table
+            headers={['Variant', 'Worst', 'Median', 'Best', 'Positive offsets']}
+            rows={annualRestart2026}
+            rowTone={['danger', 'danger', 'warning', 'warning']}
+            columnAlign={['left', 'right', 'right', 'right', 'right']}
+          />
+          <Text size="small" tone="tertiary">
+            Source: <Code>reports/amv_p3_annual_restart_cadence_context_combo.json</Code>; each year restarts independently, no costs, 7 entry offsets.
+          </Text>
+        </Stack>
+
+        <Callout tone="warning" title="Annual Restart 结论">
+          Context combo 改善了 2026 median 和正收益 offset 数量，但没有修复最差 offset：
+          raw worst <Code>-8.55%</Code>，combo worst <Code>-9.72%</Code>。因此它仍是强 challenger，不宜直接升级默认 P3。
         </Callout>
       </Grid>
 

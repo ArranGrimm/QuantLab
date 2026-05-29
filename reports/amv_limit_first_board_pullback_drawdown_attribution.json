@@ -1,0 +1,1441 @@
+{
+  "generated_at": "2026-05-29 11:45:14",
+  "scope": "Drawdown attribution for limit_first_board_pullback base 5td and quality 6td",
+  "cases": [
+    {
+      "name": "base_5td",
+      "signal_dir": "artifacts\\amv_static_sleeve_signals\\20260529_111655_limit_first_board_pullback",
+      "backtest_name": "5td_static_strict_top3_no_stop_20260529_111655_limit_first_board_pullback",
+      "total": {
+        "trades": 306,
+        "total_pnl": 917874.56,
+        "avg_pnl_pct": 0.012175,
+        "win_rate": 0.506536,
+        "big_winners_gt_20k": 64,
+        "big_losers_lt_minus_20k": 46
+      },
+      "drawdown": {
+        "peak_date": "2023-08-03",
+        "trough_date": "2024-02-05",
+        "recovery_date": "2025-02-19",
+        "peak_value": 1174338.94,
+        "trough_value": 641764.12,
+        "max_drawdown_pct": 45.35
+      },
+      "drawdown_trades": {
+        "trades": 43,
+        "total_pnl": -431912.73,
+        "avg_pnl_pct": -0.031891,
+        "win_rate": 0.255814,
+        "big_winners_gt_20k": 4,
+        "big_losers_lt_minus_20k": 10
+      },
+      "total_risk_profile": {
+        "trades": 306,
+        "avg_score": 8.795752,
+        "avg_amount_ratio_5_20": 0.943515,
+        "avg_atr_14_pct_rank_pct": 0.8131,
+        "avg_panic_vol_ratio_20d_rank_pct": 0.468837,
+        "pct_atr_gt_0p8": 0.630719,
+        "pct_panic_gt_0p8": 0.147059,
+        "pct_amount_le_0p85": 0.186275,
+        "pct_days_since_lu_le_3": 0.480392,
+        "pct_days_since_lu_ge_7": 0.395425,
+        "pct_failed_limit_5d": 0.013072
+      },
+      "drawdown_risk_profile": {
+        "trades": 43,
+        "avg_score": 6.651163,
+        "avg_amount_ratio_5_20": 0.90413,
+        "avg_atr_14_pct_rank_pct": 0.869748,
+        "avg_panic_vol_ratio_20d_rank_pct": 0.46917,
+        "pct_atr_gt_0p8": 0.744186,
+        "pct_panic_gt_0p8": 0.209302,
+        "pct_amount_le_0p85": 0.27907,
+        "pct_days_since_lu_le_3": 0.186047,
+        "pct_days_since_lu_ge_7": 0.604651,
+        "pct_failed_limit_5d": 0.0
+      },
+      "worst_12_risk_profile": {
+        "trades": 12,
+        "avg_score": 8.458333,
+        "avg_amount_ratio_5_20": 0.921017,
+        "avg_atr_14_pct_rank_pct": 0.888051,
+        "avg_panic_vol_ratio_20d_rank_pct": 0.532899,
+        "pct_atr_gt_0p8": 0.916667,
+        "pct_panic_gt_0p8": 0.166667,
+        "pct_amount_le_0p85": 0.166667,
+        "pct_days_since_lu_le_3": 0.5,
+        "pct_days_since_lu_ge_7": 0.333333,
+        "pct_failed_limit_5d": 0.0
+      },
+      "drawdown_worst_12_risk_profile": {
+        "trades": 12,
+        "avg_score": 6.0,
+        "avg_amount_ratio_5_20": 0.915109,
+        "avg_atr_14_pct_rank_pct": 0.906836,
+        "avg_panic_vol_ratio_20d_rank_pct": 0.496228,
+        "pct_atr_gt_0p8": 0.916667,
+        "pct_panic_gt_0p8": 0.25,
+        "pct_amount_le_0p85": 0.333333,
+        "pct_days_since_lu_le_3": 0.166667,
+        "pct_days_since_lu_ge_7": 0.583333,
+        "pct_failed_limit_5d": 0.0
+      },
+      "worst_months": [
+        {
+          "month": "2025-09",
+          "trades": 6,
+          "pnl": -148278.71,
+          "avg_pnl_pct": -0.052872,
+          "win_rate": 0.166667
+        },
+        {
+          "month": "2022-11",
+          "trades": 12,
+          "pnl": -119853.31,
+          "avg_pnl_pct": -0.029383,
+          "win_rate": 0.416667
+        },
+        {
+          "month": "2021-09",
+          "trades": 9,
+          "pnl": -100032.66,
+          "avg_pnl_pct": -0.039555,
+          "win_rate": 0.222222
+        },
+        {
+          "month": "2023-08",
+          "trades": 6,
+          "pnl": -98593.55,
+          "avg_pnl_pct": -0.043685,
+          "win_rate": 0.166667
+        },
+        {
+          "month": "2023-12",
+          "trades": 9,
+          "pnl": -84952.48,
+          "avg_pnl_pct": -0.03086,
+          "win_rate": 0.222222
+        },
+        {
+          "month": "2023-09",
+          "trades": 9,
+          "pnl": -84772.31,
+          "avg_pnl_pct": -0.027288,
+          "win_rate": 0.222222
+        },
+        {
+          "month": "2024-01",
+          "trades": 6,
+          "pnl": -83438.55,
+          "avg_pnl_pct": -0.049937,
+          "win_rate": 0.166667
+        },
+        {
+          "month": "2022-12",
+          "trades": 9,
+          "pnl": -69843.09,
+          "avg_pnl_pct": -0.024707,
+          "win_rate": 0.444444
+        }
+      ],
+      "drawdown_worst_months": [
+        {
+          "month": "2023-08",
+          "trades": 6,
+          "pnl": -98593.55,
+          "avg_pnl_pct": -0.043685,
+          "win_rate": 0.166667
+        },
+        {
+          "month": "2023-12",
+          "trades": 9,
+          "pnl": -84952.48,
+          "avg_pnl_pct": -0.03086,
+          "win_rate": 0.222222
+        },
+        {
+          "month": "2023-09",
+          "trades": 9,
+          "pnl": -84772.31,
+          "avg_pnl_pct": -0.027288,
+          "win_rate": 0.222222
+        },
+        {
+          "month": "2024-01",
+          "trades": 6,
+          "pnl": -83438.55,
+          "avg_pnl_pct": -0.049937,
+          "win_rate": 0.166667
+        },
+        {
+          "month": "2024-02",
+          "trades": 1,
+          "pnl": -54696.79,
+          "avg_pnl_pct": -0.212612,
+          "win_rate": 0.0
+        },
+        {
+          "month": "2023-11",
+          "trades": 12,
+          "pnl": -25459.04,
+          "avg_pnl_pct": -0.006135,
+          "win_rate": 0.416667
+        }
+      ],
+      "worst_trades": [
+        {
+          "code": "sz.002468",
+          "entry_date": "2022-10-25",
+          "exit_date": "2022-11-01",
+          "pnl": -76898.55,
+          "pnl_pct": -0.227522,
+          "hold_trading_days": 5,
+          "score": 8.0,
+          "rank": 2,
+          "days_since_prior_limit_up": 6,
+          "amount_ratio_5_20": 0.8810639141179978,
+          "atr_14_pct_rank_pct": 0.809321084472328,
+          "panic_vol_ratio_20d_rank_pct": 0.5115393233251176,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.600682",
+          "entry_date": "2026-01-15",
+          "exit_date": "2026-01-22",
+          "pnl": -73193.48,
+          "pnl_pct": -0.16307,
+          "hold_trading_days": 5,
+          "score": 8.0,
+          "rank": 2,
+          "days_since_prior_limit_up": 9,
+          "amount_ratio_5_20": 0.988240517857055,
+          "atr_14_pct_rank_pct": 0.6345332519829164,
+          "panic_vol_ratio_20d_rank_pct": 0.5845027455765711,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.000158",
+          "entry_date": "2024-01-29",
+          "exit_date": "2024-02-06",
+          "pnl": -70394.46,
+          "pnl_pct": -0.274273,
+          "hold_trading_days": 6,
+          "score": 12.0,
+          "rank": 1,
+          "days_since_prior_limit_up": 1,
+          "amount_ratio_5_20": 1.0137543806956175,
+          "atr_14_pct_rank_pct": 0.9289903644742354,
+          "panic_vol_ratio_20d_rank_pct": 0.15354000837871806,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.600557",
+          "entry_date": "2022-12-14",
+          "exit_date": "2022-12-21",
+          "pnl": -57244.85,
+          "pnl_pct": -0.188033,
+          "hold_trading_days": 5,
+          "score": 12.0,
+          "rank": 1,
+          "days_since_prior_limit_up": 1,
+          "amount_ratio_5_20": 0.8765205059775122,
+          "atr_14_pct_rank_pct": 0.9917941893989798,
+          "panic_vol_ratio_20d_rank_pct": 0.34530938123752497,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.601208",
+          "entry_date": "2025-08-26",
+          "exit_date": "2025-09-02",
+          "pnl": -56456.49,
+          "pnl_pct": -0.118334,
+          "hold_trading_days": 5,
+          "score": 12.0,
+          "rank": 1,
+          "days_since_prior_limit_up": 1,
+          "amount_ratio_5_20": 1.050437833858535,
+          "atr_14_pct_rank_pct": 0.9451942740286299,
+          "panic_vol_ratio_20d_rank_pct": 0.9584867075664621,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.002738",
+          "entry_date": "2024-01-26",
+          "exit_date": "2024-02-02",
+          "pnl": -54696.79,
+          "pnl_pct": -0.212612,
+          "hold_trading_days": 5,
+          "score": 3.5,
+          "rank": 1,
+          "days_since_prior_limit_up": 10,
+          "amount_ratio_5_20": 0.9642212958936914,
+          "atr_14_pct_rank_pct": 0.8487641390867198,
+          "panic_vol_ratio_20d_rank_pct": 0.3332635106828655,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.603650",
+          "entry_date": "2021-08-26",
+          "exit_date": "2021-09-02",
+          "pnl": -53310.73,
+          "pnl_pct": -0.188406,
+          "hold_trading_days": 5,
+          "score": 11.0,
+          "rank": 3,
+          "days_since_prior_limit_up": 2,
+          "amount_ratio_5_20": 0.9957372973623168,
+          "atr_14_pct_rank_pct": 0.8218091697645601,
+          "panic_vol_ratio_20d_rank_pct": 0.3306071871127633,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.002468",
+          "entry_date": "2025-08-26",
+          "exit_date": "2025-09-02",
+          "pnl": -50765.42,
+          "pnl_pct": -0.106508,
+          "hold_trading_days": 5,
+          "score": 8.0,
+          "rank": 3,
+          "days_since_prior_limit_up": 3,
+          "amount_ratio_5_20": 0.8884527400910389,
+          "atr_14_pct_rank_pct": 0.8950920245398774,
+          "panic_vol_ratio_20d_rank_pct": 0.5713701431492842,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.600353",
+          "entry_date": "2025-07-23",
+          "exit_date": "2025-07-30",
+          "pnl": -49273.66,
+          "pnl_pct": -0.107239,
+          "hold_trading_days": 5,
+          "score": 5.0,
+          "rank": 3,
+          "days_since_prior_limit_up": 9,
+          "amount_ratio_5_20": 0.7817834091484158,
+          "atr_14_pct_rank_pct": 0.9348494161032576,
+          "panic_vol_ratio_20d_rank_pct": 0.661339889366933,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.000815",
+          "entry_date": "2026-04-20",
+          "exit_date": "2026-04-27",
+          "pnl": -44306.24,
+          "pnl_pct": -0.094757,
+          "hold_trading_days": 5,
+          "score": 12.0,
+          "rank": 3,
+          "days_since_prior_limit_up": 1,
+          "amount_ratio_5_20": 0.9180579632481093,
+          "atr_14_pct_rank_pct": 0.9631802549059276,
+          "panic_vol_ratio_20d_rank_pct": 0.7790815294355654,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.601127",
+          "entry_date": "2023-08-10",
+          "exit_date": "2023-08-17",
+          "pnl": -42726.37,
+          "pnl_pct": -0.114966,
+          "hold_trading_days": 5,
+          "score": 5.0,
+          "rank": 3,
+          "days_since_prior_limit_up": 8,
+          "amount_ratio_5_20": 0.6375675350748313,
+          "atr_14_pct_rank_pct": 0.94,
+          "panic_vol_ratio_20d_rank_pct": 0.9438297872340425,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.603348",
+          "entry_date": "2023-08-02",
+          "exit_date": "2023-08-09",
+          "pnl": -41928.23,
+          "pnl_pct": -0.10953,
+          "hold_trading_days": 5,
+          "score": 5.0,
+          "rank": 3,
+          "days_since_prior_limit_up": 5,
+          "amount_ratio_5_20": 1.0563682991394474,
+          "atr_14_pct_rank_pct": 0.9430824984011937,
+          "panic_vol_ratio_20d_rank_pct": 0.22191430398635686,
+          "has_failed_limit_up_5d": false
+        }
+      ],
+      "drawdown_worst_trades": [
+        {
+          "code": "sz.002738",
+          "entry_date": "2024-01-26",
+          "exit_date": "2024-02-02",
+          "pnl": -54696.79,
+          "pnl_pct": -0.212612,
+          "hold_trading_days": 5,
+          "score": 3.5,
+          "rank": 1,
+          "days_since_prior_limit_up": 10,
+          "amount_ratio_5_20": 0.9642212958936914,
+          "atr_14_pct_rank_pct": 0.8487641390867198,
+          "panic_vol_ratio_20d_rank_pct": 0.3332635106828655,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.601127",
+          "entry_date": "2023-08-10",
+          "exit_date": "2023-08-17",
+          "pnl": -42726.37,
+          "pnl_pct": -0.114966,
+          "hold_trading_days": 5,
+          "score": 5.0,
+          "rank": 3,
+          "days_since_prior_limit_up": 8,
+          "amount_ratio_5_20": 0.6375675350748313,
+          "atr_14_pct_rank_pct": 0.94,
+          "panic_vol_ratio_20d_rank_pct": 0.9438297872340425,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.603348",
+          "entry_date": "2023-08-02",
+          "exit_date": "2023-08-09",
+          "pnl": -41928.23,
+          "pnl_pct": -0.10953,
+          "hold_trading_days": 5,
+          "score": 5.0,
+          "rank": 3,
+          "days_since_prior_limit_up": 5,
+          "amount_ratio_5_20": 1.0563682991394474,
+          "atr_14_pct_rank_pct": 0.9430824984011937,
+          "panic_vol_ratio_20d_rank_pct": 0.22191430398635686,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.601595",
+          "entry_date": "2024-01-10",
+          "exit_date": "2024-01-17",
+          "pnl": -37845.56,
+          "pnl_pct": -0.137945,
+          "hold_trading_days": 5,
+          "score": 5.0,
+          "rank": 2,
+          "days_since_prior_limit_up": 6,
+          "amount_ratio_5_20": 1.0751193466287479,
+          "atr_14_pct_rank_pct": 0.9590594163342431,
+          "panic_vol_ratio_20d_rank_pct": 0.3923997480579467,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.603918",
+          "entry_date": "2023-09-07",
+          "exit_date": "2023-09-14",
+          "pnl": -36379.35,
+          "pnl_pct": -0.103146,
+          "hold_trading_days": 5,
+          "score": 5.0,
+          "rank": 3,
+          "days_since_prior_limit_up": 7,
+          "amount_ratio_5_20": 1.0164155556618015,
+          "atr_14_pct_rank_pct": 0.9561440677966102,
+          "panic_vol_ratio_20d_rank_pct": 0.13559322033898305,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.000572",
+          "entry_date": "2023-11-30",
+          "exit_date": "2023-12-07",
+          "pnl": -30102.37,
+          "pnl_pct": -0.095855,
+          "hold_trading_days": 5,
+          "score": 8.0,
+          "rank": 1,
+          "days_since_prior_limit_up": 8,
+          "amount_ratio_5_20": 0.9264185451073964,
+          "atr_14_pct_rank_pct": 0.9852631578947368,
+          "panic_vol_ratio_20d_rank_pct": 0.05136842105263158,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.600839",
+          "entry_date": "2023-11-22",
+          "exit_date": "2023-11-29",
+          "pnl": -24506.27,
+          "pnl_pct": -0.07479,
+          "hold_trading_days": 5,
+          "score": 5.0,
+          "rank": 2,
+          "days_since_prior_limit_up": 9,
+          "amount_ratio_5_20": 0.7365930866555254,
+          "atr_14_pct_rank_pct": 0.9304677623261695,
+          "panic_vol_ratio_20d_rank_pct": 0.8714707121786768,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.600732",
+          "entry_date": "2023-09-15",
+          "exit_date": "2023-09-22",
+          "pnl": -22830.46,
+          "pnl_pct": -0.068485,
+          "hold_trading_days": 5,
+          "score": 5.0,
+          "rank": 1,
+          "days_since_prior_limit_up": 7,
+          "amount_ratio_5_20": 0.9980569933024899,
+          "atr_14_pct_rank_pct": 0.8755292125317528,
+          "panic_vol_ratio_20d_rank_pct": 0.7364521591871296,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.000766",
+          "entry_date": "2024-01-02",
+          "exit_date": "2024-01-09",
+          "pnl": -20970.95,
+          "pnl_pct": -0.073601,
+          "hold_trading_days": 5,
+          "score": 8.0,
+          "rank": 1,
+          "days_since_prior_limit_up": 3,
+          "amount_ratio_5_20": 0.7053693168010696,
+          "atr_14_pct_rank_pct": 0.9857202855942881,
+          "panic_vol_ratio_20d_rank_pct": 0.49706005879882403,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.601595",
+          "entry_date": "2023-08-30",
+          "exit_date": "2023-09-06",
+          "pnl": -20921.17,
+          "pnl_pct": -0.059587,
+          "hold_trading_days": 5,
+          "score": 8.0,
+          "rank": 2,
+          "days_since_prior_limit_up": 3,
+          "amount_ratio_5_20": 1.0989102495765244,
+          "atr_14_pct_rank_pct": 0.8434782608695652,
+          "panic_vol_ratio_20d_rank_pct": 0.4386002120890774,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.603613",
+          "entry_date": "2023-09-07",
+          "exit_date": "2023-09-14",
+          "pnl": -18757.44,
+          "pnl_pct": -0.053163,
+          "hold_trading_days": 5,
+          "score": 8.0,
+          "rank": 1,
+          "days_since_prior_limit_up": 6,
+          "amount_ratio_5_20": 0.7544072649088828,
+          "atr_14_pct_rank_pct": 0.6580508474576271,
+          "panic_vol_ratio_20d_rank_pct": 0.9641949152542373,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.300418",
+          "entry_date": "2023-12-18",
+          "exit_date": "2023-12-25",
+          "pnl": -17609.24,
+          "pnl_pct": -0.06022,
+          "hold_trading_days": 5,
+          "score": 6.5,
+          "rank": 1,
+          "days_since_prior_limit_up": 10,
+          "amount_ratio_5_20": 1.0118590641884144,
+          "atr_14_pct_rank_pct": 0.9564760302775441,
+          "panic_vol_ratio_20d_rank_pct": 0.3685870479394449,
+          "has_failed_limit_up_5d": false
+        }
+      ],
+      "by_days_bucket": [
+        {
+          "days_bucket": "d1_3",
+          "trades": 147,
+          "pnl": 336760.52,
+          "avg_pnl_pct": 0.009899,
+          "win_rate": 0.496599
+        },
+        {
+          "days_bucket": "d4_6",
+          "trades": 38,
+          "pnl": 125768.36,
+          "avg_pnl_pct": 0.016985,
+          "win_rate": 0.5
+        },
+        {
+          "days_bucket": "d7_10",
+          "trades": 121,
+          "pnl": 455345.69,
+          "avg_pnl_pct": 0.013429,
+          "win_rate": 0.520661
+        }
+      ],
+      "by_amount_bucket": [
+        {
+          "amount_bucket": "dry_le_0p85",
+          "trades": 57,
+          "pnl": -40628.65,
+          "avg_pnl_pct": -0.000394,
+          "win_rate": 0.45614
+        },
+        {
+          "amount_bucket": "normal_0p85_1p10",
+          "trades": 249,
+          "pnl": 958503.21,
+          "avg_pnl_pct": 0.015052,
+          "win_rate": 0.518072
+        }
+      ],
+      "by_vol_risk_bucket": [
+        {
+          "vol_risk_bucket": "high_risk_vol",
+          "trades": 267,
+          "pnl": 928310.14,
+          "avg_pnl_pct": 0.01339,
+          "win_rate": 0.509363
+        },
+        {
+          "vol_risk_bucket": "lowvol_ok",
+          "trades": 39,
+          "pnl": -10435.58,
+          "avg_pnl_pct": 0.003853,
+          "win_rate": 0.487179
+        }
+      ],
+      "by_failed_limit_flag": [
+        {
+          "has_failed_limit_up_5d": "False",
+          "trades": 302,
+          "pnl": 863767.49,
+          "avg_pnl_pct": 0.011738,
+          "win_rate": 0.503311
+        },
+        {
+          "has_failed_limit_up_5d": "True",
+          "trades": 4,
+          "pnl": 54107.08,
+          "avg_pnl_pct": 0.045174,
+          "win_rate": 0.75
+        }
+      ]
+    },
+    {
+      "name": "quality_6td",
+      "signal_dir": "artifacts\\amv_static_sleeve_signals\\20260529_112355_limit_first_board_pullback_quality",
+      "backtest_name": "6td_static_strict_top3_no_stop_20260529_112355_limit_first_board_pullback_quality",
+      "total": {
+        "trades": 107,
+        "total_pnl": 266802.48,
+        "avg_pnl_pct": 0.013264,
+        "win_rate": 0.53271,
+        "big_winners_gt_20k": 8,
+        "big_losers_lt_minus_20k": 4
+      },
+      "drawdown": {
+        "peak_date": "2021-06-03",
+        "trough_date": "2022-10-28",
+        "recovery_date": "2024-11-05",
+        "peak_value": 605033.97,
+        "trough_value": 473661.68,
+        "max_drawdown_pct": 21.71
+      },
+      "drawdown_trades": {
+        "trades": 29,
+        "total_pnl": -99458.07,
+        "avg_pnl_pct": -0.0185,
+        "win_rate": 0.310345,
+        "big_winners_gt_20k": 0,
+        "big_losers_lt_minus_20k": 1
+      },
+      "total_risk_profile": {
+        "trades": 107,
+        "avg_score": 5.108856,
+        "avg_amount_ratio_5_20": 0.777154,
+        "avg_atr_14_pct_rank_pct": 0.536687,
+        "avg_panic_vol_ratio_20d_rank_pct": 0.367096,
+        "pct_atr_gt_0p8": 0.0,
+        "pct_panic_gt_0p8": 0.0,
+        "pct_amount_le_0p85": 1.0,
+        "pct_days_since_lu_le_3": 0.037383,
+        "pct_days_since_lu_ge_7": 0.859813,
+        "pct_failed_limit_5d": 0.0
+      },
+      "drawdown_risk_profile": {
+        "trades": 29,
+        "avg_score": 5.534646,
+        "avg_amount_ratio_5_20": 0.770351,
+        "avg_atr_14_pct_rank_pct": 0.581997,
+        "avg_panic_vol_ratio_20d_rank_pct": 0.417676,
+        "pct_atr_gt_0p8": 0.0,
+        "pct_panic_gt_0p8": 0.0,
+        "pct_amount_le_0p85": 1.0,
+        "pct_days_since_lu_le_3": 0.103448,
+        "pct_days_since_lu_ge_7": 0.689655,
+        "pct_failed_limit_5d": 0.0
+      },
+      "worst_12_risk_profile": {
+        "trades": 12,
+        "avg_score": 5.047591,
+        "avg_amount_ratio_5_20": 0.796167,
+        "avg_atr_14_pct_rank_pct": 0.558312,
+        "avg_panic_vol_ratio_20d_rank_pct": 0.346505,
+        "pct_atr_gt_0p8": 0.0,
+        "pct_panic_gt_0p8": 0.0,
+        "pct_amount_le_0p85": 1.0,
+        "pct_days_since_lu_le_3": 0.0,
+        "pct_days_since_lu_ge_7": 0.833333,
+        "pct_failed_limit_5d": 0.0
+      },
+      "drawdown_worst_12_risk_profile": {
+        "trades": 12,
+        "avg_score": 5.554206,
+        "avg_amount_ratio_5_20": 0.771221,
+        "avg_atr_14_pct_rank_pct": 0.628563,
+        "avg_panic_vol_ratio_20d_rank_pct": 0.346358,
+        "pct_atr_gt_0p8": 0.0,
+        "pct_panic_gt_0p8": 0.0,
+        "pct_amount_le_0p85": 1.0,
+        "pct_days_since_lu_le_3": 0.083333,
+        "pct_days_since_lu_ge_7": 0.833333,
+        "pct_failed_limit_5d": 0.0
+      },
+      "worst_months": [
+        {
+          "month": "2025-01",
+          "trades": 1,
+          "pnl": -29159.32,
+          "avg_pnl_pct": -0.133391,
+          "win_rate": 0.0
+        },
+        {
+          "month": "2022-07",
+          "trades": 7,
+          "pnl": -28862.77,
+          "avg_pnl_pct": -0.024311,
+          "win_rate": 0.142857
+        },
+        {
+          "month": "2021-08",
+          "trades": 5,
+          "pnl": -26484.43,
+          "avg_pnl_pct": -0.027481,
+          "win_rate": 0.2
+        },
+        {
+          "month": "2023-02",
+          "trades": 3,
+          "pnl": -23732.48,
+          "avg_pnl_pct": -0.042109,
+          "win_rate": 0.333333
+        },
+        {
+          "month": "2022-04",
+          "trades": 1,
+          "pnl": -23508.8,
+          "avg_pnl_pct": -0.128975,
+          "win_rate": 0.0
+        },
+        {
+          "month": "2021-01",
+          "trades": 3,
+          "pnl": -21568.09,
+          "avg_pnl_pct": -0.043145,
+          "win_rate": 0.0
+        },
+        {
+          "month": "2021-09",
+          "trades": 6,
+          "pnl": -16065.83,
+          "avg_pnl_pct": -0.013488,
+          "win_rate": 0.5
+        },
+        {
+          "month": "2024-03",
+          "trades": 6,
+          "pnl": -11773.06,
+          "avg_pnl_pct": -0.01055,
+          "win_rate": 0.666667
+        }
+      ],
+      "drawdown_worst_months": [
+        {
+          "month": "2022-07",
+          "trades": 7,
+          "pnl": -28862.77,
+          "avg_pnl_pct": -0.024311,
+          "win_rate": 0.142857
+        },
+        {
+          "month": "2021-08",
+          "trades": 5,
+          "pnl": -26484.43,
+          "avg_pnl_pct": -0.027481,
+          "win_rate": 0.2
+        },
+        {
+          "month": "2022-04",
+          "trades": 1,
+          "pnl": -23508.8,
+          "avg_pnl_pct": -0.128975,
+          "win_rate": 0.0
+        },
+        {
+          "month": "2021-09",
+          "trades": 6,
+          "pnl": -16065.83,
+          "avg_pnl_pct": -0.013488,
+          "win_rate": 0.5
+        },
+        {
+          "month": "2022-03",
+          "trades": 1,
+          "pnl": -9259.7,
+          "avg_pnl_pct": -0.051257,
+          "win_rate": 0.0
+        },
+        {
+          "month": "2022-06",
+          "trades": 3,
+          "pnl": -3183.22,
+          "avg_pnl_pct": -0.005489,
+          "win_rate": 0.333333
+        },
+        {
+          "month": "2021-06",
+          "trades": 2,
+          "pnl": 3105.85,
+          "avg_pnl_pct": 0.009837,
+          "win_rate": 0.5
+        },
+        {
+          "month": "2022-05",
+          "trades": 4,
+          "pnl": 4800.83,
+          "avg_pnl_pct": 0.007263,
+          "win_rate": 0.5
+        }
+      ],
+      "worst_trades": [
+        {
+          "code": "sz.002603",
+          "entry_date": "2025-01-17",
+          "exit_date": "2025-01-27",
+          "pnl": -29159.32,
+          "pnl_pct": -0.133391,
+          "hold_trading_days": 6,
+          "score": 4.538842975206611,
+          "rank": 1,
+          "days_since_prior_limit_up": 8,
+          "amount_ratio_5_20": 0.789669591814009,
+          "atr_14_pct_rank_pct": 0.3615702479338843,
+          "panic_vol_ratio_20d_rank_pct": 0.5607438016528926,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.601666",
+          "entry_date": "2024-03-07",
+          "exit_date": "2024-03-15",
+          "pnl": -24717.42,
+          "pnl_pct": -0.132439,
+          "hold_trading_days": 6,
+          "score": 4.643679363750524,
+          "rank": 1,
+          "days_since_prior_limit_up": 9,
+          "amount_ratio_5_20": 0.829770088199056,
+          "atr_14_pct_rank_pct": 0.3677270824612809,
+          "panic_vol_ratio_20d_rank_pct": 0.34491419003767265,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.002120",
+          "entry_date": "2023-02-09",
+          "exit_date": "2023-02-17",
+          "pnl": -24650.79,
+          "pnl_pct": -0.1312,
+          "hold_trading_days": 6,
+          "score": 4.35288928098809,
+          "rank": 1,
+          "days_since_prior_limit_up": 6,
+          "amount_ratio_5_20": 0.6998036665183065,
+          "atr_14_pct_rank_pct": 0.6561535068372298,
+          "panic_vol_ratio_20d_rank_pct": 0.6380679311865902,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.002484",
+          "entry_date": "2022-03-24",
+          "exit_date": "2022-04-01",
+          "pnl": -23508.8,
+          "pnl_pct": -0.128975,
+          "hold_trading_days": 6,
+          "score": 7.578422164827424,
+          "rank": 1,
+          "days_since_prior_limit_up": 5,
+          "amount_ratio_5_20": 0.6944519388164824,
+          "atr_14_pct_rank_pct": 0.6656492134303827,
+          "panic_vol_ratio_20d_rank_pct": 0.1775064569147687,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.000887",
+          "entry_date": "2021-09-15",
+          "exit_date": "2021-09-27",
+          "pnl": -17588.68,
+          "pnl_pct": -0.090991,
+          "hold_trading_days": 6,
+          "score": 3.0566223535204333,
+          "rank": 1,
+          "days_since_prior_limit_up": 10,
+          "amount_ratio_5_20": 0.8250509268048453,
+          "atr_14_pct_rank_pct": 0.6622353520433284,
+          "panic_vol_ratio_20d_rank_pct": 0.22451994091580502,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.600143",
+          "entry_date": "2021-06-08",
+          "exit_date": "2021-06-17",
+          "pnl": -16301.89,
+          "pnl_pct": -0.080971,
+          "hold_trading_days": 6,
+          "score": 4.3954975697109235,
+          "rank": 1,
+          "days_since_prior_limit_up": 8,
+          "amount_ratio_5_20": 0.849050091062994,
+          "atr_14_pct_rank_pct": 0.6282936812484011,
+          "panic_vol_ratio_20d_rank_pct": 0.5807111793297518,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.002340",
+          "entry_date": "2021-09-10",
+          "exit_date": "2021-09-22",
+          "pnl": -13188.27,
+          "pnl_pct": -0.068716,
+          "hold_trading_days": 6,
+          "score": 4.422526523562793,
+          "rank": 1,
+          "days_since_prior_limit_up": 9,
+          "amount_ratio_5_20": 0.8325148270453386,
+          "atr_14_pct_rank_pct": 0.6664199358499877,
+          "panic_vol_ratio_20d_rank_pct": 0.48852701702442636,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.000767",
+          "entry_date": "2022-10-26",
+          "exit_date": "2022-11-03",
+          "pnl": -11174.01,
+          "pnl_pct": -0.069019,
+          "hold_trading_days": 6,
+          "score": 4.646360582306831,
+          "rank": 1,
+          "days_since_prior_limit_up": 8,
+          "amount_ratio_5_20": 0.7599207683394757,
+          "atr_14_pct_rank_pct": 0.5377379619260918,
+          "panic_vol_ratio_20d_rank_pct": 0.16954087346024635,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.002212",
+          "entry_date": "2021-07-23",
+          "exit_date": "2021-08-02",
+          "pnl": -11083.89,
+          "pnl_pct": -0.05667,
+          "hold_trading_days": 6,
+          "score": 4.509929612870789,
+          "rank": 1,
+          "days_since_prior_limit_up": 8,
+          "amount_ratio_5_20": 0.8337019363586601,
+          "atr_14_pct_rank_pct": 0.5781799899446959,
+          "panic_vol_ratio_20d_rank_pct": 0.4019607843137255,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.600588",
+          "entry_date": "2021-08-13",
+          "exit_date": "2021-08-23",
+          "pnl": -10945.39,
+          "pnl_pct": -0.057347,
+          "hold_trading_days": 6,
+          "score": 7.6548419218322135,
+          "rank": 1,
+          "days_since_prior_limit_up": 8,
+          "amount_ratio_5_20": 0.8036306864168549,
+          "atr_14_pct_rank_pct": 0.6594473487677371,
+          "panic_vol_ratio_20d_rank_pct": 0.030868807567836692,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.603129",
+          "entry_date": "2023-04-27",
+          "exit_date": "2023-05-10",
+          "pnl": -10517.02,
+          "pnl_pct": -0.061669,
+          "hold_trading_days": 6,
+          "score": 6.163511749347259,
+          "rank": 1,
+          "days_since_prior_limit_up": 10,
+          "amount_ratio_5_20": 0.8112094542344377,
+          "atr_14_pct_rank_pct": 0.6255439512619669,
+          "panic_vol_ratio_20d_rank_pct": 0.047432550043516104,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.600673",
+          "entry_date": "2021-01-18",
+          "exit_date": "2021-01-26",
+          "pnl": -10229.88,
+          "pnl_pct": -0.061293,
+          "hold_trading_days": 6,
+          "score": 4.607969843834141,
+          "rank": 2,
+          "days_since_prior_limit_up": 7,
+          "amount_ratio_5_20": 0.825228537067168,
+          "atr_14_pct_rank_pct": 0.29079159935379645,
+          "panic_vol_ratio_20d_rank_pct": 0.49326871297792135,
+          "has_failed_limit_up_5d": false
+        }
+      ],
+      "drawdown_worst_trades": [
+        {
+          "code": "sz.002484",
+          "entry_date": "2022-03-24",
+          "exit_date": "2022-04-01",
+          "pnl": -23508.8,
+          "pnl_pct": -0.128975,
+          "hold_trading_days": 6,
+          "score": 7.578422164827424,
+          "rank": 1,
+          "days_since_prior_limit_up": 5,
+          "amount_ratio_5_20": 0.6944519388164824,
+          "atr_14_pct_rank_pct": 0.6656492134303827,
+          "panic_vol_ratio_20d_rank_pct": 0.1775064569147687,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.000887",
+          "entry_date": "2021-09-15",
+          "exit_date": "2021-09-27",
+          "pnl": -17588.68,
+          "pnl_pct": -0.090991,
+          "hold_trading_days": 6,
+          "score": 3.0566223535204333,
+          "rank": 1,
+          "days_since_prior_limit_up": 10,
+          "amount_ratio_5_20": 0.8250509268048453,
+          "atr_14_pct_rank_pct": 0.6622353520433284,
+          "panic_vol_ratio_20d_rank_pct": 0.22451994091580502,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.600143",
+          "entry_date": "2021-06-08",
+          "exit_date": "2021-06-17",
+          "pnl": -16301.89,
+          "pnl_pct": -0.080971,
+          "hold_trading_days": 6,
+          "score": 4.3954975697109235,
+          "rank": 1,
+          "days_since_prior_limit_up": 8,
+          "amount_ratio_5_20": 0.849050091062994,
+          "atr_14_pct_rank_pct": 0.6282936812484011,
+          "panic_vol_ratio_20d_rank_pct": 0.5807111793297518,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.002340",
+          "entry_date": "2021-09-10",
+          "exit_date": "2021-09-22",
+          "pnl": -13188.27,
+          "pnl_pct": -0.068716,
+          "hold_trading_days": 6,
+          "score": 4.422526523562793,
+          "rank": 1,
+          "days_since_prior_limit_up": 9,
+          "amount_ratio_5_20": 0.8325148270453386,
+          "atr_14_pct_rank_pct": 0.6664199358499877,
+          "panic_vol_ratio_20d_rank_pct": 0.48852701702442636,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.002212",
+          "entry_date": "2021-07-23",
+          "exit_date": "2021-08-02",
+          "pnl": -11083.89,
+          "pnl_pct": -0.05667,
+          "hold_trading_days": 6,
+          "score": 4.509929612870789,
+          "rank": 1,
+          "days_since_prior_limit_up": 8,
+          "amount_ratio_5_20": 0.8337019363586601,
+          "atr_14_pct_rank_pct": 0.5781799899446959,
+          "panic_vol_ratio_20d_rank_pct": 0.4019607843137255,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.600588",
+          "entry_date": "2021-08-13",
+          "exit_date": "2021-08-23",
+          "pnl": -10945.39,
+          "pnl_pct": -0.057347,
+          "hold_trading_days": 6,
+          "score": 7.6548419218322135,
+          "rank": 1,
+          "days_since_prior_limit_up": 8,
+          "amount_ratio_5_20": 0.8036306864168549,
+          "atr_14_pct_rank_pct": 0.6594473487677371,
+          "panic_vol_ratio_20d_rank_pct": 0.030868807567836692,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.601828",
+          "entry_date": "2022-07-14",
+          "exit_date": "2022-07-22",
+          "pnl": -9996.44,
+          "pnl_pct": -0.058049,
+          "hold_trading_days": 6,
+          "score": 3.0569882569652314,
+          "rank": 1,
+          "days_since_prior_limit_up": 10,
+          "amount_ratio_5_20": 0.6712182535466904,
+          "atr_14_pct_rank_pct": 0.4899838821091411,
+          "panic_vol_ratio_20d_rank_pct": 0.39603960396039606,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.002626",
+          "entry_date": "2022-05-24",
+          "exit_date": "2022-06-01",
+          "pnl": -9860.93,
+          "pnl_pct": -0.056101,
+          "hold_trading_days": 6,
+          "score": 2.8931643803766565,
+          "rank": 1,
+          "days_since_prior_limit_up": 10,
+          "amount_ratio_5_20": 0.6402340954819947,
+          "atr_14_pct_rank_pct": 0.6421762380841665,
+          "panic_vol_ratio_20d_rank_pct": 0.5714950011625204,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.600392",
+          "entry_date": "2022-03-21",
+          "exit_date": "2022-03-29",
+          "pnl": -9259.7,
+          "pnl_pct": -0.051257,
+          "hold_trading_days": 6,
+          "score": 15.159802306425041,
+          "rank": 1,
+          "days_since_prior_limit_up": 1,
+          "amount_ratio_5_20": 0.8334510432392911,
+          "atr_14_pct_rank_pct": 0.5853141915744882,
+          "panic_vol_ratio_20d_rank_pct": 0.09508119557542952,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.600236",
+          "entry_date": "2022-07-21",
+          "exit_date": "2022-07-29",
+          "pnl": -8619.09,
+          "pnl_pct": -0.051958,
+          "hold_trading_days": 6,
+          "score": 4.487250172294969,
+          "rank": 1,
+          "days_since_prior_limit_up": 9,
+          "amount_ratio_5_20": 0.7655773772716394,
+          "atr_14_pct_rank_pct": 0.6418561911325522,
+          "panic_vol_ratio_20d_rank_pct": 0.3836434642775098,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sh.600383",
+          "entry_date": "2022-07-12",
+          "exit_date": "2022-07-20",
+          "pnl": -7780.38,
+          "pnl_pct": -0.04505,
+          "hold_trading_days": 6,
+          "score": 4.495741252302025,
+          "rank": 2,
+          "days_since_prior_limit_up": 8,
+          "amount_ratio_5_20": 0.6918869017348743,
+          "atr_14_pct_rank_pct": 0.6696593001841621,
+          "panic_vol_ratio_20d_rank_pct": 0.3388581952117864,
+          "has_failed_limit_up_5d": false
+        },
+        {
+          "code": "sz.002456",
+          "entry_date": "2022-07-12",
+          "exit_date": "2022-07-20",
+          "pnl": -7262.19,
+          "pnl_pct": -0.041946,
+          "hold_trading_days": 6,
+          "score": 4.939686924493555,
+          "rank": 1,
+          "days_since_prior_limit_up": 8,
+          "amount_ratio_5_20": 0.8138836364139814,
+          "atr_14_pct_rank_pct": 0.6535451197053407,
+          "panic_vol_ratio_20d_rank_pct": 0.46708103130755063,
+          "has_failed_limit_up_5d": false
+        }
+      ],
+      "by_days_bucket": [
+        {
+          "days_bucket": "d1_3",
+          "trades": 4,
+          "pnl": -6832.51,
+          "avg_pnl_pct": -0.006307,
+          "win_rate": 0.25
+        },
+        {
+          "days_bucket": "d4_6",
+          "trades": 11,
+          "pnl": 32341.12,
+          "avg_pnl_pct": 0.015179,
+          "win_rate": 0.727273
+        },
+        {
+          "days_bucket": "d7_10",
+          "trades": 92,
+          "pnl": 241293.88,
+          "avg_pnl_pct": 0.013885,
+          "win_rate": 0.521739
+        }
+      ],
+      "by_amount_bucket": [
+        {
+          "amount_bucket": "dry_le_0p85",
+          "trades": 107,
+          "pnl": 266802.48,
+          "avg_pnl_pct": 0.013264,
+          "win_rate": 0.53271
+        }
+      ],
+      "by_vol_risk_bucket": [
+        {
+          "vol_risk_bucket": "lowvol_ok",
+          "trades": 107,
+          "pnl": 266802.48,
+          "avg_pnl_pct": 0.013264,
+          "win_rate": 0.53271
+        }
+      ],
+      "by_failed_limit_flag": [
+        {
+          "has_failed_limit_up_5d": "False",
+          "trades": 107,
+          "pnl": 266802.48,
+          "avg_pnl_pct": 0.013264,
+          "win_rate": 0.53271
+        }
+      ]
+    }
+  ],
+  "base_vs_quality_trade_set": {
+    "common": {
+      "trades": 4,
+      "total_pnl": -19597.96,
+      "avg_pnl_pct": -0.013073,
+      "win_rate": 0.25,
+      "big_winners_gt_20k": 0,
+      "big_losers_lt_minus_20k": 1
+    },
+    "left_only": {
+      "trades": 302,
+      "total_pnl": 937472.52,
+      "avg_pnl_pct": 0.012509,
+      "win_rate": 0.509934,
+      "big_winners_gt_20k": 64,
+      "big_losers_lt_minus_20k": 45
+    },
+    "left_only_worst_trades": [
+      {
+        "code": "sz.002468",
+        "entry_date": "2022-10-25",
+        "exit_date": "2022-11-01",
+        "pnl": -76898.55,
+        "pnl_pct": -0.227522,
+        "hold_trading_days": 5,
+        "score": 8.0,
+        "rank": 2,
+        "days_since_prior_limit_up": 6,
+        "amount_ratio_5_20": 0.8810639141179978,
+        "atr_14_pct_rank_pct": 0.809321084472328,
+        "panic_vol_ratio_20d_rank_pct": 0.5115393233251176,
+        "has_failed_limit_up_5d": false
+      },
+      {
+        "code": "sh.600682",
+        "entry_date": "2026-01-15",
+        "exit_date": "2026-01-22",
+        "pnl": -73193.48,
+        "pnl_pct": -0.16307,
+        "hold_trading_days": 5,
+        "score": 8.0,
+        "rank": 2,
+        "days_since_prior_limit_up": 9,
+        "amount_ratio_5_20": 0.988240517857055,
+        "atr_14_pct_rank_pct": 0.6345332519829164,
+        "panic_vol_ratio_20d_rank_pct": 0.5845027455765711,
+        "has_failed_limit_up_5d": false
+      },
+      {
+        "code": "sz.000158",
+        "entry_date": "2024-01-29",
+        "exit_date": "2024-02-06",
+        "pnl": -70394.46,
+        "pnl_pct": -0.274273,
+        "hold_trading_days": 6,
+        "score": 12.0,
+        "rank": 1,
+        "days_since_prior_limit_up": 1,
+        "amount_ratio_5_20": 1.0137543806956175,
+        "atr_14_pct_rank_pct": 0.9289903644742354,
+        "panic_vol_ratio_20d_rank_pct": 0.15354000837871806,
+        "has_failed_limit_up_5d": false
+      },
+      {
+        "code": "sh.600557",
+        "entry_date": "2022-12-14",
+        "exit_date": "2022-12-21",
+        "pnl": -57244.85,
+        "pnl_pct": -0.188033,
+        "hold_trading_days": 5,
+        "score": 12.0,
+        "rank": 1,
+        "days_since_prior_limit_up": 1,
+        "amount_ratio_5_20": 0.8765205059775122,
+        "atr_14_pct_rank_pct": 0.9917941893989798,
+        "panic_vol_ratio_20d_rank_pct": 0.34530938123752497,
+        "has_failed_limit_up_5d": false
+      },
+      {
+        "code": "sh.601208",
+        "entry_date": "2025-08-26",
+        "exit_date": "2025-09-02",
+        "pnl": -56456.49,
+        "pnl_pct": -0.118334,
+        "hold_trading_days": 5,
+        "score": 12.0,
+        "rank": 1,
+        "days_since_prior_limit_up": 1,
+        "amount_ratio_5_20": 1.050437833858535,
+        "atr_14_pct_rank_pct": 0.9451942740286299,
+        "panic_vol_ratio_20d_rank_pct": 0.9584867075664621,
+        "has_failed_limit_up_5d": false
+      },
+      {
+        "code": "sz.002738",
+        "entry_date": "2024-01-26",
+        "exit_date": "2024-02-02",
+        "pnl": -54696.79,
+        "pnl_pct": -0.212612,
+        "hold_trading_days": 5,
+        "score": 3.5,
+        "rank": 1,
+        "days_since_prior_limit_up": 10,
+        "amount_ratio_5_20": 0.9642212958936914,
+        "atr_14_pct_rank_pct": 0.8487641390867198,
+        "panic_vol_ratio_20d_rank_pct": 0.3332635106828655,
+        "has_failed_limit_up_5d": false
+      },
+      {
+        "code": "sh.603650",
+        "entry_date": "2021-08-26",
+        "exit_date": "2021-09-02",
+        "pnl": -53310.73,
+        "pnl_pct": -0.188406,
+        "hold_trading_days": 5,
+        "score": 11.0,
+        "rank": 3,
+        "days_since_prior_limit_up": 2,
+        "amount_ratio_5_20": 0.9957372973623168,
+        "atr_14_pct_rank_pct": 0.8218091697645601,
+        "panic_vol_ratio_20d_rank_pct": 0.3306071871127633,
+        "has_failed_limit_up_5d": false
+      },
+      {
+        "code": "sz.002468",
+        "entry_date": "2025-08-26",
+        "exit_date": "2025-09-02",
+        "pnl": -50765.42,
+        "pnl_pct": -0.106508,
+        "hold_trading_days": 5,
+        "score": 8.0,
+        "rank": 3,
+        "days_since_prior_limit_up": 3,
+        "amount_ratio_5_20": 0.8884527400910389,
+        "atr_14_pct_rank_pct": 0.8950920245398774,
+        "panic_vol_ratio_20d_rank_pct": 0.5713701431492842,
+        "has_failed_limit_up_5d": false
+      },
+      {
+        "code": "sh.600353",
+        "entry_date": "2025-07-23",
+        "exit_date": "2025-07-30",
+        "pnl": -49273.66,
+        "pnl_pct": -0.107239,
+        "hold_trading_days": 5,
+        "score": 5.0,
+        "rank": 3,
+        "days_since_prior_limit_up": 9,
+        "amount_ratio_5_20": 0.7817834091484158,
+        "atr_14_pct_rank_pct": 0.9348494161032576,
+        "panic_vol_ratio_20d_rank_pct": 0.661339889366933,
+        "has_failed_limit_up_5d": false
+      },
+      {
+        "code": "sz.000815",
+        "entry_date": "2026-04-20",
+        "exit_date": "2026-04-27",
+        "pnl": -44306.24,
+        "pnl_pct": -0.094757,
+        "hold_trading_days": 5,
+        "score": 12.0,
+        "rank": 3,
+        "days_since_prior_limit_up": 1,
+        "amount_ratio_5_20": 0.9180579632481093,
+        "atr_14_pct_rank_pct": 0.9631802549059276,
+        "panic_vol_ratio_20d_rank_pct": 0.7790815294355654,
+        "has_failed_limit_up_5d": false
+      }
+    ],
+    "left_only_by_amount_bucket": [
+      {
+        "amount_bucket": "dry_le_0p85",
+        "trades": 53,
+        "pnl": -21030.69,
+        "avg_pnl_pct": 0.000563,
+        "win_rate": 0.471698
+      },
+      {
+        "amount_bucket": "normal_0p85_1p10",
+        "trades": 249,
+        "pnl": 958503.21,
+        "avg_pnl_pct": 0.015052,
+        "win_rate": 0.518072
+      }
+    ],
+    "left_only_by_vol_risk_bucket": [
+      {
+        "vol_risk_bucket": "high_risk_vol",
+        "trades": 267,
+        "pnl": 928310.14,
+        "avg_pnl_pct": 0.01339,
+        "win_rate": 0.509363
+      },
+      {
+        "vol_risk_bucket": "lowvol_ok",
+        "trades": 35,
+        "pnl": 9162.38,
+        "avg_pnl_pct": 0.005787,
+        "win_rate": 0.514286
+      }
+    ]
+  },
+  "interpretation": {
+    "base_5td": "High total return comes from broad participation, but the same breadth keeps high-risk volatility and expanded-volume pullbacks in the book.",
+    "quality_6td": "Quality filter removes most high-risk trades and lowers MaxDD, but also cuts too much gross edge and leaves 2023 weak."
+  }
+}

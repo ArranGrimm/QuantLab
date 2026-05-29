@@ -1,0 +1,898 @@
+{
+  "generated_at": "2026-05-29 11:08:37",
+  "method": "Daily raw OHLCV limit ecology features joined on signal_date + code. pre_close_raw is approximated by previous trading day's raw close because stock_daily has no official pre_close.",
+  "data": {
+    "qmt_db": "D:\\WorkSpace\\Tinkering\\QuantData\\Ashare\\qmt_data.duckdb",
+    "start_date": "2019-01-01",
+    "end_date": "2026-05-10",
+    "feature_rows": 7505002,
+    "price_limit_tolerance": 0.001,
+    "st_snapshot_date": "2026-03-31"
+  },
+  "supported_features": [
+    "near-N-day close limit-up",
+    "days since previous close limit-up",
+    "close limit-up streak",
+    "failed limit-up approximated by intraday high touching limit but close not limit-up",
+    "one-word limit-up approximated by open/low/close all at limit-up",
+    "first-board pullback setup",
+    "reclaim after prior limit-up",
+    "re-board after pullback",
+    "break-after-limit acceptance"
+  ],
+  "unsupported_features": [
+    "exact seal time",
+    "seal amount",
+    "number of intraday board opens",
+    "auction strength",
+    "Level2 order book strength",
+    "official ex-right adjusted price-limit reference price"
+  ],
+  "feature_definitions": {
+    "is_close_limit_up": "raw close / previous raw close - 1 >= board limit pct - tolerance",
+    "is_failed_limit_up": "raw high touched limit-up but raw close did not close limit-up",
+    "limit_up_streak": "consecutive close limit-up count by code",
+    "days_since_prior_limit_up": "trading days since the previous close limit-up before signal_date",
+    "is_first_board_pullback_setup": "after a prior first board within 10 trading days, price pulls back mildly with non-expanded 5/20 amount",
+    "is_reclaim_after_limit": "after a prior limit-up, raw close reclaims the prior limit-up day's high",
+    "is_reboard_after_pullback": "close limit-up again within 10 trading days after a prior limit-up",
+    "is_good_break_acceptance": "after prior limit-up streak breaks, daily return > -2% and close position >= 0.55"
+  },
+  "sleeves": {
+    "p3_static": {
+      "sleeve": "p3_static",
+      "label": "P3 static strict",
+      "total": {
+        "trades": 274,
+        "total_pnl": 1008459.88,
+        "avg_pnl_pct": 0.013133,
+        "win_rate": 0.525547
+      },
+      "missing_feature_trades": 0,
+      "by_days_since_lu_bucket": [
+        {
+          "days_since_lu_bucket": "after_lu_11_20d",
+          "trades": 3,
+          "total_pnl": 62186.42,
+          "avg_pnl_pct": 0.076339,
+          "win_rate": 1.0
+        },
+        {
+          "days_since_lu_bucket": "after_lu_1_3d",
+          "trades": 14,
+          "total_pnl": 598108.15,
+          "avg_pnl_pct": 0.128059,
+          "win_rate": 0.714286
+        },
+        {
+          "days_since_lu_bucket": "after_lu_4_10d",
+          "trades": 3,
+          "total_pnl": 47674.04,
+          "avg_pnl_pct": 0.03396,
+          "win_rate": 0.666667
+        },
+        {
+          "days_since_lu_bucket": "after_lu_gt20d",
+          "trades": 217,
+          "total_pnl": 284786.7,
+          "avg_pnl_pct": 0.006233,
+          "win_rate": 0.497696
+        },
+        {
+          "days_since_lu_bucket": "no_prior_limit",
+          "trades": 37,
+          "total_pnl": 15704.57,
+          "avg_pnl_pct": 0.0033,
+          "win_rate": 0.567568
+        }
+      ],
+      "by_last_lu_streak_bucket": [
+        {
+          "last_lu_streak_bucket": "last_2_boards",
+          "trades": 29,
+          "total_pnl": -122211.86,
+          "avg_pnl_pct": -0.014113,
+          "win_rate": 0.344828
+        },
+        {
+          "last_lu_streak_bucket": "last_3plus_boards",
+          "trades": 4,
+          "total_pnl": 177821.39,
+          "avg_pnl_pct": 0.122644,
+          "win_rate": 0.25
+        },
+        {
+          "last_lu_streak_bucket": "last_first_board",
+          "trades": 204,
+          "total_pnl": 937145.78,
+          "avg_pnl_pct": 0.016642,
+          "win_rate": 0.54902
+        },
+        {
+          "last_lu_streak_bucket": "no_prior_limit",
+          "trades": 37,
+          "total_pnl": 15704.57,
+          "avg_pnl_pct": 0.0033,
+          "win_rate": 0.567568
+        }
+      ],
+      "by_limit_up_count_20d_bucket": [
+        {
+          "limit_up_count_20d_bucket": "four_plus_lu_20d",
+          "trades": 8,
+          "total_pnl": 345900.61,
+          "avg_pnl_pct": 0.116066,
+          "win_rate": 0.625
+        },
+        {
+          "limit_up_count_20d_bucket": "no_lu_20d",
+          "trades": 250,
+          "total_pnl": 358754.7,
+          "avg_pnl_pct": 0.006529,
+          "win_rate": 0.516
+        },
+        {
+          "limit_up_count_20d_bucket": "one_lu_20d",
+          "trades": 7,
+          "total_pnl": -31384.63,
+          "avg_pnl_pct": -0.011212,
+          "win_rate": 0.428571
+        },
+        {
+          "limit_up_count_20d_bucket": "two_three_lu_20d",
+          "trades": 9,
+          "total_pnl": 335189.19,
+          "avg_pnl_pct": 0.124018,
+          "win_rate": 0.777778
+        }
+      ],
+      "event_summary": {
+        "has_limit_up_5d": {
+          "true": {
+            "trades": 21,
+            "total_pnl": 622826.37,
+            "avg_pnl_pct": 0.089865,
+            "win_rate": 0.571429
+          },
+          "false": {
+            "trades": 253,
+            "total_pnl": 385633.5,
+            "avg_pnl_pct": 0.006764,
+            "win_rate": 0.521739
+          }
+        },
+        "has_limit_up_10d": {
+          "true": {
+            "trades": 22,
+            "total_pnl": 623755.11,
+            "avg_pnl_pct": 0.086003,
+            "win_rate": 0.590909
+          },
+          "false": {
+            "trades": 252,
+            "total_pnl": 384704.77,
+            "avg_pnl_pct": 0.006771,
+            "win_rate": 0.519841
+          }
+        },
+        "has_limit_up_20d": {
+          "true": {
+            "trades": 24,
+            "total_pnl": 649705.17,
+            "avg_pnl_pct": 0.081925,
+            "win_rate": 0.625
+          },
+          "false": {
+            "trades": 250,
+            "total_pnl": 358754.7,
+            "avg_pnl_pct": 0.006529,
+            "win_rate": 0.516
+          }
+        },
+        "has_failed_limit_up_5d": {
+          "true": {
+            "trades": 7,
+            "total_pnl": 103957.43,
+            "avg_pnl_pct": 0.043533,
+            "win_rate": 0.714286
+          },
+          "false": {
+            "trades": 267,
+            "total_pnl": 904502.44,
+            "avg_pnl_pct": 0.012336,
+            "win_rate": 0.520599
+          }
+        },
+        "has_one_word_limit_up_10d": {
+          "true": {
+            "trades": 10,
+            "total_pnl": 336454.81,
+            "avg_pnl_pct": 0.098047,
+            "win_rate": 0.6
+          },
+          "false": {
+            "trades": 264,
+            "total_pnl": 672005.07,
+            "avg_pnl_pct": 0.009916,
+            "win_rate": 0.522727
+          }
+        },
+        "was_limit_up_yesterday": {
+          "true": {
+            "trades": 14,
+            "total_pnl": 598108.15,
+            "avg_pnl_pct": 0.128059,
+            "win_rate": 0.714286
+          },
+          "false": {
+            "trades": 260,
+            "total_pnl": 410351.73,
+            "avg_pnl_pct": 0.006945,
+            "win_rate": 0.515385
+          }
+        },
+        "was_failed_limit_up_yesterday": {
+          "true": {
+            "trades": 0,
+            "total_pnl": 0.0,
+            "avg_pnl_pct": 0.0,
+            "win_rate": 0.0
+          },
+          "false": {
+            "trades": 274,
+            "total_pnl": 1008459.88,
+            "avg_pnl_pct": 0.013133,
+            "win_rate": 0.525547
+          }
+        },
+        "is_break_after_limit": {
+          "true": {
+            "trades": 0,
+            "total_pnl": 0.0,
+            "avg_pnl_pct": 0.0,
+            "win_rate": 0.0
+          },
+          "false": {
+            "trades": 274,
+            "total_pnl": 1008459.88,
+            "avg_pnl_pct": 0.013133,
+            "win_rate": 0.525547
+          }
+        },
+        "is_good_break_acceptance": {
+          "true": {
+            "trades": 0,
+            "total_pnl": 0.0,
+            "avg_pnl_pct": 0.0,
+            "win_rate": 0.0
+          },
+          "false": {
+            "trades": 274,
+            "total_pnl": 1008459.88,
+            "avg_pnl_pct": 0.013133,
+            "win_rate": 0.525547
+          }
+        },
+        "is_first_board_pullback_setup": {
+          "true": {
+            "trades": 0,
+            "total_pnl": 0.0,
+            "avg_pnl_pct": 0.0,
+            "win_rate": 0.0
+          },
+          "false": {
+            "trades": 274,
+            "total_pnl": 1008459.88,
+            "avg_pnl_pct": 0.013133,
+            "win_rate": 0.525547
+          }
+        },
+        "is_reclaim_after_limit": {
+          "true": {
+            "trades": 1,
+            "total_pnl": 928.74,
+            "avg_pnl_pct": 0.004892,
+            "win_rate": 1.0
+          },
+          "false": {
+            "trades": 273,
+            "total_pnl": 1007531.14,
+            "avg_pnl_pct": 0.013163,
+            "win_rate": 0.52381
+          }
+        },
+        "is_reboard_after_pullback": {
+          "true": {
+            "trades": 16,
+            "total_pnl": 644853.45,
+            "avg_pnl_pct": 0.118113,
+            "win_rate": 0.6875
+          },
+          "false": {
+            "trades": 258,
+            "total_pnl": 363606.43,
+            "avg_pnl_pct": 0.006622,
+            "win_rate": 0.515504
+          }
+        }
+      },
+      "rules": [
+        {
+          "rule": "skip_no_recent_limit_up_20d",
+          "skipped": {
+            "trades": 250,
+            "total_pnl": 358754.7,
+            "avg_pnl_pct": 0.006529,
+            "win_rate": 0.516
+          },
+          "kept": {
+            "trades": 24,
+            "total_pnl": 649705.17,
+            "avg_pnl_pct": 0.081925,
+            "win_rate": 0.625
+          },
+          "trade_level_delta": -358754.7,
+          "skipped_big_winner_gt_20k": 19,
+          "skipped_big_loser_lt_minus_20k": 15,
+          "yearly_trade_level_delta": {
+            "2021": 11178.31,
+            "2022": -173323.8,
+            "2023": -148842.33,
+            "2024": -56849.09,
+            "2025": -799.88,
+            "2026": 9882.09
+          }
+        },
+        {
+          "rule": "skip_recent_failed_limit_up_5d",
+          "skipped": {
+            "trades": 7,
+            "total_pnl": 103957.43,
+            "avg_pnl_pct": 0.043533,
+            "win_rate": 0.714286
+          },
+          "kept": {
+            "trades": 267,
+            "total_pnl": 904502.44,
+            "avg_pnl_pct": 0.012336,
+            "win_rate": 0.520599
+          },
+          "trade_level_delta": -103957.43,
+          "skipped_big_winner_gt_20k": 3,
+          "skipped_big_loser_lt_minus_20k": 1,
+          "yearly_trade_level_delta": {
+            "2021": -16413.89,
+            "2024": 9672.76,
+            "2025": -97216.3
+          }
+        },
+        {
+          "rule": "skip_after_3plus_limit_streak",
+          "skipped": {
+            "trades": 4,
+            "total_pnl": 177821.39,
+            "avg_pnl_pct": 0.122644,
+            "win_rate": 0.25
+          },
+          "kept": {
+            "trades": 270,
+            "total_pnl": 830638.49,
+            "avg_pnl_pct": 0.011511,
+            "win_rate": 0.52963
+          },
+          "trade_level_delta": -177821.39,
+          "skipped_big_winner_gt_20k": 1,
+          "skipped_big_loser_lt_minus_20k": 0,
+          "yearly_trade_level_delta": {
+            "2021": 18347.46,
+            "2022": 4012.84,
+            "2023": 3785.29,
+            "2024": -203966.98
+          }
+        },
+        {
+          "rule": "skip_weak_break_after_limit",
+          "skipped": {
+            "trades": 0,
+            "total_pnl": 0.0,
+            "avg_pnl_pct": 0.0,
+            "win_rate": 0.0
+          },
+          "kept": {
+            "trades": 274,
+            "total_pnl": 1008459.88,
+            "avg_pnl_pct": 0.013133,
+            "win_rate": 0.525547
+          },
+          "trade_level_delta": -0.0,
+          "skipped_big_winner_gt_20k": 0,
+          "skipped_big_loser_lt_minus_20k": 0,
+          "yearly_trade_level_delta": {}
+        },
+        {
+          "rule": "skip_not_first_board_pullback_setup",
+          "skipped": {
+            "trades": 274,
+            "total_pnl": 1008459.88,
+            "avg_pnl_pct": 0.013133,
+            "win_rate": 0.525547
+          },
+          "kept": {
+            "trades": 0,
+            "total_pnl": 0.0,
+            "avg_pnl_pct": 0.0,
+            "win_rate": 0.0
+          },
+          "trade_level_delta": -1008459.88,
+          "skipped_big_winner_gt_20k": 29,
+          "skipped_big_loser_lt_minus_20k": 16,
+          "yearly_trade_level_delta": {
+            "2021": -43070.3,
+            "2022": -219677.3,
+            "2023": -148842.33,
+            "2024": -423266.72,
+            "2025": -185366.77,
+            "2026": 11763.54
+          }
+        },
+        {
+          "rule": "skip_not_reclaim_or_reboard",
+          "skipped": {
+            "trades": 257,
+            "total_pnl": 362677.69,
+            "avg_pnl_pct": 0.006629,
+            "win_rate": 0.513619
+          },
+          "kept": {
+            "trades": 17,
+            "total_pnl": 645782.18,
+            "avg_pnl_pct": 0.111453,
+            "win_rate": 0.705882
+          },
+          "trade_level_delta": -362677.69,
+          "skipped_big_winner_gt_20k": 20,
+          "skipped_big_loser_lt_minus_20k": 16,
+          "yearly_trade_level_delta": {
+            "2021": 16743.19,
+            "2022": -219677.3,
+            "2023": -148842.33,
+            "2024": -6031.99,
+            "2025": -16632.81,
+            "2026": 11763.54
+          }
+        }
+      ]
+    },
+    "pb3_rolling": {
+      "sleeve": "pb3_rolling",
+      "label": "PB3 rolling raw",
+      "total": {
+        "trades": 1650,
+        "total_pnl": 498123.68,
+        "avg_pnl_pct": 0.01032,
+        "win_rate": 0.480606
+      },
+      "missing_feature_trades": 0,
+      "by_days_since_lu_bucket": [
+        {
+          "days_since_lu_bucket": "after_lu_11_20d",
+          "trades": 169,
+          "total_pnl": 96390.35,
+          "avg_pnl_pct": 0.01561,
+          "win_rate": 0.473373
+        },
+        {
+          "days_since_lu_bucket": "after_lu_1_3d",
+          "trades": 11,
+          "total_pnl": 6061.2,
+          "avg_pnl_pct": 0.01083,
+          "win_rate": 0.454545
+        },
+        {
+          "days_since_lu_bucket": "after_lu_4_10d",
+          "trades": 70,
+          "total_pnl": 56909.09,
+          "avg_pnl_pct": 0.023945,
+          "win_rate": 0.571429
+        },
+        {
+          "days_since_lu_bucket": "after_lu_gt20d",
+          "trades": 1226,
+          "total_pnl": 329025.93,
+          "avg_pnl_pct": 0.010029,
+          "win_rate": 0.486949
+        },
+        {
+          "days_since_lu_bucket": "no_prior_limit",
+          "trades": 174,
+          "total_pnl": 9737.1,
+          "avg_pnl_pct": 0.001721,
+          "win_rate": 0.408046
+        }
+      ],
+      "by_last_lu_streak_bucket": [
+        {
+          "last_lu_streak_bucket": "last_2_boards",
+          "trades": 96,
+          "total_pnl": 62267.61,
+          "avg_pnl_pct": 0.01796,
+          "win_rate": 0.53125
+        },
+        {
+          "last_lu_streak_bucket": "last_3plus_boards",
+          "trades": 35,
+          "total_pnl": 7682.89,
+          "avg_pnl_pct": 0.00716,
+          "win_rate": 0.4
+        },
+        {
+          "last_lu_streak_bucket": "last_first_board",
+          "trades": 1345,
+          "total_pnl": 418436.08,
+          "avg_pnl_pct": 0.010969,
+          "win_rate": 0.488476
+        },
+        {
+          "last_lu_streak_bucket": "no_prior_limit",
+          "trades": 174,
+          "total_pnl": 9737.1,
+          "avg_pnl_pct": 0.001721,
+          "win_rate": 0.408046
+        }
+      ],
+      "by_limit_up_count_20d_bucket": [
+        {
+          "limit_up_count_20d_bucket": "four_plus_lu_20d",
+          "trades": 24,
+          "total_pnl": 204.04,
+          "avg_pnl_pct": -0.000316,
+          "win_rate": 0.458333
+        },
+        {
+          "limit_up_count_20d_bucket": "no_lu_20d",
+          "trades": 1421,
+          "total_pnl": 333604.95,
+          "avg_pnl_pct": 0.0088,
+          "win_rate": 0.477833
+        },
+        {
+          "limit_up_count_20d_bucket": "one_lu_20d",
+          "trades": 147,
+          "total_pnl": 115353.91,
+          "avg_pnl_pct": 0.019901,
+          "win_rate": 0.482993
+        },
+        {
+          "limit_up_count_20d_bucket": "two_three_lu_20d",
+          "trades": 58,
+          "total_pnl": 48960.78,
+          "avg_pnl_pct": 0.027674,
+          "win_rate": 0.551724
+        }
+      ],
+      "event_summary": {
+        "has_limit_up_5d": {
+          "true": {
+            "trades": 14,
+            "total_pnl": 5997.59,
+            "avg_pnl_pct": 0.008745,
+            "win_rate": 0.5
+          },
+          "false": {
+            "trades": 1636,
+            "total_pnl": 492126.09,
+            "avg_pnl_pct": 0.010333,
+            "win_rate": 0.48044
+          }
+        },
+        "has_limit_up_10d": {
+          "true": {
+            "trades": 65,
+            "total_pnl": 42470.79,
+            "avg_pnl_pct": 0.016933,
+            "win_rate": 0.538462
+          },
+          "false": {
+            "trades": 1585,
+            "total_pnl": 455652.9,
+            "avg_pnl_pct": 0.010049,
+            "win_rate": 0.478233
+          }
+        },
+        "has_limit_up_20d": {
+          "true": {
+            "trades": 229,
+            "total_pnl": 164518.73,
+            "avg_pnl_pct": 0.019751,
+            "win_rate": 0.497817
+          },
+          "false": {
+            "trades": 1421,
+            "total_pnl": 333604.95,
+            "avg_pnl_pct": 0.0088,
+            "win_rate": 0.477833
+          }
+        },
+        "has_failed_limit_up_5d": {
+          "true": {
+            "trades": 22,
+            "total_pnl": -2327.96,
+            "avg_pnl_pct": -0.004289,
+            "win_rate": 0.363636
+          },
+          "false": {
+            "trades": 1628,
+            "total_pnl": 500451.65,
+            "avg_pnl_pct": 0.010517,
+            "win_rate": 0.482187
+          }
+        },
+        "has_one_word_limit_up_10d": {
+          "true": {
+            "trades": 3,
+            "total_pnl": 6860.42,
+            "avg_pnl_pct": 0.071557,
+            "win_rate": 0.666667
+          },
+          "false": {
+            "trades": 1647,
+            "total_pnl": 491263.27,
+            "avg_pnl_pct": 0.010208,
+            "win_rate": 0.480267
+          }
+        },
+        "was_limit_up_yesterday": {
+          "true": {
+            "trades": 2,
+            "total_pnl": -3635.55,
+            "avg_pnl_pct": -0.075328,
+            "win_rate": 0.0
+          },
+          "false": {
+            "trades": 1648,
+            "total_pnl": 501759.23,
+            "avg_pnl_pct": 0.010424,
+            "win_rate": 0.481189
+          }
+        },
+        "was_failed_limit_up_yesterday": {
+          "true": {
+            "trades": 4,
+            "total_pnl": 10342.71,
+            "avg_pnl_pct": 0.086458,
+            "win_rate": 0.75
+          },
+          "false": {
+            "trades": 1646,
+            "total_pnl": 487780.97,
+            "avg_pnl_pct": 0.010135,
+            "win_rate": 0.479951
+          }
+        },
+        "is_break_after_limit": {
+          "true": {
+            "trades": 2,
+            "total_pnl": -3635.55,
+            "avg_pnl_pct": -0.075328,
+            "win_rate": 0.0
+          },
+          "false": {
+            "trades": 1648,
+            "total_pnl": 501759.23,
+            "avg_pnl_pct": 0.010424,
+            "win_rate": 0.481189
+          }
+        },
+        "is_good_break_acceptance": {
+          "true": {
+            "trades": 0,
+            "total_pnl": 0.0,
+            "avg_pnl_pct": 0.0,
+            "win_rate": 0.0
+          },
+          "false": {
+            "trades": 1650,
+            "total_pnl": 498123.68,
+            "avg_pnl_pct": 0.01032,
+            "win_rate": 0.480606
+          }
+        },
+        "is_first_board_pullback_setup": {
+          "true": {
+            "trades": 11,
+            "total_pnl": 16497.98,
+            "avg_pnl_pct": 0.044239,
+            "win_rate": 0.545455
+          },
+          "false": {
+            "trades": 1639,
+            "total_pnl": 481625.71,
+            "avg_pnl_pct": 0.010092,
+            "win_rate": 0.480171
+          }
+        },
+        "is_reclaim_after_limit": {
+          "true": {
+            "trades": 2,
+            "total_pnl": 1017.02,
+            "avg_pnl_pct": 0.029615,
+            "win_rate": 0.5
+          },
+          "false": {
+            "trades": 1648,
+            "total_pnl": 497106.66,
+            "avg_pnl_pct": 0.010297,
+            "win_rate": 0.480583
+          }
+        },
+        "is_reboard_after_pullback": {
+          "true": {
+            "trades": 0,
+            "total_pnl": 0.0,
+            "avg_pnl_pct": 0.0,
+            "win_rate": 0.0
+          },
+          "false": {
+            "trades": 1650,
+            "total_pnl": 498123.68,
+            "avg_pnl_pct": 0.01032,
+            "win_rate": 0.480606
+          }
+        }
+      },
+      "rules": [
+        {
+          "rule": "skip_no_recent_limit_up_20d",
+          "skipped": {
+            "trades": 1421,
+            "total_pnl": 333604.95,
+            "avg_pnl_pct": 0.0088,
+            "win_rate": 0.477833
+          },
+          "kept": {
+            "trades": 229,
+            "total_pnl": 164518.73,
+            "avg_pnl_pct": 0.019751,
+            "win_rate": 0.497817
+          },
+          "trade_level_delta": -333604.95,
+          "skipped_big_winner_gt_20k": 1,
+          "skipped_big_loser_lt_minus_20k": 0,
+          "yearly_trade_level_delta": {
+            "2021": -12437.61,
+            "2022": -50548.14,
+            "2023": 13971.29,
+            "2024": -104478.88,
+            "2025": -140435.92,
+            "2026": -39675.69
+          }
+        },
+        {
+          "rule": "skip_recent_failed_limit_up_5d",
+          "skipped": {
+            "trades": 22,
+            "total_pnl": -2327.96,
+            "avg_pnl_pct": -0.004289,
+            "win_rate": 0.363636
+          },
+          "kept": {
+            "trades": 1628,
+            "total_pnl": 500451.65,
+            "avg_pnl_pct": 0.010517,
+            "win_rate": 0.482187
+          },
+          "trade_level_delta": 2327.96,
+          "skipped_big_winner_gt_20k": 0,
+          "skipped_big_loser_lt_minus_20k": 0,
+          "yearly_trade_level_delta": {
+            "2021": -555.09,
+            "2022": 1759.97,
+            "2023": 2146.88,
+            "2024": 4818.47,
+            "2025": -9335.76,
+            "2026": 3493.5
+          }
+        },
+        {
+          "rule": "skip_after_3plus_limit_streak",
+          "skipped": {
+            "trades": 35,
+            "total_pnl": 7682.89,
+            "avg_pnl_pct": 0.00716,
+            "win_rate": 0.4
+          },
+          "kept": {
+            "trades": 1615,
+            "total_pnl": 490440.79,
+            "avg_pnl_pct": 0.010388,
+            "win_rate": 0.482353
+          },
+          "trade_level_delta": -7682.89,
+          "skipped_big_winner_gt_20k": 0,
+          "skipped_big_loser_lt_minus_20k": 0,
+          "yearly_trade_level_delta": {
+            "2021": 9477.06,
+            "2022": 102.74,
+            "2024": -9795.03,
+            "2025": -6994.91,
+            "2026": -472.75
+          }
+        },
+        {
+          "rule": "skip_weak_break_after_limit",
+          "skipped": {
+            "trades": 2,
+            "total_pnl": -3635.55,
+            "avg_pnl_pct": -0.075328,
+            "win_rate": 0.0
+          },
+          "kept": {
+            "trades": 1648,
+            "total_pnl": 501759.23,
+            "avg_pnl_pct": 0.010424,
+            "win_rate": 0.481189
+          },
+          "trade_level_delta": 3635.55,
+          "skipped_big_winner_gt_20k": 0,
+          "skipped_big_loser_lt_minus_20k": 0,
+          "yearly_trade_level_delta": {
+            "2021": 3001.12,
+            "2022": 634.43
+          }
+        },
+        {
+          "rule": "skip_not_first_board_pullback_setup",
+          "skipped": {
+            "trades": 1639,
+            "total_pnl": 481625.71,
+            "avg_pnl_pct": 0.010092,
+            "win_rate": 0.480171
+          },
+          "kept": {
+            "trades": 11,
+            "total_pnl": 16497.98,
+            "avg_pnl_pct": 0.044239,
+            "win_rate": 0.545455
+          },
+          "trade_level_delta": -481625.71,
+          "skipped_big_winner_gt_20k": 2,
+          "skipped_big_loser_lt_minus_20k": 0,
+          "yearly_trade_level_delta": {
+            "2021": -1337.23,
+            "2022": -37858.83,
+            "2023": 17738.03,
+            "2024": -146837.14,
+            "2025": -188802.11,
+            "2026": -124528.42
+          }
+        },
+        {
+          "rule": "skip_not_reclaim_or_reboard",
+          "skipped": {
+            "trades": 1648,
+            "total_pnl": 497106.66,
+            "avg_pnl_pct": 0.010297,
+            "win_rate": 0.480583
+          },
+          "kept": {
+            "trades": 2,
+            "total_pnl": 1017.02,
+            "avg_pnl_pct": 0.029615,
+            "win_rate": 0.5
+          },
+          "trade_level_delta": -497106.66,
+          "skipped_big_winner_gt_20k": 2,
+          "skipped_big_loser_lt_minus_20k": 0,
+          "yearly_trade_level_delta": {
+            "2021": 2039.43,
+            "2022": -40855.72,
+            "2023": 18182.61,
+            "2024": -146519.94,
+            "2025": -198632.87,
+            "2026": -131320.16
+          }
+        }
+      ]
+    }
+  }
+}

@@ -230,12 +230,18 @@ impl From<ConfigFile> for AmvTopnConfig {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct PriceBar {
+    /// Execution price basis. Prefer raw OHLC; old artifacts fall back to adjusted OHLC.
     pub open: f64,
     pub high: f64,
     pub close: f64,
     pub pre_close: f64,
+    pub open_adj: f64,
+    pub high_adj: f64,
+    pub close_adj: f64,
+    pub pre_close_adj: f64,
     pub score: f64,
     pub rank: u32,
     pub is_signal: bool,
@@ -247,6 +253,7 @@ pub struct MarketData {
     pub prices: HashMap<String, HashMap<NaiveDate, PriceBar>>,
     pub date_index: HashMap<NaiveDate, i32>,
     pub trading_dates: Vec<NaiveDate>,
+    pub price_basis: String,
 }
 
 #[derive(Resource, Default)]
