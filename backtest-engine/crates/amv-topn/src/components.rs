@@ -47,6 +47,7 @@ pub struct ClosedTrade {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitReason {
     StopLoss,
+    EarlyStop,
     TrailingStop,
     BearRegime,
     MaxHoldDays,
@@ -57,6 +58,7 @@ impl std::fmt::Display for ExitReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ExitReason::StopLoss => write!(f, "StopLoss"),
+            ExitReason::EarlyStop => write!(f, "EarlyStop"),
             ExitReason::TrailingStop => write!(f, "TrailingStop"),
             ExitReason::BearRegime => write!(f, "BearRegime"),
             ExitReason::MaxHoldDays => write!(f, "MaxHoldDays"),

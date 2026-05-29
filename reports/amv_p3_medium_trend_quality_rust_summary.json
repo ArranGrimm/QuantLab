@@ -1,0 +1,94 @@
+{
+  "generated_at": "2026-05-28 17:22:30",
+  "base": {
+    "artifact": "20260520_092049_candidate_p3_k0p5_b0_c0_r0",
+    "label": "raw P3 candidate_p3_k0p5_b0_c0_r0",
+    "total_return_pct": 201.69197502379618,
+    "max_drawdown_pct": 13.522221809970919,
+    "win_rate_pct": 52.55474452554745,
+    "total_trades": 274,
+    "report_json": "artifacts/amv_static_sleeve_signals/20260520_092049_candidate_p3_k0p5_b0_c0_r0/backtests/6td_static_strict_top3_no_stop_20260520_092208_801/report.json"
+  },
+  "candidates": [
+    {
+      "artifact": "20260528_171844_p3_medium128_quality_linear_t0p5_p0p01",
+      "label": "p3_medium128_quality_linear_t0p5_p0p01",
+      "penalty_mode": "linear",
+      "weak_threshold": 0.5,
+      "penalty": 0.01,
+      "total_return_pct": 201.10408165403788,
+      "max_drawdown_pct": 14.708682467457223,
+      "win_rate_pct": 54.74452554744526,
+      "total_trades": 274,
+      "delta_total_return_pct_vs_raw": -0.5878933697582986,
+      "delta_max_drawdown_pct_vs_raw": 1.1864606574863037,
+      "report_json": "artifacts/amv_static_sleeve_signals/20260528_171844_p3_medium128_quality_linear_t0p5_p0p01/backtests/6td_static_strict_top3_no_stop_20260528_171844_p3_medium128_quality_linear_t0p5_p0p01/report.json"
+    },
+    {
+      "artifact": "20260528_171848_p3_medium128_quality_linear_t0p5_p0p02",
+      "label": "p3_medium128_quality_linear_t0p5_p0p02",
+      "penalty_mode": "linear",
+      "weak_threshold": 0.5,
+      "penalty": 0.02,
+      "total_return_pct": 261.77421787309413,
+      "max_drawdown_pct": 15.326291967115155,
+      "win_rate_pct": 54.74452554744526,
+      "total_trades": 274,
+      "delta_total_return_pct_vs_raw": 60.08224284929795,
+      "delta_max_drawdown_pct_vs_raw": 1.804070157144236,
+      "report_json": "artifacts/amv_static_sleeve_signals/20260528_171848_p3_medium128_quality_linear_t0p5_p0p02/backtests/6td_static_strict_top3_no_stop_20260528_171848_p3_medium128_quality_linear_t0p5_p0p02/report.json"
+    },
+    {
+      "artifact": "20260528_171853_p3_medium128_quality_linear_t0p5_p0p03",
+      "label": "p3_medium128_quality_linear_t0p5_p0p03",
+      "penalty_mode": "linear",
+      "weak_threshold": 0.5,
+      "penalty": 0.03,
+      "total_return_pct": 264.89797074875474,
+      "max_drawdown_pct": 14.048176962270537,
+      "win_rate_pct": 54.379562043795616,
+      "total_trades": 274,
+      "delta_total_return_pct_vs_raw": 63.20599572495857,
+      "delta_max_drawdown_pct_vs_raw": 0.525955152299618,
+      "report_json": "artifacts/amv_static_sleeve_signals/20260528_171853_p3_medium128_quality_linear_t0p5_p0p03/backtests/6td_static_strict_top3_no_stop_20260528_171853_p3_medium128_quality_linear_t0p5_p0p03/report.json"
+    }
+  ],
+  "best_candidate": {
+    "artifact": "20260528_171853_p3_medium128_quality_linear_t0p5_p0p03",
+    "reason": "Highest net return among first grid, with lower MaxDD than p0.02 and much stronger return than raw P3."
+  },
+  "attribution": {
+    "report": "reports/amv_p3_medium_trend_quality_attribution.json",
+    "exact_overlap_count": 227,
+    "left_unique_count": 47,
+    "right_unique_count": 47,
+    "left_unique_pnl": -68648.020924,
+    "right_unique_pnl": 161316.304818,
+    "unique_delta_pnl": 229964.32574200002,
+    "common_delta_pnl": 86065.65288499999,
+    "top_positive_trade_month_delta": {
+      "month": "2025-08",
+      "delta_pnl": 139837.98612699998
+    },
+    "top_negative_trade_month_delta": {
+      "month": "2026-01",
+      "delta_pnl": -110684.36825199999
+    }
+  },
+  "cadence": {
+    "report": "reports/amv_p3_medium_trend_quality_cadence.json",
+    "type": "Python-side no-cost static offset sensitivity",
+    "positive_delta_offsets": 7,
+    "offset_count": 7,
+    "raw_worst_total_return_pct": 260.7351052129617,
+    "raw_median_total_return_pct": 285.5951491343531,
+    "raw_best_total_return_pct": 297.7861991491931,
+    "rerank_worst_total_return_pct": 284.6114510091524,
+    "rerank_median_total_return_pct": 307.7093362915879,
+    "rerank_best_total_return_pct": 331.6345194465534,
+    "worst_delta_total_return_pct": 21.244060152354294,
+    "median_delta_total_return_pct": 22.640293170260505,
+    "best_delta_total_return_pct": 33.848320297360335
+  },
+  "current_verdict": "Strong second-stage challenger. Upgrade only after combining with sector-tailwind checks and running a combined/cadence robustness pass; do not replace default P3 yet."
+}

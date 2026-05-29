@@ -74,6 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let df = LazyFrame::scan_parquet(&args.data, Default::default())?.collect()?;
     println!("Loaded {} rows", df.height());
     let (market_data, mut trading_dates) = build_market_data(&df)?;
+    println!("Execution price basis: {}", market_data.price_basis);
 
     let original_len = trading_dates.len();
     if let Some(start) = config.start_date {
@@ -229,14 +230,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if !args.output_dir.is_empty() {
         let config = app.world().resource::<AmvTopnConfig>();
+        let market_data = app.world().resource::<MarketData>();
         let config_text = format_config(config, trading_dates.len());
         let extra_text = format!(
             "--- Strategy Stats ---\n\
+             Execution Price Basis: {}\n\
              Signal Rows:       {}\n\
              Limit Up Blocked:  {} ({} days)\n\
              Open Gap Blocked:  {} ({} days)\n\
              Require Bull Regime: {}\n\
              Bull Regime Blocked Signals: {} ({} days)\n",
+            market_data.price_basis,
             signal_rows,
             limit_up_blocked,
             limit_up_days,
@@ -258,6 +262,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "max_daily_buys": config.max_daily_buys,
                 "position_size_pct": config.position_size_pct,
                 "max_hold_trading_days": config.max_hold_trading_days,
+                "allow_duplicate_positions": config.allow_duplicate_positions,
                 "start_date": config.start_date.map(|d| d.to_string()),
                 "end_date": config.end_date.map(|d| d.to_string()),
                 "top_n": config.top_n,
@@ -268,15 +273,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "sell_on_bear_regime": config.sell_on_bear_regime,
                 "stop_loss_enabled": config.stop_loss_enabled,
                 "stop_loss_pct": config.stop_loss_pct,
+                "early_stop_enabled": config.early_stop_enabled,
+                "early_stop_trigger_hold_trading_days": config.early_stop_trigger_hold_trading_days,
+                "early_stop_loss_pct": config.early_stop_loss_pct,
+                "early_stop_require_previous_close_below_entry": config.early_stop_require_previous_close_below_entry,
+                "early_stop_reserve_slot_until_max_hold": config.early_stop_reserve_slot_until_max_hold,
                 "trailing_enabled": config.trailing_enabled,
                 "trailing_activation_pct": config.trailing_activation_pct,
                 "trailing_pct": config.trailing_pct,
                 "commission_rate": config.cost_model.commission_rate,
                 "stamp_duty_rate": config.cost_model.stamp_duty_rate,
                 "slippage_pct": config.cost_model.slippage_pct,
+                "execution_price_basis": market_data.price_basis.as_str(),
             }),
             Some(extra_text.as_str()),
             Some(json!({
+                "execution_price_basis": market_data.price_basis.as_str(),
                 "signal_rows": signal_rows,
                 "limit_up_blocked": limit_up_blocked,
                 "limit_up_days": limit_up_days,
@@ -321,6 +333,14 @@ fn print_config(config: &AmvTopnConfig) {
     println!("Max Daily Buys: {}", config.max_daily_buys);
     println!("Position Size: {:.1}%", config.position_size_pct * 100.0);
     println!("Max Hold Trading Days: {}", config.max_hold_trading_days);
+    println!(
+        "Allow Duplicate Positions: {}",
+        if config.allow_duplicate_positions {
+            "ON (lot-level)"
+        } else {
+            "OFF"
+        }
+    );
     let start_str = config
         .start_date
         .map(|d| d.to_string())
@@ -365,6 +385,29 @@ fn print_config(config: &AmvTopnConfig) {
         }
     );
     println!(
+        "Early Stop: d{} < -{:.1}%{} ({})",
+        config.early_stop_trigger_hold_trading_days,
+        config.early_stop_loss_pct * 100.0,
+        if config.early_stop_require_previous_close_below_entry {
+            " and previous close < entry"
+        } else {
+            ""
+        },
+        if config.early_stop_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
+    );
+    println!(
+        "Early Stop Reserve Slot: {}",
+        if config.early_stop_reserve_slot_until_max_hold {
+            "ON"
+        } else {
+            "OFF"
+        }
+    );
+    println!(
         "Trailing Stop: Activate={:.0}%, Trail={:.0}% ({})",
         config.trailing_activation_pct * 100.0,
         config.trailing_pct * 100.0,
@@ -392,6 +435,34 @@ fn build_market_data(
     let high_adj = df.column("high_adj")?.f64()?;
     let close_adj = df.column("close_adj")?.f64()?;
     let pre_close_adj = df.column("pre_close_adj")?.f64()?;
+    let has_raw_prices = ["open_raw", "high_raw", "close_raw", "pre_close_raw"]
+        .iter()
+        .all(|name| df.get_column_names().iter().any(|col| col.as_str() == *name));
+    let open_raw = if has_raw_prices {
+        Some(df.column("open_raw")?.f64()?)
+    } else {
+        None
+    };
+    let high_raw = if has_raw_prices {
+        Some(df.column("high_raw")?.f64()?)
+    } else {
+        None
+    };
+    let close_raw = if has_raw_prices {
+        Some(df.column("close_raw")?.f64()?)
+    } else {
+        None
+    };
+    let pre_close_raw = if has_raw_prices {
+        Some(df.column("pre_close_raw")?.f64()?)
+    } else {
+        None
+    };
+    market_data.price_basis = if has_raw_prices {
+        "raw_ohlc_pre_close".to_string()
+    } else {
+        "adjusted_ohlc_fallback".to_string()
+    };
     let score = df.column("score")?.f64()?;
     let rank_casted = df.column("rank")?.cast(&DataType::UInt32)?;
     let rank = rank_casted.u32()?;
@@ -402,11 +473,31 @@ fn build_market_data(
         let code = codes.get(i).ok_or("Missing code")?;
         let date_days = dates.get(i).ok_or("Missing date")?;
         let date = bt_core::epoch_days_to_date(date_days).ok_or("Invalid date")?;
+        let open_adj_value = open_adj.get(i).unwrap_or(0.0);
+        let high_adj_value = high_adj.get(i).unwrap_or(0.0);
+        let close_adj_value = close_adj.get(i).unwrap_or(0.0);
+        let pre_close_adj_value = pre_close_adj.get(i).unwrap_or(0.0);
         let bar = PriceBar {
-            open: open_adj.get(i).unwrap_or(0.0),
-            high: high_adj.get(i).unwrap_or(0.0),
-            close: close_adj.get(i).unwrap_or(0.0),
-            pre_close: pre_close_adj.get(i).unwrap_or(0.0),
+            open: open_raw
+                .as_ref()
+                .and_then(|col| col.get(i))
+                .unwrap_or(open_adj_value),
+            high: high_raw
+                .as_ref()
+                .and_then(|col| col.get(i))
+                .unwrap_or(high_adj_value),
+            close: close_raw
+                .as_ref()
+                .and_then(|col| col.get(i))
+                .unwrap_or(close_adj_value),
+            pre_close: pre_close_raw
+                .as_ref()
+                .and_then(|col| col.get(i))
+                .unwrap_or(pre_close_adj_value),
+            open_adj: open_adj_value,
+            high_adj: high_adj_value,
+            close_adj: close_adj_value,
+            pre_close_adj: pre_close_adj_value,
             score: score.get(i).unwrap_or(0.0),
             rank: rank.get(i).unwrap_or(9999u32),
             is_signal: is_signal.get(i).unwrap_or(false),
@@ -428,6 +519,7 @@ fn build_market_data(
         .enumerate()
         .map(|(idx, date)| (*date, idx as i32))
         .collect();
+    market_data.trading_dates = all_dates.clone();
     Ok((market_data, all_dates))
 }
 
@@ -446,6 +538,16 @@ fn format_config(config: &AmvTopnConfig, trading_days: usize) -> String {
     )
     .unwrap();
     writeln!(s, "Max Hold Trading Days: {}", config.max_hold_trading_days).unwrap();
+    writeln!(
+        s,
+        "Allow Duplicate Positions: {}",
+        if config.allow_duplicate_positions {
+            "true (lot-level)"
+        } else {
+            "false"
+        }
+    )
+    .unwrap();
     let start_str = config
         .start_date
         .map(|d| d.to_string())
@@ -488,6 +590,33 @@ fn format_config(config: &AmvTopnConfig, trading_days: usize) -> String {
         "Stop Loss:        {:.1}% ({})",
         config.stop_loss_pct * 100.0,
         if config.stop_loss_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Early Stop:       d{} < -{:.1}%{} ({})",
+        config.early_stop_trigger_hold_trading_days,
+        config.early_stop_loss_pct * 100.0,
+        if config.early_stop_require_previous_close_below_entry {
+            " and previous close < entry"
+        } else {
+            ""
+        },
+        if config.early_stop_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "Early Stop Reserve Slot: {}",
+        if config.early_stop_reserve_slot_until_max_hold {
             "ON"
         } else {
             "OFF"
@@ -563,6 +692,7 @@ fn append_amv_topn_registry_entry(
         "max_daily_buys": config.max_daily_buys,
         "position_size_pct": config.position_size_pct,
         "max_hold_trading_days": config.max_hold_trading_days,
+        "allow_duplicate_positions": config.allow_duplicate_positions,
         "top_n": config.top_n,
         "entry_rank_limit": config.entry_rank_limit,
         "min_score": config.min_score,
@@ -571,6 +701,11 @@ fn append_amv_topn_registry_entry(
         "sell_on_bear_regime": config.sell_on_bear_regime,
         "stop_loss_enabled": config.stop_loss_enabled,
         "stop_loss_pct": config.stop_loss_pct,
+        "early_stop_enabled": config.early_stop_enabled,
+        "early_stop_trigger_hold_trading_days": config.early_stop_trigger_hold_trading_days,
+        "early_stop_loss_pct": config.early_stop_loss_pct,
+        "early_stop_require_previous_close_below_entry": config.early_stop_require_previous_close_below_entry,
+        "early_stop_reserve_slot_until_max_hold": config.early_stop_reserve_slot_until_max_hold,
         "trailing_enabled": config.trailing_enabled,
         "trailing_activation_pct": config.trailing_activation_pct,
         "trailing_pct": config.trailing_pct,
@@ -603,6 +738,9 @@ fn force_close_all_positions(app: &mut App, end_date: NaiveDate) {
     {
         let mut query = world.query::<(Entity, &Position)>();
         for (entity, position) in query.iter(world) {
+            if position.shares == 0 {
+                continue;
+            }
             if let Some(prices) = market_data.prices.get(&position.code) {
                 let exit_price = prices
                     .iter()

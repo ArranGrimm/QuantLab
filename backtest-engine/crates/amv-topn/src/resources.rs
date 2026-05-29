@@ -15,6 +15,8 @@ pub struct ConfigFile {
     #[serde(default)]
     pub exit: ExitSection,
     pub stop_loss: StopLossSection,
+    #[serde(default)]
+    pub early_stop: EarlyStopSection,
     pub trailing_stop: TrailingStopSection,
     pub costs: CostModel,
 }
@@ -26,6 +28,8 @@ pub struct BacktestSection {
     pub max_daily_buys: usize,
     pub position_size_pct: f64,
     pub max_hold_trading_days: i32,
+    #[serde(default)]
+    pub allow_duplicate_positions: bool,
     #[serde(default)]
     pub start_date: Option<String>,
     #[serde(default)]
@@ -68,6 +72,40 @@ pub struct StopLossSection {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct EarlyStopSection {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_early_stop_trigger_hold_trading_days")]
+    pub trigger_hold_trading_days: i32,
+    #[serde(default = "default_early_stop_loss_pct")]
+    pub loss_pct: f64,
+    #[serde(default)]
+    pub require_previous_close_below_entry: bool,
+    #[serde(default)]
+    pub reserve_slot_until_max_hold: bool,
+}
+
+impl Default for EarlyStopSection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            trigger_hold_trading_days: default_early_stop_trigger_hold_trading_days(),
+            loss_pct: default_early_stop_loss_pct(),
+            require_previous_close_below_entry: false,
+            reserve_slot_until_max_hold: false,
+        }
+    }
+}
+
+fn default_early_stop_trigger_hold_trading_days() -> i32 {
+    2
+}
+
+fn default_early_stop_loss_pct() -> f64 {
+    0.03
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct TrailingStopSection {
     pub enabled: bool,
     pub activation_pct: f64,
@@ -89,6 +127,7 @@ pub struct AmvTopnConfig {
     pub max_daily_buys: usize,
     pub position_size_pct: f64,
     pub max_hold_trading_days: i32,
+    pub allow_duplicate_positions: bool,
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
     pub min_position_ratio: f64,
@@ -103,6 +142,12 @@ pub struct AmvTopnConfig {
 
     pub stop_loss_enabled: bool,
     pub stop_loss_pct: f64,
+
+    pub early_stop_enabled: bool,
+    pub early_stop_trigger_hold_trading_days: i32,
+    pub early_stop_loss_pct: f64,
+    pub early_stop_require_previous_close_below_entry: bool,
+    pub early_stop_reserve_slot_until_max_hold: bool,
 
     pub trailing_enabled: bool,
     pub trailing_activation_pct: f64,
@@ -119,6 +164,7 @@ impl Default for AmvTopnConfig {
             max_daily_buys: 3,
             position_size_pct: 1.0 / 3.0,
             max_hold_trading_days: 10,
+            allow_duplicate_positions: false,
             start_date: None,
             end_date: None,
             min_position_ratio: 0.5,
@@ -130,6 +176,11 @@ impl Default for AmvTopnConfig {
             sell_on_bear_regime: false,
             stop_loss_enabled: true,
             stop_loss_pct: 0.05,
+            early_stop_enabled: false,
+            early_stop_trigger_hold_trading_days: 2,
+            early_stop_loss_pct: 0.03,
+            early_stop_require_previous_close_below_entry: false,
+            early_stop_reserve_slot_until_max_hold: false,
             trailing_enabled: false,
             trailing_activation_pct: 0.10,
             trailing_pct: 0.05,
@@ -152,6 +203,7 @@ impl From<ConfigFile> for AmvTopnConfig {
             max_daily_buys,
             position_size_pct: cfg.backtest.position_size_pct,
             max_hold_trading_days: cfg.backtest.max_hold_trading_days,
+            allow_duplicate_positions: cfg.backtest.allow_duplicate_positions,
             start_date: bt_core::parse_date_opt(&cfg.backtest.start_date),
             end_date: bt_core::parse_date_opt(&cfg.backtest.end_date),
             min_position_ratio: cfg.backtest.min_position_ratio,
@@ -163,6 +215,13 @@ impl From<ConfigFile> for AmvTopnConfig {
             sell_on_bear_regime: cfg.exit.sell_on_bear_regime,
             stop_loss_enabled: cfg.stop_loss.enabled,
             stop_loss_pct: cfg.stop_loss.pct,
+            early_stop_enabled: cfg.early_stop.enabled,
+            early_stop_trigger_hold_trading_days: cfg.early_stop.trigger_hold_trading_days,
+            early_stop_loss_pct: cfg.early_stop.loss_pct,
+            early_stop_require_previous_close_below_entry: cfg
+                .early_stop
+                .require_previous_close_below_entry,
+            early_stop_reserve_slot_until_max_hold: cfg.early_stop.reserve_slot_until_max_hold,
             trailing_enabled: cfg.trailing_stop.enabled,
             trailing_activation_pct: cfg.trailing_stop.activation_pct,
             trailing_pct: cfg.trailing_stop.trailing_pct,
@@ -171,12 +230,18 @@ impl From<ConfigFile> for AmvTopnConfig {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct PriceBar {
+    /// Execution price basis. Prefer raw OHLC; old artifacts fall back to adjusted OHLC.
     pub open: f64,
     pub high: f64,
     pub close: f64,
     pub pre_close: f64,
+    pub open_adj: f64,
+    pub high_adj: f64,
+    pub close_adj: f64,
+    pub pre_close_adj: f64,
     pub score: f64,
     pub rank: u32,
     pub is_signal: bool,
@@ -187,6 +252,8 @@ pub struct PriceBar {
 pub struct MarketData {
     pub prices: HashMap<String, HashMap<NaiveDate, PriceBar>>,
     pub date_index: HashMap<NaiveDate, i32>,
+    pub trading_dates: Vec<NaiveDate>,
+    pub price_basis: String,
 }
 
 #[derive(Resource, Default)]

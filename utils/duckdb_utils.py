@@ -108,6 +108,10 @@ def load_daily_data_full(conn, codes: list[str] = None):
         
         # 2. 计算前复权价格
         .with_columns([
+            pl.col("open").alias("open_raw"),
+            pl.col("high").alias("high_raw"),
+            pl.col("low").alias("low_raw"),
+            pl.col("close").alias("close_raw"),
             (pl.col("open") * pl.col("adj_ratio")).alias("open_adj"),
             (pl.col("high") * pl.col("adj_ratio")).alias("high_adj"),
             (pl.col("low") * pl.col("adj_ratio")).alias("low_adj"),
@@ -117,8 +121,6 @@ def load_daily_data_full(conn, codes: list[str] = None):
               .then(pl.col("amount") / (pl.col("volume") * _A_SHARE_LOT_SIZE))
               .otherwise(None)
               .alias("vwap_raw"),
-            # 保留原始 close 并重命名 (符合你旧代码逻辑)
-            pl.col("close").alias("close_raw") 
         ])
         .with_columns([
             (pl.col("vwap_raw") * pl.col("adj_ratio")).alias("vwap_adj"),
@@ -143,15 +145,19 @@ def load_daily_data_full(conn, codes: list[str] = None):
         
         # 6. 前一日复权收盘价 (涨跌停判断、收益计算等通用需求)
         .with_columns(
-            pl.col("close_adj").shift(1).over("code").alias("pre_close_adj")
+            [
+                pl.col("close_adj").shift(1).over("code").alias("pre_close_adj"),
+                pl.col("close_raw").shift(1).over("code").alias("pre_close_raw"),
+            ]
         )
         
         # 7. 选择并排序最终列
         .select([
             "code", "date", 
             "open_adj", "high_adj", "low_adj", "close_adj", "vwap_adj", "pre_close_adj",
+            "open_raw", "high_raw", "low_raw", "close_raw", "pre_close_raw",
             "volume", "amount", 
-            "close_raw", "vwap_raw", "market_cap_100m",
+            "vwap_raw", "market_cap_100m",
             "circulating_capital",
         ])
         .sort(["code", "date"])

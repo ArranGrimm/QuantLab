@@ -17,6 +17,8 @@ from scripts.amv_bull_pool_export_signals import (
     _score_component,
     build_feature_frame,
 )
+from scripts.b1_executable_base_lab import _base_b1_expr, _build_b1_indicators
+from scripts.amv_regime_phase_diagnostic import build_amv_phase_frame
 
 
 DEFAULT_OUTPUT_ROOT = ROOT / "artifacts" / "amv_static_sleeve_signals"
@@ -28,9 +30,21 @@ SLEEVE_IDS = [
     "kmid2",
     "manual_p2_k0p5_r0",
     "manual_p3_k0p5_r0",
+    "reference_p2_k0p5_b0_c0_r0",
+    "candidate_p3_k0p5_b0_c0_r0",
     "pkm_p1_k0p5_m1",
     "pkm_p2_k0p5_m0p5",
     "pkm_p3_k1_m2",
+    "pullback_p0_k0_pb1_cp0_rv0",
+    "pullback_p0_k0_pb3_cp1_rv0",
+    "pullback_p0_k0_pb2_cp0p5_rv0",
+    "pullback_p2_k0_pb0_cp0p5_rv0p5",
+    "trend_p1_k0_pb1_cp0_rv0p5",
+    "trend_p1_k0p5_pb1_cp0_rv0p5",
+    "trend_p3_k0p5_pb2_cp1_rv0p5",
+    "trend_p1_k0p5_pb1_cp0_rv1",
+    "trend_p1_k1_pb1_cp0_rv1",
+    "trend_p2_k0p5_pb2_cp0_rv1",
 ]
 
 
@@ -58,28 +72,36 @@ def sleeve_score_expr(sleeve_id: str) -> tuple[pl.Expr, list[str]]:
     if sleeve_id == "kmid2":
         return pl.col("KMID2"), ["KMID2"]
     if sleeve_id == "manual_p2_k0p5_r0":
-        cols = ["price_pos_20d", "close_to_high_20d", "KLEN", "KMID2"]
-        return (
-            (
-                _score_component("price_pos_20d", higher_is_better=True, weight=2.0)
-                + _score_component("close_to_high_20d", higher_is_better=False, weight=2.0)
-                + _score_component("KLEN", higher_is_better=False, weight=0.5)
-                + _score_component("KMID2", higher_is_better=True, weight=0.5)
-            )
-            / 5.0,
-            cols,
+        return pullback_combo_score_expr(
+            price_weight=2.0,
+            kbar_weight=0.5,
+            bias_weight=0.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.0,
         )
     if sleeve_id == "manual_p3_k0p5_r0":
-        cols = ["price_pos_20d", "close_to_high_20d", "KLEN", "KMID2"]
-        return (
-            (
-                _score_component("price_pos_20d", higher_is_better=True, weight=3.0)
-                + _score_component("close_to_high_20d", higher_is_better=False, weight=3.0)
-                + _score_component("KLEN", higher_is_better=False, weight=0.5)
-                + _score_component("KMID2", higher_is_better=True, weight=0.5)
-            )
-            / 7.0,
-            cols,
+        return pullback_combo_score_expr(
+            price_weight=3.0,
+            kbar_weight=0.5,
+            bias_weight=0.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.0,
+        )
+    if sleeve_id == "reference_p2_k0p5_b0_c0_r0":
+        return pullback_combo_score_expr(
+            price_weight=2.0,
+            kbar_weight=0.5,
+            bias_weight=0.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.0,
+        )
+    if sleeve_id == "candidate_p3_k0p5_b0_c0_r0":
+        return pullback_combo_score_expr(
+            price_weight=3.0,
+            kbar_weight=0.5,
+            bias_weight=0.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.0,
         )
     if sleeve_id == "pkm_p1_k0p5_m1":
         return pkm_score_expr(price_weight=1.0, kbar_weight=0.5, momentum_weight=1.0)
@@ -87,7 +109,134 @@ def sleeve_score_expr(sleeve_id: str) -> tuple[pl.Expr, list[str]]:
         return pkm_score_expr(price_weight=2.0, kbar_weight=0.5, momentum_weight=0.5)
     if sleeve_id == "pkm_p3_k1_m2":
         return pkm_score_expr(price_weight=3.0, kbar_weight=1.0, momentum_weight=2.0)
+    if sleeve_id == "pullback_p0_k0_pb1_cp0_rv0":
+        return pullback_combo_score_expr(
+            price_weight=0.0,
+            kbar_weight=0.0,
+            bias_weight=1.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.0,
+        )
+    if sleeve_id == "pullback_p0_k0_pb3_cp1_rv0":
+        return pullback_combo_score_expr(
+            price_weight=0.0,
+            kbar_weight=0.0,
+            bias_weight=3.0,
+            close_pullback_weight=1.0,
+            risk_weight=0.0,
+        )
+    if sleeve_id == "pullback_p0_k0_pb2_cp0p5_rv0":
+        return pullback_combo_score_expr(
+            price_weight=0.0,
+            kbar_weight=0.0,
+            bias_weight=2.0,
+            close_pullback_weight=0.5,
+            risk_weight=0.0,
+        )
+    if sleeve_id == "pullback_p2_k0_pb0_cp0p5_rv0p5":
+        return pullback_combo_score_expr(
+            price_weight=2.0,
+            kbar_weight=0.0,
+            bias_weight=0.0,
+            close_pullback_weight=0.5,
+            risk_weight=0.5,
+        )
+    if sleeve_id == "trend_p1_k0_pb1_cp0_rv0p5":
+        return pullback_combo_score_expr(
+            price_weight=1.0,
+            kbar_weight=0.0,
+            bias_weight=1.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.5,
+        )
+    if sleeve_id == "trend_p1_k0p5_pb1_cp0_rv0p5":
+        return pullback_combo_score_expr(
+            price_weight=1.0,
+            kbar_weight=0.5,
+            bias_weight=1.0,
+            close_pullback_weight=0.0,
+            risk_weight=0.5,
+        )
+    if sleeve_id == "trend_p3_k0p5_pb2_cp1_rv0p5":
+        return pullback_combo_score_expr(
+            price_weight=3.0,
+            kbar_weight=0.5,
+            bias_weight=2.0,
+            close_pullback_weight=1.0,
+            risk_weight=0.5,
+        )
+    if sleeve_id == "trend_p1_k0p5_pb1_cp0_rv1":
+        return pullback_combo_score_expr(
+            price_weight=1.0,
+            kbar_weight=0.5,
+            bias_weight=1.0,
+            close_pullback_weight=0.0,
+            risk_weight=1.0,
+        )
+    if sleeve_id == "trend_p1_k1_pb1_cp0_rv1":
+        return pullback_combo_score_expr(
+            price_weight=1.0,
+            kbar_weight=1.0,
+            bias_weight=1.0,
+            close_pullback_weight=0.0,
+            risk_weight=1.0,
+        )
+    if sleeve_id == "trend_p2_k0p5_pb2_cp0_rv1":
+        return pullback_combo_score_expr(
+            price_weight=2.0,
+            kbar_weight=0.5,
+            bias_weight=2.0,
+            close_pullback_weight=0.0,
+            risk_weight=1.0,
+        )
     raise ValueError(f"unknown sleeve_id: {sleeve_id}")
+
+
+def is_trend_filter_sleeve(sleeve_id: str) -> bool:
+    return sleeve_id.startswith("trend_")
+
+
+def uses_pb3_regime_gate(sleeve_id: str, args: argparse.Namespace) -> bool:
+    return (
+        sleeve_id == "pullback_p0_k0_pb3_cp1_rv0"
+        and args.pb3_regime_gate != "none"
+    )
+
+
+def build_pb3_regime_gate_frame(args: argparse.Namespace) -> pl.DataFrame:
+    """Build signal-date AMV gate flags using only known close data."""
+    if args.pb3_regime_gate != "aged_non_accel_or_chaos":
+        raise ValueError(f"unknown PB3 regime gate: {args.pb3_regime_gate}")
+
+    phase = build_amv_phase_frame(
+        bull_trigger_pct=args.amv_bull_trigger_pct,
+        bear_trigger_1d_pct=args.amv_bear_trigger_1d_pct,
+        bull_lookback_days=args.amv_bull_lookback_days,
+        effective_lag_days=args.amv_effective_lag_days,
+    )
+    aged_non_accel = (
+        (pl.col("fwd_duration_bucket") == "aged")
+        & pl.col("fwd_momentum_bucket").is_in(["cruising", "stalling", "retreating"])
+    )
+    chaos = (pl.col("amv_neg_streak") >= 3) & (pl.col("amplitude_pct") > 2.5)
+    return (
+        phase.select([
+            "date",
+            "fwd_duration_bucket",
+            "fwd_momentum_bucket",
+            "fwd_phase",
+            "amv_neg_streak",
+            "amplitude_pct",
+        ])
+        .with_columns(
+            [
+                aged_non_accel.alias("pb3_gate_aged_non_accel"),
+                chaos.alias("pb3_gate_chaos"),
+                (aged_non_accel | chaos).alias("pb3_gate_skip"),
+            ]
+        )
+        .rename({"date": "signal_date"})
+    )
 
 
 def pkm_score_expr(
@@ -114,11 +263,76 @@ def pkm_score_expr(
     )
 
 
+def pullback_combo_score_expr(
+    *,
+    price_weight: float,
+    kbar_weight: float,
+    bias_weight: float,
+    close_pullback_weight: float,
+    risk_weight: float,
+) -> tuple[pl.Expr, list[str]]:
+    components: list[tuple[str, bool, float]] = []
+    if price_weight > 0:
+        components.extend(
+            [
+                ("price_pos_20d", True, price_weight),
+                ("close_to_high_20d", False, price_weight),
+            ]
+        )
+    if kbar_weight > 0:
+        components.extend(
+            [
+                ("KLEN", False, kbar_weight),
+                ("KMID2", True, kbar_weight),
+            ]
+        )
+    if bias_weight > 0:
+        components.extend(
+            [
+                ("ma_bias_20", False, bias_weight),
+                ("disp_bias_20", False, bias_weight),
+            ]
+        )
+    if close_pullback_weight > 0:
+        components.extend(
+            [
+                ("KSFT", False, close_pullback_weight),
+                ("intraday_pos", False, close_pullback_weight),
+            ]
+        )
+    if risk_weight > 0:
+        components.extend(
+            [
+                ("atr_14_pct", False, risk_weight),
+                ("panic_vol_ratio_20d", False, risk_weight),
+            ]
+        )
+
+    total_weight = sum(weight for _, _, weight in components)
+    if total_weight <= 0:
+        raise ValueError("pullback combo total weight must be positive")
+
+    score_expr = _score_component(
+        components[0][0],
+        higher_is_better=components[0][1],
+        weight=components[0][2],
+    )
+    for factor, higher_is_better, weight in components[1:]:
+        score_expr = score_expr + _score_component(
+            factor,
+            higher_is_better=higher_is_better,
+            weight=weight,
+        )
+
+    return score_expr / total_weight, [factor for factor, _, _ in components]
+
+
 def build_one_sleeve_signal(
     market: pl.DataFrame,
     *,
     sleeve_id: str,
     args: argparse.Namespace,
+    pb3_gate: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame, dict[str, Any]]:
     score_expr, required_cols = sleeve_score_expr(sleeve_id)
     valid_expr = _finite_expr(required_cols[0])
@@ -131,21 +345,27 @@ def build_one_sleeve_signal(
         & (pl.col("amount_ma20") >= args.amount_ma20_min)
         & valid_expr
     )
+    if is_trend_filter_sleeve(sleeve_id):
+        candidate_expr = candidate_expr & _base_b1_expr("trend_only", 13.0)
 
-    scored = (
-        market.with_columns(candidate_expr.alias("_is_signal_candidate"))
-        .with_columns(
+    scored_base = market.with_columns(candidate_expr.alias("_is_signal_candidate"))
+    if is_trend_filter_sleeve(sleeve_id):
+        # Trend-filter grids rank components inside the filtered candidate pool.
+        scored = scored_base.filter(pl.col("_is_signal_candidate")).with_columns(
+            score_expr.alias("_signal_score")
+        )
+    else:
+        scored = scored_base.with_columns(
             pl.when(pl.col("_is_signal_candidate"))
             .then(score_expr)
             .otherwise(None)
             .alias("_signal_score")
         )
-        .with_columns(
-            pl.col("_signal_score")
-            .rank(method="ordinal", descending=True)
-            .over("date")
-            .alias("_signal_rank")
-        )
+    scored = scored.with_columns(
+        pl.col("_signal_score")
+        .rank(method="ordinal", descending=True)
+        .over("date")
+        .alias("_signal_rank")
     )
     signal_rows = (
         scored.filter(pl.col("_is_signal_candidate") & (pl.col("_signal_rank") <= args.top_n))
@@ -160,6 +380,40 @@ def build_one_sleeve_signal(
         )
         .sort(["signal_date", "rank", "code"])
     )
+    gating_summary: dict[str, Any] = {
+        "pb3_regime_gate": args.pb3_regime_gate,
+        "pb3_regime_gate_applied": False,
+    }
+    if uses_pb3_regime_gate(sleeve_id, args):
+        if pb3_gate is None:
+            raise ValueError("PB3 regime gate requested but gate frame was not provided")
+        before_rows = signal_rows.height
+        before_days = signal_rows.select("signal_date").n_unique()
+        signal_rows = (
+            signal_rows.join(pb3_gate, on="signal_date", how="left")
+            .with_columns(
+                [
+                    pl.col("pb3_gate_skip").fill_null(False),
+                    pl.col("pb3_gate_aged_non_accel").fill_null(False),
+                    pl.col("pb3_gate_chaos").fill_null(False),
+                ]
+            )
+        )
+        blocked = signal_rows.filter(pl.col("pb3_gate_skip"))
+        signal_rows = signal_rows.filter(~pl.col("pb3_gate_skip")).sort(["signal_date", "rank", "code"])
+        gating_summary = {
+            "pb3_regime_gate": args.pb3_regime_gate,
+            "pb3_regime_gate_applied": True,
+            "pb3_gate_timing": "signal_date_close_before_t_plus_1_open",
+            "pb3_gate_rows_before": before_rows,
+            "pb3_gate_rows_after": signal_rows.height,
+            "pb3_gate_rows_blocked": blocked.height,
+            "pb3_gate_days_before": before_days,
+            "pb3_gate_days_after": signal_rows.select("signal_date").n_unique(),
+            "pb3_gate_days_blocked": blocked.select("signal_date").n_unique(),
+            "pb3_gate_aged_non_accel_rows": int(blocked["pb3_gate_aged_non_accel"].sum()),
+            "pb3_gate_chaos_rows": int(blocked["pb3_gate_chaos"].sum()),
+        }
 
     trading_dates = market.select("date").unique().sort("date")
     next_dates = trading_dates.with_columns(
@@ -189,6 +443,11 @@ def build_one_sleeve_signal(
                 "low_adj",
                 "close_adj",
                 "pre_close_adj",
+                "open_raw",
+                "high_raw",
+                "low_raw",
+                "close_raw",
+                "pre_close_raw",
                 "is_bull_regime",
                 "amv_mechanical_regime",
                 "market_cap_100m",
@@ -221,6 +480,7 @@ def build_one_sleeve_signal(
         ),
         "score_min": float(signal_rows["score"].min()) if signal_rows.height else None,
         "score_max": float(signal_rows["score"].max()) if signal_rows.height else None,
+        **gating_summary,
     }
     return export, signal_rows, summary
 
@@ -271,6 +531,7 @@ def write_one_signal(
             "amv_bull_lookback_days": args.amv_bull_lookback_days,
             "amv_bear_trigger_1d_pct": args.amv_bear_trigger_1d_pct,
             "amv_effective_lag_days": args.amv_effective_lag_days,
+            "pb3_regime_gate": args.pb3_regime_gate,
         },
         "summary": summary,
         "files": {
@@ -298,15 +559,31 @@ def main() -> int:
     parser.add_argument("--amv-bull-lookback-days", type=int, default=2)
     parser.add_argument("--amv-bear-trigger-1d-pct", type=float, default=-2.3)
     parser.add_argument("--amv-effective-lag-days", type=int, default=1)
+    parser.add_argument(
+        "--pb3-regime-gate",
+        choices=["none", "aged_non_accel_or_chaos"],
+        default="none",
+        help="Optional signal-date AMV gate for PB3/CP1/RV0 exports.",
+    )
     args = parser.parse_args()
 
     started_at = datetime.now()
     print("Building static sleeve signal exports...")
     market = build_feature_frame(args)
+    if any(is_trend_filter_sleeve(sleeve_id) for sleeve_id in args.sleeves):
+        market = market.join(_build_b1_indicators(args), on=["date", "code"], how="left")
+    pb3_gate = None
+    if args.pb3_regime_gate != "none":
+        pb3_gate = build_pb3_regime_gate_frame(args)
     output_paths: list[str] = []
     for sleeve_id in args.sleeves:
         print(f"Exporting sleeve: {sleeve_id}")
-        export, selected, summary = build_one_sleeve_signal(market, sleeve_id=sleeve_id, args=args)
+        export, selected, summary = build_one_sleeve_signal(
+            market,
+            sleeve_id=sleeve_id,
+            args=args,
+            pb3_gate=pb3_gate,
+        )
         meta_path = write_one_signal(
             args.output_root,
             sleeve_id=sleeve_id,

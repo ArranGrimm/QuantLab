@@ -1,0 +1,84 @@
+{
+  "generated_at": "2026-05-21 10:18",
+  "purpose": "Diagnose allow_duplicate_positions impact for trend-only vs PB3 rolling refill.",
+  "config": "backtest-engine/crates/amv-topn/config_6td_rolling21_refill_top10_duplicate_no_stop.toml",
+  "records": [
+    {
+      "name": "trend_p1_k1_pb1_cp0_rv1",
+      "no_repeat_path": "artifacts\\amv_static_sleeve_signals\\20260521_090943_trend_p1_k1_pb1_cp0_rv1\\backtests\\6td_rolling21_refill_top10_no_stop_20260521_090957_450",
+      "duplicate_path": "artifacts\\amv_static_sleeve_signals\\20260521_090943_trend_p1_k1_pb1_cp0_rv1\\backtests\\6td_rolling21_refill_top10_duplicate_no_stop_20260521_101625_546",
+      "no_repeat": {
+        "total_return_pct": 60.17095574575772,
+        "gross_return_pct": 95.1335106290611,
+        "max_drawdown_pct": 11.577256141534367,
+        "win_rate_pct": 47.091243110838946,
+        "total_trades": 1633,
+        "total_costs": 174812.77441651843,
+        "allow_duplicate_positions": false
+      },
+      "duplicate": {
+        "total_return_pct": 106.50059719552014,
+        "gross_return_pct": 147.16954467879074,
+        "max_drawdown_pct": 13.333491512802913,
+        "win_rate_pct": 49.69733656174334,
+        "total_trades": 1652,
+        "total_costs": 203344.7374163536,
+        "allow_duplicate_positions": true,
+        "active_lot_stats": {
+          "max_lots_same_code": 7,
+          "avg_max_lots_same_code": 2.9192015209125475,
+          "days_with_duplicate_code_lots": 892,
+          "share_days_with_duplicate_code_lots_pct": 84.79087452471484
+        }
+      },
+      "delta": {
+        "total_return_pp": 46.32964144976242,
+        "gross_return_pp": 52.036034049729636,
+        "max_drawdown_pp": 1.7562353712685468,
+        "trades": 19,
+        "costs": 28531.962999835174
+      }
+    },
+    {
+      "name": "pullback_p0_k0_pb3_cp1_rv0",
+      "no_repeat_path": "artifacts\\amv_static_sleeve_signals\\20260521_090945_pullback_p0_k0_pb3_cp1_rv0\\backtests\\6td_rolling21_refill_top10_no_stop_20260521_091007_830",
+      "duplicate_path": "artifacts\\amv_static_sleeve_signals\\20260521_090945_pullback_p0_k0_pb3_cp1_rv0\\backtests\\6td_rolling21_refill_top10_duplicate_no_stop_20260521_101648_203",
+      "no_repeat": {
+        "total_return_pct": 99.62473659733892,
+        "gross_return_pct": 130.77868464331743,
+        "max_drawdown_pct": 20.703872330497656,
+        "win_rate_pct": 48.06060606060606,
+        "total_trades": 1650,
+        "total_costs": 155769.7402298929,
+        "allow_duplicate_positions": false
+      },
+      "duplicate": {
+        "total_return_pct": 102.93225392178952,
+        "gross_return_pct": 134.11870117824748,
+        "max_drawdown_pct": 20.457091189018147,
+        "win_rate_pct": 49.63636363636363,
+        "total_trades": 1650,
+        "total_costs": 155932.23628229048,
+        "allow_duplicate_positions": true,
+        "active_lot_stats": {
+          "max_lots_same_code": 5,
+          "avg_max_lots_same_code": 2.029893924783028,
+          "days_with_duplicate_code_lots": 790,
+          "share_days_with_duplicate_code_lots_pct": 76.18129218900675
+        }
+      },
+      "delta": {
+        "total_return_pp": 3.3075173244506004,
+        "gross_return_pp": 3.3400165349300437,
+        "max_drawdown_pp": -0.24678114147950936,
+        "trades": 0,
+        "costs": 162.49605239758966
+      }
+    }
+  ],
+  "interpretation": {
+    "trend_only_duplicate_helped": true,
+    "pullback_duplicate_only_small_change": true,
+    "conclusion": "No-repeat rolling position semantics explain a large share of the trend-only Python-to-Rust gap, while PB3 is already more compatible with no-repeat rolling."
+  }
+}

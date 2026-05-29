@@ -1,0 +1,103 @@
+{
+  "generated_at": "2026-05-29 11:22:00",
+  "scope": "Stage-3 limit-up ecology event sleeve first Rust validation",
+  "execution_note": "Current bt-amv-topn still uses adjusted OHLC for execution; raw execution is tracked as a separate TODO. Limit-up ecology features were built from daily raw OHLCV with previous raw close approximation.",
+  "config": "backtest-engine/crates/amv-topn/config_6td_static_strict_top3_no_stop.toml",
+  "runs": [
+    {
+      "signal_id": "20260529_111651_limit_reboard_reclaim",
+      "sleeve_id": "limit_reboard_reclaim",
+      "artifact_dir": "artifacts/amv_static_sleeve_signals/20260529_111651_limit_reboard_reclaim",
+      "backtest_dir": "artifacts/amv_static_sleeve_signals/20260529_111651_limit_reboard_reclaim/backtests/6td_static_strict_top3_no_stop_20260529_111651_limit_reboard_reclaim",
+      "signal_rows_after_shift": 2430,
+      "signal_days_after_shift": 812,
+      "candidate_rows_before_shift": 38230,
+      "rust": {
+        "total_return_pct": -21.54,
+        "max_drawdown_pct": 68.57,
+        "total_trades": 268,
+        "win_rate_pct": 47.01,
+        "gross_return_pct": 2.69,
+        "total_costs": 121184.35,
+        "limit_up_blocked": 144,
+        "limit_up_days": 118
+      },
+      "yearly_return_pct": {
+        "2021": -13.33,
+        "2022": 12.99,
+        "2023": -37.12,
+        "2024": -4.06,
+        "2025": 49.93,
+        "2026": -7.51
+      },
+      "verdict": "Rejected as standalone static sleeve. Event is too close to executable limit-up pressure; T+1 open limit-up blocks are heavy."
+    },
+    {
+      "signal_id": "20260529_111653_limit_recent_lu_ranked",
+      "sleeve_id": "limit_recent_lu_ranked",
+      "artifact_dir": "artifacts/amv_static_sleeve_signals/20260529_111653_limit_recent_lu_ranked",
+      "backtest_dir": "artifacts/amv_static_sleeve_signals/20260529_111653_limit_recent_lu_ranked/backtests/6td_static_strict_top3_no_stop_20260529_111653_limit_recent_lu_ranked",
+      "signal_rows_after_shift": 2434,
+      "signal_days_after_shift": 812,
+      "candidate_rows_before_shift": 117939,
+      "rust": {
+        "total_return_pct": 46.25,
+        "max_drawdown_pct": 59.87,
+        "total_trades": 269,
+        "win_rate_pct": 49.07,
+        "gross_return_pct": 76.45,
+        "total_costs": 151008.37,
+        "limit_up_blocked": 144,
+        "limit_up_days": 118
+      },
+      "yearly_return_pct": {
+        "2021": -13.33,
+        "2022": 18.43,
+        "2023": -23.16,
+        "2024": 33.06,
+        "2025": 57.02,
+        "2026": -7.31
+      },
+      "verdict": "Positive but not sleeve-ready. Drawdown is far too high and 2026 remains negative."
+    },
+    {
+      "signal_id": "20260529_111655_limit_first_board_pullback",
+      "sleeve_id": "limit_first_board_pullback",
+      "artifact_dir": "artifacts/amv_static_sleeve_signals/20260529_111655_limit_first_board_pullback",
+      "backtest_dir": "artifacts/amv_static_sleeve_signals/20260529_111655_limit_first_board_pullback/backtests/6td_static_strict_top3_no_stop_20260529_111655_limit_first_board_pullback",
+      "signal_rows_after_shift": 2281,
+      "signal_days_after_shift": 787,
+      "candidate_rows_before_shift": 9749,
+      "rust": {
+        "total_return_pct": 85.32,
+        "max_drawdown_pct": 56.5,
+        "total_trades": 271,
+        "win_rate_pct": 52.03,
+        "gross_return_pct": 137.89,
+        "total_costs": 262888.55,
+        "limit_up_blocked": 3,
+        "limit_up_days": 3
+      },
+      "yearly_return_pct": {
+        "2021": 27.4,
+        "2022": 45.02,
+        "2023": -11.64,
+        "2024": 1.42,
+        "2025": -10.05,
+        "2026": 20.16
+      },
+      "verdict": "Best first-pass candidate, but not yet sleeve-ready because drawdown is very high. Worth a focused holding-period and risk-filter scan."
+    }
+  ],
+  "conclusion": {
+    "best_first_pass": "limit_first_board_pullback",
+    "not_ready_for_allocation": true,
+    "key_lesson": "The strongest trade-level re-board signal does not directly survive executable Rust static testing because it is heavily blocked by T+1 open limit-up and has very high path risk.",
+    "next_steps": [
+      "Run 3td/5td/6td static strict scan for limit_first_board_pullback.",
+      "Test a narrower first-board pullback candidate with volatility/amount/risk filters.",
+      "Defer rolling/refill until static drawdown is controlled.",
+      "Revalidate after raw execution price migration."
+    ]
+  }
+}
