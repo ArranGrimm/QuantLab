@@ -5,20 +5,19 @@ A 股多策略量化研究仓库。主线是 AMV Bull Pool TopN：Python/Polars 
 ## 第一阅读顺序
 
 1. `CURRENT_STATE.md`: 当前真实口径、baseline、challenger、sleeve 状态和日常命令。
-2. `AGENTS.md`: agent 工作规则、代码分层、整理期约束。
-3. `project-status.md`: 当前详细结论、关键指标、活跃风险和优先级；整理期不作为频繁更新入口。
-4. `progress.md`: 倒序实验流水账；整理期只记录阶段性里程碑。
-5. `docs/script-inventory.md`: 脚本状态标签，删除或迁移前先看。
-6. `docs/cleanup-plan.md`: 第二阶段删除 / 迁移门禁。
+2. `AGENTS.md`: agent 工作规则、代码分层、探索与清理约束。
+3. `strategies/target-strategy-evolution.md`: 外部对标与 QuantLab 长期方向。
+4. `strategies/archive-index.md`: B1 / B3 / Rotation / LTR / oracle 等已归档路线索引。
 
-主线策略结论仍以 `project-status.md` 为准；但产品化整理期间，不要每次小改都更新 `project-status.md` 或 `progress.md`。
+主线策略结论以 `CURRENT_STATE.md` 与 `strategies/amv/status.py` 为准；历史实验流水只从 git history 回看。
 
 ## 当前工作模式
 
-- 当前阶段优先做项目产品化整理，不继续新增策略探索。
+- 项目已从产品化清理阶段切回 AMV 探索阶段。
+- 新探索围绕 `活跃市值 regime -> AMV bull pool -> TopN / sleeve -> raw execution` 展开。
 - 日常入口收敛到 `scripts/qlab.py`，不要再随手新增一堆一次性入口脚本。
-- 第一阶段只建立新秩序，不删除脚本、不大规模移动文件、不改 Rust 引擎结构。
-- 第二阶段再按 `docs/script-inventory.md` 和 `docs/cleanup-plan.md` 删除或迁移。
+- `scripts/` 只保留 `qlab.py`；历史脚本、报告 JSON、旧 agent、旧实验目录不再作为当前 workflow 保留。
+- 删除或迁移前先确认当前能力已进入 `qlab.py`、`strategies/amv/`、`CURRENT_STATE.md`、`strategies/archive-index.md` 或 git history。
 
 常用命令：
 
@@ -68,6 +67,8 @@ uv run python scripts/qlab.py attribution p3-raw-vs-adjusted
 - score expression registry
 - preset 名称与稳定参数
 - CLI 或重复 runner 会用到的策略族元信息
+- `target-strategy-evolution.md`: 外部对标锚点（小红书博主策略演化）
+- `archive-index.md`: 已归档策略路线的回看索引
 
 不要把 DuckDB 访问、报告写入、一次性诊断放在这里。
 
@@ -93,25 +94,18 @@ uv run python scripts/qlab.py attribution p3-raw-vs-adjusted
 只放命令入口：
 
 - `scripts/qlab.py`
-- 少数 canonical export runner
-- 少数 canonical backtest / compare / attribution runner
-- 仍需复现稳定报告的 focused diagnostic runner
 
-新脚本必须尽量薄。重的因子和 score 逻辑在第二阶段逐步迁入 `strategies/amv/`。
+不要新增 one-off 研究脚本。新能力优先进入 `qlab.py`、`strategies/amv/` 或 `utils/`。
 
 ### `reports/`
 
 只放稳定产物：
 
-- JSON 结论
-- Canvas 可视化
+- 核心 Canvas 可视化
+- 少量长期保留的文字/状态说明
 - 长期保留的诊断输出
 
 不要放大体积 parquet、CSV 回测明细或临时数据。
-
-### `experiments/`
-
-放历史路线说明和归档研究笔记，不作为日常入口。
 
 ## Rust 回测引擎
 
@@ -120,7 +114,7 @@ uv run python scripts/qlab.py attribution p3-raw-vs-adjusted
 - `core`: 账户、费用、A 股涨跌停、交易统计
 - `amv-topn`: AMV TopN static / rolling 主回测，**当前主线**
 - `amv-cohort-diagnostic`: close-to-close cohort 诊断
-- `b1`, `b3`, `renko`, `rotation`: 旧策略线，归档维护
+- `b1`, `b3`, `renko`, `rotation`: 旧策略线，仅保留历史资料，不新增运行入口或专用 agent
 
 执行：
 
@@ -159,17 +153,15 @@ cargo run -p bt-amv-topn --release -- \
 
 日常操作不要再要求用户记 Rust config 文件名。
 
-## 脚本状态标签
+## 删除 / 迁移门禁
 
-每个脚本只标一个 operational status，记录在 `docs/script-inventory.md`：
+删除或移动文件前，必须满足适用门禁：
 
-- `canonical`: 明确推荐的直接入口。
-- `implementation`: CLI 或 canonical script 内部调用，用户一般不直接运行。
-- `diagnostic`: 可复现实验诊断，不是日常入口。
-- `historical`: 历史结论已沉淀，保留用于追溯。
-- `deprecated`: 第二阶段删除或迁移候选。
-
-这些标签只是操作状态，不是价值判断。`historical` 脚本仍可能有价值，只是不应该作为新用户第一入口。
+- 当前日常入口已由 `scripts/qlab.py`、`strategies/amv/` 或 `utils/` 覆盖，或者该文件不属于当前 workflow。
+- 最新结论已进入 `CURRENT_STATE.md`、`strategies/amv/status.py`、核心 Canvas、`strategies/archive-index.md`、`strategies/target-strategy-evolution.md`，或已经在 git history 中沉淀。
+- raw execution 状态清楚；仅 adjusted-execution 的结果必须标为 historical。
+- 没有当前 canonical 代码依赖该文件。
+- 删除动作尽量和行为改动分开 review / commit。
 
 ## 目录与产出
 
@@ -180,31 +172,31 @@ cargo run -p bt-amv-topn --release -- \
 | `utils/` | 数据读取、价格处理、ST、行业映射等通用工具 | 是 |
 | `backtest-engine/` | Rust 工作区 | 是（不含 `target/`） |
 | `notebooks/` | Marimo 入口 | 是 |
-| `reports/` | 稳定 JSON 结论、`canvases/*.canvas.tsx` 可视化 | 是 |
-| `experiments/` | 归档实验文档 | 是 |
-| `.agents/skills/` | 跨设备追踪的 Agent Skills | 是 |
+| `reports/` | 少量核心 `canvases/*.canvas.tsx` 可视化 | 是 |
+| `.claude/skills/` | 跨设备追踪的 Claude / Agent Skills | 是 |
 | `artifacts/`, `results/`, `data/`, `logs/` | 大文件、回测产物、中间数据 | **否** |
 | `.cursor/` | Cursor 本地配置 | **否** |
 
 - 大文件 / parquet / csv / pkl / html 全部已被 `.gitignore`，不要尝试 `git add`。
-- 想跨设备同步的 skill / 配置必须放 `.agents/skills/`，不要放 `.cursor/`。
+- 想跨设备同步的 skill / 配置必须放 `.claude/skills/`，不要放 `.cursor/`。
 
 ## 文档与状态更新规则
 
-- **`CURRENT_STATE.md`**: 第一阅读入口，只保留当前真实口径、baseline、challenger、sleeve 状态、禁用旧结论和日常命令。
-- **`progress.md`**: 实验流水账，不是整理期操作日志。新增策略实验、关键调试结论、阶段性整理完成时再更新；普通文档改名、引用清理、脚本分类微调不要更新。
-- **`project-status.md`**: 当前详细状态看板。只有稳定策略决策或项目级里程碑变化时才更新；整理期的小步重构、删除候选调整、文档措辞变化不要更新。
+- **`CURRENT_STATE.md`**: 唯一当前状态看板，只保留当前真实口径、baseline、challenger、sleeve、关键判断、活跃风险和日常命令。
+- **`strategies/amv/status.py`**: `qlab status` 使用的稳定数值摘要。
+- **`strategies/archive-index.md`**: 已归档策略路线索引，只记录为什么探索、为什么归档、何时回看。
+- **`strategies/target-strategy-evolution.md`**: 外部对标与长期方向，不替代当前指标。
 - **`reports/canvases/*.canvas.tsx`**: 长期可视化结论。新增/编辑 canvas 时遵循 `canvas` skill。
 - **`README.md`**: 项目入口，改动只在结构/主线变化时更新。
 - **文档语言**: 面向项目使用者的文档默认中文；代码标识、命令、技术名词可保留英文。
 
 ## 常用分析入口
 
-- AMV 回测对比、交易归因、sleeve 互补：先用 `.agents/skills/amv-trade-attribution/SKILL.md` 的流程。
+- AMV 回测对比、交易归因、sleeve 互补：先用 `.claude/skills/amv-trade-attribution/SKILL.md` 的流程。
 - 日常入口: `scripts/qlab.py`
-- 通用归因脚本: `scripts/backtest_trade_attribution.py`（支持任意两个 `bt-amv-topn` artifact）。
+- 通用归因入口: `uv run python scripts/qlab.py attribution trade ...`；实现位于 `strategies/amv/attribution.py`。
 - 当前 signal export 由 `qlab export` 包装，不再优先手动记忆具体脚本名。
-- Executable 评估旧入口已进入历史/诊断清单；使用前先看 `docs/script-inventory.md`。
+- 旧入口默认不恢复；需要回看旧路线时先看 `strategies/archive-index.md` 和 git history。
 
 ## 编码与风格
 

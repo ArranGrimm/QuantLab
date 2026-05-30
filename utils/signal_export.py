@@ -387,8 +387,7 @@ def export_for_rust(
         print(f"Date range: {date_range[0]} ~ {date_range[1]}")
         print(f"B1 signals: {signal_rows}")
         print(f"B1 signals in loose periods: {loose_signal_rows}")
-        print("Rust 回测示例:")
-        print(f"  backtest-engine\\run_b1.bat \"{signal_meta_path}\"")
+        print("B1 旧回测入口已归档，当前不再提供 run_b1.bat 示例。")
         return str(signal_path)
 
     # Write to parquet
@@ -653,8 +652,7 @@ def export_rotation_scores(
         print(f"Unique stocks: {unique_codes}")
         print(f"Date range: {date_range[0]} ~ {date_range[1]}")
         print(f"Top-{top_n} signals: {top_n_rows:,} ({top_n_rows/unique_dates:.1f}/day avg)")
-        print("Rust 回测示例:")
-        print(f"  backtest-engine\\run_rotation.bat \"{signal_meta_path}\"")
+        print("Rotation 旧回测入口已归档，当前不再提供 run_rotation.bat 示例。")
         return str(signal_path)
 
     if not output_path:

@@ -11,7 +11,6 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKTEST_ENGINE_DIR = ROOT / "backtest-engine"
-GROUND_TRUTH_REPORT = ROOT / "reports" / "amv_raw_execution_ground_truth_summary.json"
 INTERPRETATION_TEXTS = {
     "core": "raw execution 显著压低静态 Ref/P3/context 收益，但 context combo 仍是当前最强核心静态 challenger。",
     "pb3": "PB3 gated rolling 在 raw execution 下收益低于旧 adjusted 诊断输入，进入组合权重前需要重新做 allocation 评估。",
@@ -26,6 +25,7 @@ INTERPRETATION_LABELS = {
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from strategies.amv.attribution import write_trade_attribution  # noqa: E402
 from strategies.amv.registry import (  # noqa: E402
     BACKTEST_PRESETS,
     EXPORT_TARGETS,
@@ -33,6 +33,7 @@ from strategies.amv.registry import (  # noqa: E402
     resolve_project_path,
 )
 from strategies.amv.sleeves import SLEEVE_SPECS  # noqa: E402
+from strategies.amv.status import P3_RAW_VS_ADJUSTED_ATTRIBUTION, RAW_EXECUTION_STATUS  # noqa: E402
 from strategies.amv.workflows import (  # noqa: E402
     WorkflowExportConfig,
     export_context_sleeve,
@@ -190,7 +191,7 @@ def command_export_native(args: argparse.Namespace, target: Any) -> int:
 
 
 def load_ground_truth_runs() -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
-    report = read_json(GROUND_TRUTH_REPORT)
+    report = RAW_EXECUTION_STATUS
     runs = {run["name"]: run for run in report.get("runs", [])}
     return report, runs
 
@@ -341,8 +342,34 @@ def command_compare(args: argparse.Namespace) -> int:
 
 def command_attribution(args: argparse.Namespace) -> int:
     if args.target == "p3-raw-vs-adjusted":
-        script = ROOT / "scripts" / "amv_p3_raw_vs_adjusted_trade_attribution.py"
-        return run_command([sys.executable, str(script)], cwd=ROOT, dry_run=args.dry_run)
+        report = P3_RAW_VS_ADJUSTED_ATTRIBUTION
+        summary = report.get("summary", {})
+        adjusted = summary.get("adjusted", {})
+        raw = summary.get("raw", {})
+        delta = summary.get("delta_raw_minus_adjusted", {})
+        overlap = summary.get("overlap", {})
+        matched = summary.get("matched_trade_sums", {})
+        print("P3 raw-vs-adjusted 归因报告")
+        print(f"- 报告摘要: strategies/amv/status.py::{report.get('report_name')}")
+        print(
+            f"- 总收益: adjusted {pct(adjusted.get('total_return_pct'))} -> "
+            f"raw {pct(raw.get('total_return_pct'))} ({delta.get('total_return_pp', 0.0):+.2f}pp)"
+        )
+        print(
+            f"- MaxDD: adjusted {pct(adjusted.get('max_drawdown_pct'), signed=False)} -> "
+            f"raw {pct(raw.get('max_drawdown_pct'), signed=False)} ({delta.get('max_drawdown_pp', 0.0):+.2f}pp)"
+        )
+        print(
+            f"- 交易重合: {overlap.get('common_entry_code', 'n/a')}/"
+            f"{overlap.get('adjusted_trades', 'n/a')}，same exit date/reason "
+            f"{overlap.get('same_exit_date', 'n/a')}/{overlap.get('same_exit_reason', 'n/a')}"
+        )
+        print(
+            f"- PnL 差异: {matched.get('pnl_delta_raw_minus_adjusted', 0.0):+.2f}，"
+            f"notional effect {matched.get('notional_effect', 0.0):+.2f}，"
+            f"return effect {matched.get('return_effect', 0.0):+.2f}"
+        )
+        return 0
 
     missing = [
         name
@@ -356,24 +383,32 @@ def command_attribution(args: argparse.Namespace) -> int:
     if missing:
         raise ValueError(f"attribution trade 缺少必要参数: {', '.join(missing)}")
 
-    script = ROOT / "scripts" / "backtest_trade_attribution.py"
-    cmd = [
-        sys.executable,
-        str(script),
-        "--left-backtest",
-        str(args.left_backtest),
-        "--right-backtest",
-        str(args.right_backtest),
-        "--left-label",
-        args.left_label,
-        "--right-label",
-        args.right_label,
-        "--out",
-        str(args.out),
-        "--top-n",
-        str(args.top_n),
-    ]
-    return run_command(cmd, cwd=ROOT, dry_run=args.dry_run)
+    if args.dry_run:
+        print("将生成交易归因:")
+        print(f"  left: {args.left_backtest} ({args.left_label})")
+        print(f"  right: {args.right_backtest} ({args.right_label})")
+        print(f"  out: {args.out}")
+        print(f"  top_n: {args.top_n}")
+        return 0
+
+    attribution = write_trade_attribution(
+        args.left_backtest,
+        args.right_backtest,
+        left_label=args.left_label,
+        right_label=args.right_label,
+        out=args.out,
+        top_n=args.top_n,
+    )
+    delta = attribution["summary"]["delta_right_minus_left"]
+    print(f"Wrote {args.out}")
+    print(
+        "return_delta={:.2f}pp maxdd_delta={:.2f}pp exact_overlap={}".format(
+            delta.get("total_return_pct", 0.0),
+            delta.get("max_drawdown_pct", 0.0),
+            attribution["overlap"]["exact_overlap_count"],
+        )
+    )
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
