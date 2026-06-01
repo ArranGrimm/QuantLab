@@ -1,0 +1,24 @@
+{
+  "trend": {
+    "label": "趋势突破延续",
+    "group": "canonical",
+    "components": [
+      { "factor": "price_pos_20d", "direction": "higher", "weight": "{P}" },
+      { "factor": "close_to_high_20d", "direction": "lower", "weight": "{P}" },
+      { "factor": "KLEN", "direction": "lower", "weight": "{K}" },
+      { "factor": "KMID2", "direction": "higher", "weight": "{K}" }
+    ],
+    "default_params": { "P": 2.0, "K": 0.5 }
+  },
+  "pullback": {
+    "label": "回调反弹 PB/CP/RV",
+    "group": "pullback",
+    "components": [
+      { "factor": "ma_bias_20", "direction": "lower", "weight": "{PB}" },
+      { "factor": "disp_bias_20", "direction": "lower", "weight": "{PB}" },
+      { "factor": "KSFT", "direction": "lower", "weight": "{CP}" },
+      { "factor": "intraday_pos", "direction": "lower", "weight": "{CP}" }
+    ],
+    "default_params": { "PB": 3.0, "CP": 1.0 }
+  }
+}

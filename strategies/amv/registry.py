@@ -1,89 +1,123 @@
+"""
+AMV 策略注册表 —— 从 configs/*.json 动态加载策略定义。
+"""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-from strategies.amv.sleeves import SLEEVE_SPECS
+from strategies.amv.specs import RankerSpec, ScoreComponent
 
-
-@dataclass(frozen=True)
-class ExportTarget:
-    """由 scripts/qlab.py 包装的稳定导出目标。"""
-
-    description: str
-    script: str | None
-    args: tuple[str, ...]
+CONFIGS_DIR = Path(__file__).parent / "configs"
 
 
 @dataclass(frozen=True)
-class BacktestPreset:
-    description: str
+class Preset:
+    name: str
     config: str
 
 
 @dataclass(frozen=True)
-class ReportAlias:
-    description: str
-    run_name: str
+class Strategy:
+    """一个已知 AMV 子策略 = Ranker + Rules + Preset。"""
+
+    name: str
+    family: str
+    label: str
+    ranker: RankerSpec
+    preset: Preset
+    rules: tuple[str, ...] = ()
+    rule_params: dict[str, Any] = field(default_factory=dict)
+    status: str = "research"
+    description: str = ""
 
 
-EXPORT_TARGETS: dict[str, ExportTarget] = {
-    "ref": ExportTarget(
-        description=SLEEVE_SPECS["ref"].label,
-        script=None,
-        args=SLEEVE_SPECS["ref"].export_args,
-    ),
-    "p3": ExportTarget(
-        description=SLEEVE_SPECS["p3"].label,
-        script=None,
-        args=SLEEVE_SPECS["p3"].export_args,
-    ),
-    "context": ExportTarget(
-        description=SLEEVE_SPECS["context"].label,
-        script=None,
-        args=SLEEVE_SPECS["context"].export_args,
-    ),
-    "pb3-gated": ExportTarget(
-        description=SLEEVE_SPECS["pb3-gated"].label,
-        script=None,
-        args=SLEEVE_SPECS["pb3-gated"].export_args,
-    ),
-    "limit-weakgate": ExportTarget(
-        description=SLEEVE_SPECS["limit-weakgate"].label,
-        script=None,
-        args=SLEEVE_SPECS["limit-weakgate"].export_args,
-    ),
-}
+# === JSON loader ===
 
 
-BACKTEST_PRESETS: dict[str, BacktestPreset] = {
-    "6td-static": BacktestPreset(
-        description="持有 6 个交易日，static strict Top3，无止损",
-        config="backtest-engine/crates/amv-topn/config_6td_static_strict_top3_no_stop.toml",
-    ),
-    "5td-static": BacktestPreset(
-        description="持有 5 个交易日，static strict Top3，无止损",
-        config="backtest-engine/crates/amv-topn/config_5td_static_strict_top3_no_stop.toml",
-    ),
-    "3td-static": BacktestPreset(
-        description="持有 3 个交易日，static strict Top3，无止损",
-        config="backtest-engine/crates/amv-topn/config_3td_static_strict_top3_no_stop.toml",
-    ),
-    "6td-rolling": BacktestPreset(
-        description="持有 6 个交易日，rolling21 refill Top10，无止损",
-        config="backtest-engine/crates/amv-topn/config_6td_rolling21_refill_top10_no_stop.toml",
-    ),
-}
+def _resolve_weight(weight_template: str, params: dict[str, float]) -> float:
+    result = weight_template
+    for k, v in params.items():
+        result = result.replace(f"{{{k}}}", str(v))
+    return float(result)
 
 
-REPORT_ALIASES: dict[str, ReportAlias] = {
-    "ref": ReportAlias("raw 口径 Reference P2 6td static", "ref_p2_6td"),
-    "p3": ReportAlias("raw 口径 Candidate P3 6td static", "p3_6td"),
-    "context": ReportAlias("raw 口径 P3 上下文组合 6td static", "context_combo_6td"),
-    "pb3-gated": ReportAlias("raw 口径 PB3 gated 6td rolling", "pb3_gated_rolling"),
-    "limit-base": ReportAlias("raw 口径 涨停首板 base 5td static", "limit_first_board_5td"),
-    "limit-weakgate": ReportAlias("raw 口径 涨停首板 weakgate 5td static", "limit_weakgate_5td"),
-}
+def _build_ranker(name: str, ranker_config: dict, family: str, label: str) -> RankerSpec:
+    rtype = ranker_config["type"]
+
+    if rtype == "components":
+        templates = json.loads((CONFIGS_DIR / "_rankers.json").read_text(encoding="utf-8"))
+        template = templates[ranker_config["template"]]
+        params = {**template.get("default_params", {}), **ranker_config.get("params", {})}
+        components = tuple(
+            ScoreComponent(
+                factor=c["factor"],
+                direction=c["direction"],
+                weight=_resolve_weight(str(c["weight"]), params),
+            )
+            for c in template["components"]
+        )
+        return RankerSpec(
+            id=f"{name}-ranker",
+            label=template["label"],
+            group=template["group"],
+            components=components,
+            weights=params,
+        )
+
+    if rtype == "custom":
+        return RankerSpec(
+            id=f"{name}-ranker",
+            label=label,
+            group=family,
+            factor=ranker_config["function"],
+            descending=True,
+            weights={},
+        )
+
+    raise ValueError(f"unknown ranker type: {rtype}")
+
+
+def load_strategy(name: str) -> Strategy:
+    config = json.loads((CONFIGS_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    ranker = _build_ranker(name, config["ranker"], config["family"], config["label"])
+
+    preset_raw = config["preset"]
+    preset = Preset(name=preset_raw["name"], config=preset_raw["config"]) if isinstance(preset_raw, dict) else Preset(name=preset_raw, config="")
+
+    rules = tuple(r["id"] for r in config.get("rules", []))
+    rule_params: dict[str, Any] = {}
+    for r in config.get("rules", []):
+        if r.get("params"):
+            rule_params.update(r["params"])
+
+    return Strategy(
+        name=config["name"],
+        family=config["family"],
+        label=config["label"],
+        ranker=ranker,
+        preset=preset,
+        rules=rules,
+        rule_params=rule_params,
+        status=config["status"],
+        description=config.get("description", ""),
+    )
+
+
+def load_all_strategies() -> dict[str, Strategy]:
+    strategies: dict[str, Strategy] = {}
+    for path in sorted(CONFIGS_DIR.glob("*.json")):
+        if path.name.startswith("_"):
+            continue
+        strategy = load_strategy(path.stem)
+        strategies[strategy.name] = strategy
+    return strategies
+
+
+KNOWN_STRATEGIES = load_all_strategies()
 
 
 def resolve_project_path(root: Path, relative_path: str) -> Path:

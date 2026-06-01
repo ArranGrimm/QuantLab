@@ -1,0 +1,36 @@
+{
+  "name": "trend-p3-enhanced",
+  "family": "trend",
+  "label": "趋势突破 P3 + 板块/中期增强",
+  "description": "趋势突破 P3 + 板块顺风 penalty + 128 日中期结构/趋势质量 penalty。当前最强静态 challenger，仍处 forward monitor。",
+  "status": "challenger",
+  "preset": {
+    "name": "6td-static",
+    "config": "backtest-engine/crates/amv-topn/config_6td_static_strict_top3_no_stop.toml"
+  },
+  "ranker": {
+    "type": "components",
+    "template": "trend",
+    "params": { "P": 3.0 }
+  },
+  "rules": [
+    {
+      "id": "sector-tailwind",
+      "params": {
+        "sector_penalty": 0.02,
+        "sector_penalty_mode": "linear",
+        "sector_rank_source": "mix_10_20",
+        "sector_relative_confirm": "rel20_under0",
+        "sector_bottom_rank_threshold": 0.40
+      }
+    },
+    {
+      "id": "medium-trend-quality",
+      "params": {
+        "medium_penalty": 0.03,
+        "medium_penalty_mode": "linear",
+        "medium_weak_threshold": 0.50
+      }
+    }
+  ]
+}

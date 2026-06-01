@@ -228,7 +228,7 @@ def build_amv_phase_frame(
     )
 
 
-def build_pb3_regime_gate_frame(
+def build_amv_regime_gate_frame(
     *,
     bull_trigger_pct: float = 4.0,
     bear_trigger_1d_pct: float = -2.3,
@@ -259,9 +259,9 @@ def build_pb3_regime_gate_frame(
         )
         .with_columns(
             [
-                aged_non_accel.alias("pb3_gate_aged_non_accel"),
-                chaos.alias("pb3_gate_chaos"),
-                (aged_non_accel | chaos).alias("pb3_gate_skip"),
+                aged_non_accel.alias("gate_aged_non_accel"),
+                chaos.alias("gate_chaos"),
+                (aged_non_accel | chaos).alias("gate_skip"),
             ]
         )
         .rename({"date": "signal_date"})

@@ -1,0 +1,22 @@
+{
+  "name": "pullback-pb3",
+  "family": "pullback",
+  "label": "回调 PB3/CP1/RV0 + AMV 风控",
+  "description": "回调反弹 PB3/CP1/RV0 + AMV 活跃市值内部阶段风控 gate。与 trend 家族低相关（日收益 corr ~0.26）。",
+  "status": "complementary",
+  "preset": {
+    "name": "6td-rolling",
+    "config": "backtest-engine/crates/amv-topn/config_6td_rolling21_refill_top10_no_stop.toml"
+  },
+  "ranker": {
+    "type": "components",
+    "template": "pullback",
+    "params": {}
+  },
+  "rules": [
+    {
+      "id": "amv-regime-gate",
+      "params": {}
+    }
+  ]
+}

@@ -23,10 +23,11 @@ A 股多策略量化研究仓库。主线是 AMV Bull Pool TopN：Python/Polars 
 
 ```bash
 uv run python scripts/qlab.py status
-uv run python scripts/qlab.py export p3
-uv run python scripts/qlab.py backtest <signal_dir> --preset 6td-static
-uv run python scripts/qlab.py compare p3 context
-uv run python scripts/qlab.py attribution p3-raw-vs-adjusted
+uv run python scripts/qlab.py export trend-p3
+uv run python scripts/qlab.py backtest trend-p3
+uv run python scripts/qlab.py results trend-p3
+uv run python scripts/qlab.py results trend-p3 --diff
+uv run python scripts/qlab.py run trend-p3
 ```
 
 ## 设备分支
@@ -138,9 +139,12 @@ cargo run -p bt-amv-topn --release -- \
 - **涨跌停**: close 涨停默认禁开仓 (`max_open_gap_pct = 0.098`)；任何新因子探索都必须报告 close 涨停污染率和 T+1 高开污染。
 - **重复持仓**: `bt-amv-topn` 的 `allow_duplicate_positions` 默认 `false`；rolling/refill 结果对这个开关敏感，对比时注明。
 - **AMV 命名**:
-  - `Ref` = `reference_p2_k0p5_b0_c0_r0`
-  - `P3` = `candidate_p3_k0p5_b0_c0_r0`
-  - Pullback 用 `PB/CP/RV`：`PB = ma_bias_20 + disp_bias_20`，`CP = KSFT + intraday_pos`，`RV = atr_14_pct + panic_vol_ratio_20d`
+  - 策略: `家族-变体`，如 `trend-p2` (趋势突破 P2 基线)、`pullback-pb3` (回调反弹 PB3 + 风控)、`event-firstboard` (首板回踩事件)
+  - 趋势家族 (`trend`): 贴近 20 日新高，P-block 权重主导。`trend-p2` (P=2 基线)、`trend-p3` (P=3 挑战者)、`trend-p3-enhanced` (P=3 + 板块/中期增强)
+  - 回调家族 (`pullback`): PB/CP/RV 回调反弹。`PB = ma_bias_20 + disp_bias_20`，`CP = KSFT + intraday_pos`，`RV = atr_14_pct + panic_vol_ratio_20d`
+  - 事件家族 (`event`): 涨停生态事件驱动
+  - 旧名 `ref`/`p3`/`context`/`pb3-gated`/`limit-weakgate` 在 CLI 仍兼容但不再建议使用
+  - 规则: `sector-tailwind`, `medium-trend-quality`, `amv-regime-gate`, `event-weakgate`
 
 ## Preset 名称
 

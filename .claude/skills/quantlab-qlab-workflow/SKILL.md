@@ -1,6 +1,6 @@
 ---
 name: quantlab-qlab-workflow
-description: Guides QuantLab daily AMV operations through the canonical qlab CLI. Use when exporting AMV signals, running bt-amv-topn backtests, comparing strategies, checking current status, reproducing raw-execution baselines, or when the user mentions qlab, ref, p3, context, pb3-gated, limit-weakgate, presets, or AMV artifacts.
+description: Guides QuantLab daily AMV operations through the canonical qlab CLI. Use when exporting AMV signals, running bt-amv-topn backtests, comparing strategies, checking current status, reproducing raw-execution baselines, or when the user mentions qlab, AMV strategies, presets, or AMV artifacts.
 ---
 
 # QuantLab QLab Workflow
@@ -17,29 +17,36 @@ Use this skill when the task is to operate the current AMV workflow, not to inve
 
 ```bash
 uv run python scripts/qlab.py status
-uv run python scripts/qlab.py export p3
-uv run python scripts/qlab.py export context
-uv run python scripts/qlab.py export pb3-gated
-uv run python scripts/qlab.py export limit-weakgate
-uv run python scripts/qlab.py backtest artifacts/amv_static_sleeve_signals/<signal_id> --preset 6td-static
-uv run python scripts/qlab.py compare p3 context
-uv run python scripts/qlab.py attribution p3-raw-vs-adjusted
+uv run python scripts/qlab.py export trend-p3
+uv run python scripts/qlab.py export trend-p3-enhanced
+uv run python scripts/qlab.py export pullback-pb3
+uv run python scripts/qlab.py export event-firstboard
+uv run python scripts/qlab.py backtest trend-p3
+uv run python scripts/qlab.py backtest trend-p3 --top-n 5
+uv run python scripts/qlab.py results trend-p3
+uv run python scripts/qlab.py results trend-p3 --diff
+uv run python scripts/qlab.py run trend-p3
 ```
 
-Stable export targets: `ref`, `p3`, `context`, `pb3-gated`, `limit-weakgate`.
+Stable export targets: `trend-p2`, `trend-p3`, `trend-p3-enhanced`, `pullback-pb3`, `event-firstboard`, `event-firstboard-base`.
 
-Stable presets: `6td-static`, `5td-static`, `3td-static`, `6td-rolling`.
+## Naming Convention
+
+- Strategies: `family-variant`. See `strategies/amv/configs/*.json`.
+- A Strategy = Ranker template + params + list of Rules + Preset.
 
 ## Source Of Truth
 
 - Tradable results come from Rust `bt-amv-topn` artifacts.
-- `qlab status` reads stable summaries from `strategies/amv/status.py`.
-- `reports/*.json` has been intentionally removed; do not depend on it.
-- Use `artifacts/` for run outputs and large/intermediate files.
+- `qlab status` scans `artifacts/*/backtests/*/result.json` for latest canonical results.
+- `qlab results` lists all historical backtest results for a strategy.
+- Strategy definitions in `strategies/amv/configs/*.json`.
 
 ## When Editing
 
 - Keep CLI orchestration thin in `scripts/qlab.py`.
 - Put reusable strategy logic in `strategies/amv/`.
 - Put generic data/price helpers in `utils/`.
-- After changing workflow code, validate with focused `py_compile`, `qlab --dry-run` commands, and lints for edited files.
+- New strategy: add a JSON file in `strategies/amv/configs/`.
+- New rule: add implementation to `strategies/amv/rules/` + register in `rules/__init__.py`.
+- `end_date` auto-detects from DuckDB; set explicitly only for backtesting historical ranges.

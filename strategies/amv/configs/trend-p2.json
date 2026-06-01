@@ -1,0 +1,17 @@
+{
+  "name": "trend-p2",
+  "family": "trend",
+  "label": "趋势突破 P2 基线",
+  "description": "趋势突破延续，P=2 权重，K=0.5。当前 baseline。",
+  "status": "baseline",
+  "preset": {
+    "name": "6td-static",
+    "config": "backtest-engine/crates/amv-topn/config_6td_static_strict_top3_no_stop.toml"
+  },
+  "ranker": {
+    "type": "components",
+    "template": "trend",
+    "params": { "P": 2.0 }
+  },
+  "rules": []
+}

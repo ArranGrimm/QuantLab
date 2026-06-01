@@ -42,22 +42,27 @@ When explaining why one AMV ranker beats another:
 
 ## AMV Naming
 
-- `Ref` usually means `reference_p2_k0p5_b0_c0_r0`.
-- `P3` usually means `candidate_p3_k0p5_b0_c0_r0`.
-- Pullback naming uses `PB/CP/RV`:
-  - `PB`: `ma_bias_20 + disp_bias_20`
-  - `CP`: `KSFT + intraday_pos`
-  - `RV`: `atr_14_pct + panic_vol_ratio_20d`
+Strategies use `family-variant` convention:
+- `trend-p2`: trend continuation, P=2 weight (baseline)
+- `trend-p3`: trend continuation, P=3 weight (challenger)
+- `trend-p3-enhanced`: P3 + sector tailwind + medium trend quality penalties
+- `pullback-pb3`: pullback PB3/CP1/RV0 + AMV regime gate
+- `event-firstboard`: first board pullback + weak window gate
+
+Ranker component naming uses `PB/CP/RV`:
+- `PB`: `ma_bias_20 + disp_bias_20` (pullback bias)
+- `CP`: `KSFT + intraday_pos` (close pullback)
+- `RV`: `atr_14_pct + panic_vol_ratio_20d` (risk/volatility)
 
 ## Preferred Script Entrypoints
 
 Prefer the canonical CLI before writing one-off code:
 
-- `scripts/qlab.py attribution trade`
-- `scripts/qlab.py attribution p3-raw-vs-adjusted`
-- `scripts/qlab.py compare <left> <right>`
+- `scripts/qlab.py results <strategy>` — list history
+- `scripts/qlab.py results <strategy> --diff` — latest two canonical compared
+- `scripts/qlab.py backtest <strategy> --top-n 5` — parameter override
 
-Reusable attribution implementation lives under `strategies/amv/attribution.py`; keep `scripts/` reserved for `qlab.py`.
+Deep trade attribution: read `artifacts/<strategy>/backtests/<ts>/trades.csv` directly with Polars.
 
 ## Output Summary
 

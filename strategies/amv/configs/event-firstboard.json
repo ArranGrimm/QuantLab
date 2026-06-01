@@ -1,0 +1,21 @@
+{
+  "name": "event-firstboard",
+  "family": "event",
+  "label": "首板后回踩 + 弱窗口过滤",
+  "description": "首板涨停后回踩事件 + 7 维弱窗口 gate。研究候选，base MaxDD 45% → weakgate 34%，尚未 allocation-ready。",
+  "status": "research",
+  "preset": {
+    "name": "5td-static",
+    "config": "backtest-engine/crates/amv-topn/config_5td_static_strict_top3_no_stop.toml"
+  },
+  "ranker": {
+    "type": "custom",
+    "function": "first_board_event_score"
+  },
+  "rules": [
+    {
+      "id": "event-weakgate",
+      "params": {}
+    }
+  ]
+}

@@ -1,3 +1,5 @@
+"""AMV 策略体系的纯类型定义。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -6,7 +8,6 @@ from typing import Literal
 
 FactorDirection = Literal["higher", "lower"]
 FactorRole = Literal["alpha", "risk", "gate", "context", "diagnostic"]
-SleeveFamily = Literal["ref", "p3", "pullback", "context", "limit_ecology", "diagnostic"]
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,7 @@ class ScoreComponent:
 
 @dataclass(frozen=True)
 class RankerSpec:
-    """候选池排序器定义；grid scan 和 signal export 都应逐步收敛到这里。"""
+    """候选池排序器定义。"""
 
     id: str
     label: str
@@ -78,28 +79,3 @@ class RankerSpec:
             "factor": self.factor,
             "descending": self.descending,
         }
-
-
-@dataclass(frozen=True)
-class SleeveSpec:
-    """可导出并接 Rust 回测的 AMV 子策略定义。"""
-
-    id: str
-    label: str
-    family: SleeveFamily
-    ranker: RankerSpec | None = None
-    top_n: int = 3
-    default_preset: str = "6td-static"
-    export_target: str | None = None
-    export_args: tuple[str, ...] = ()
-    description: str = ""
-
-
-@dataclass(frozen=True)
-class GridSpec:
-    """一组待扫描 ranker。"""
-
-    id: str
-    label: str
-    rankers: tuple[RankerSpec, ...]
-    description: str = ""

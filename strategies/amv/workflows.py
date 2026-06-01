@@ -1,39 +1,45 @@
+"""
+AMV 策略导出编排层。
+
+统一管道: market 构造 → ranker 评分 → penalties 扣分 → TopN 选择 → gates 过滤 → 导出
+"""
+
 from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import polars as pl
 
-from strategies.amv.export import SignalArtifact, SignalArtifactConfig, write_signal_artifact
-from strategies.amv.factors.limit_ecology import LIMIT_TOLERANCE
+from strategies.amv.export import SignalArtifact, write_signal_artifact
+from strategies.amv.factors.limit_ecology import LIMIT_TOLERANCE, add_limit_ecology_features, load_raw_daily
 from strategies.amv.factors.medium_trend_quality import add_medium_trend_features
 from strategies.amv.factors.sector_tailwind import build_sector_features
 from strategies.amv.market import build_market_frame
-from strategies.amv.rules.context import build_context_signal, context_config_payload
-from strategies.amv.rules.limit_weakgate import (
-    build_limit_ecology_market,
-    build_limit_weakgate_signal,
-    limit_config_payload,
-)
-from strategies.amv.rules.pb3_regime import apply_pb3_regime_gate
+from strategies.amv.registry import Strategy
+from strategies.amv.rules.amv_regime import apply_amv_regime_gate
+from strategies.amv.rules.event_weakgate import build_event_weakgate_signal
+from strategies.amv.rules.medium_penalty import apply_medium_trend_penalty
+from strategies.amv.rules.sector_penalty import apply_sector_tailwind_penalty
 from strategies.amv.signals import (
     SignalAssemblyConfig,
     assemble_ranker_signal,
+    base_candidate_expr,
     build_backtest_signal_frame,
+    ranker_required_columns,
+    ranker_score_expr,
 )
-from strategies.amv.specs import SleeveSpec
 
 
 @dataclass(frozen=True)
 class WorkflowExportConfig:
+    """所有 AMV 策略共用的基础导出配置。"""
+
     qmt_db: Path
-    output_root: Path
     start_date: str = "2019-01-01"
-    end_date: str = "2026-05-10"
+    end_date: str = ""  # 空 = 自动取数据库最新日期
     st_snapshot_date: str = "2026-03-31"
     mv_min: float = 100.0
     amount_ma20_min: float = 5e7
@@ -46,23 +52,26 @@ class WorkflowExportConfig:
     sector_start_date: str = "2019-01-01"
     refresh_sector_map: bool = False
     sector_map_request_sleep: float = 0.35
-    rank_source: str = "mix_10_20"
-    sector_penalty_mode: str = "linear"
-    relative_confirm: str = "rel20_under0"
-    bottom_rank_threshold: float = 0.40
-    sector_penalty: float = 0.02
-    medium_penalty_mode: str = "linear"
-    weak_threshold: float = 0.50
-    medium_penalty: float = 0.03
-    pb3_regime_gate: str = "aged_non_accel_or_chaos"
     price_limit_tolerance: float = LIMIT_TOLERANCE
+
+
+# === Market frame helpers ===
+
+
+def _resolve_end_date(config: WorkflowExportConfig) -> str:
+    if config.end_date:
+        return config.end_date
+    import duckdb
+    with duckdb.connect(str(config.qmt_db), read_only=True) as conn:
+        max_date = conn.execute("SELECT MAX(date) FROM v_stock_daily_qfq_qmt").fetchone()[0]
+        return str(max_date)
 
 
 def _as_market_args(config: WorkflowExportConfig) -> argparse.Namespace:
     return argparse.Namespace(
         qmt_db=config.qmt_db,
         start_date=config.start_date,
-        end_date=config.end_date,
+        end_date=_resolve_end_date(config),
         st_snapshot_date=config.st_snapshot_date,
         mv_min=config.mv_min,
         amount_ma20_min=config.amount_ma20_min,
@@ -75,198 +84,137 @@ def _as_market_args(config: WorkflowExportConfig) -> argparse.Namespace:
     )
 
 
-def _as_context_args(config: WorkflowExportConfig) -> argparse.Namespace:
+def _context_args(config: WorkflowExportConfig, rule_params: dict[str, Any]) -> argparse.Namespace:
     args = _as_market_args(config)
     args.sector_map = config.sector_map
     args.sector_start_date = config.sector_start_date
     args.refresh_sector_map = config.refresh_sector_map
     args.sector_map_request_sleep = config.sector_map_request_sleep
-    args.rank_source = config.rank_source
-    args.sector_penalty_mode = config.sector_penalty_mode
-    args.relative_confirm = config.relative_confirm
-    args.bottom_rank_threshold = config.bottom_rank_threshold
-    args.medium_penalty_mode = config.medium_penalty_mode
-    args.weak_threshold = config.weak_threshold
+    args.rank_source = rule_params.get("sector_rank_source", "mix_10_20")
+    args.sector_penalty_mode = rule_params.get("sector_penalty_mode", "linear")
+    args.relative_confirm = rule_params.get("sector_relative_confirm", "rel20_under0")
+    args.bottom_rank_threshold = rule_params.get("sector_bottom_rank_threshold", 0.40)
     return args
 
 
-def _summary(export: pl.DataFrame, signal_rows: pl.DataFrame, *, sleeve_id: str) -> dict[str, Any]:
-    return {
-        "sleeve_id": sleeve_id,
-        "rows": export.height,
-        "date_min": str(export["date"].min()),
-        "date_max": str(export["date"].max()),
-        "unique_codes": export["code"].n_unique(),
-        "signal_rows_before_shift": signal_rows.height,
-        "signal_rows_after_shift": int(export["is_signal"].sum()),
-        "signal_days_after_shift": export.filter(pl.col("is_signal")).select("date").n_unique(),
-        "signals_blocked_by_execution_bear_regime": int(
-            export.filter(pl.col("is_signal") & ~pl.col("is_bull_regime")).height
-        ),
-        "score_min": float(signal_rows["score"].min()) if signal_rows.height else None,
-        "score_max": float(signal_rows["score"].max()) if signal_rows.height else None,
-    }
-
-
-def _config_payload(config: WorkflowExportConfig, sleeve: SleeveSpec) -> dict[str, Any]:
-    return {
-        "qmt_db": str(config.qmt_db),
-        "sleeve_id": sleeve.id,
-        "top_n": config.top_n,
-        "start_date": config.start_date,
-        "end_date": config.end_date,
-        "st_snapshot_date": config.st_snapshot_date,
-        "mv_min": config.mv_min,
-        "amount_ma20_min": config.amount_ma20_min,
-        "amv_bull_trigger_pct": config.amv_bull_trigger_pct,
-        "amv_bull_lookback_days": config.amv_bull_lookback_days,
-        "amv_bear_trigger_1d_pct": config.amv_bear_trigger_1d_pct,
-        "amv_effective_lag_days": config.amv_effective_lag_days,
-        "ranker_id": sleeve.ranker.id if sleeve.ranker else None,
-        "ranker_weights": dict(sleeve.ranker.weights) if sleeve.ranker else {},
-        "pb3_regime_gate": config.pb3_regime_gate,
-    }
-
-
-def export_limit_weakgate_sleeve(
-    sleeve: SleeveSpec,
-    config: WorkflowExportConfig,
-    *,
-    repo_root: Path | None = None,
-    started_at: datetime | None = None,
-) -> SignalArtifact:
-    sleeve_id = sleeve.id
-    if sleeve_id != "limit_first_board_pullback_weakgate":
-        raise ValueError(f"unsupported limit ecology native sleeve: {sleeve_id}")
-
-    started = started_at or datetime.now()
-    market = build_limit_ecology_market(config, _as_market_args(config))
-    signal_rows, weakgate_summary = build_limit_weakgate_signal(market=market, sleeve_id=sleeve_id, config=config)
-    export = build_backtest_signal_frame(market, signal_rows)
-    summary = {
-        "sleeve_id": sleeve_id,
-        "rows": export.height,
-        "date_min": str(export["date"].min()),
-        "date_max": str(export["date"].max()),
-        "unique_codes": export["code"].n_unique(),
-        "signal_rows_before_shift": signal_rows.height,
-        "signal_rows_after_shift": int(export["is_signal"].sum()),
-        "signal_days_after_shift": export.filter(pl.col("is_signal")).select("date").n_unique(),
-        "signals_blocked_by_execution_bear_regime": int(
-            export.filter(pl.col("is_signal") & ~pl.col("is_bull_regime")).height
-        ),
-        "score_min": float(signal_rows["score"].min()) if signal_rows.height else None,
-        "score_max": float(signal_rows["score"].max()) if signal_rows.height else None,
-        **weakgate_summary,
-    }
-    return write_signal_artifact(
-        export=export,
-        selected=signal_rows,
-        artifact_config=SignalArtifactConfig(
-            sleeve_id=sleeve_id,
-            model_name="daily_raw_limit_ecology_event",
-            output_root=config.output_root,
-            strategy="amv_limit_ecology_event_sleeve",
-            label=f"limit_ecology:{sleeve_id}",
-            feature_mode=sleeve_id,
-            config=limit_config_payload(config, sleeve_id),
-            summary=summary,
-        ),
-        started_at=started,
-        repo_root=repo_root,
+def _build_event_market(config: WorkflowExportConfig) -> pl.DataFrame:
+    market_args = _as_market_args(config)
+    market = build_market_frame(market_args)
+    raw_daily = load_raw_daily(market_args)
+    ecology = add_limit_ecology_features(raw_daily, tolerance=config.price_limit_tolerance)
+    return market.join(ecology, on=["date", "code"], how="left").with_columns(
+        [
+            (pl.col("atr_14_pct").rank("average").over("date") / pl.len().over("date")).alias("atr_14_pct_rank_pct"),
+            (pl.col("panic_vol_ratio_20d").rank("average").over("date") / pl.len().over("date")).alias("panic_vol_ratio_20d_rank_pct"),
+        ]
     )
 
 
-def export_ranker_sleeve(
-    sleeve: SleeveSpec,
-    config: WorkflowExportConfig,
-    *,
-    repo_root: Path | None = None,
-    started_at: datetime | None = None,
-) -> SignalArtifact:
-    if sleeve.ranker is None:
-        raise ValueError(f"sleeve {sleeve.id} does not define a ranker")
+# === Unified export pipeline ===
 
-    started = started_at or datetime.now()
+
+def export_strategy(
+    strategy: Strategy,
+    config: WorkflowExportConfig,
+    output_dir: Path,
+) -> SignalArtifact:
+    """统一策略导出管道 → artifacts/<strategy>/signal.parquet"""
+    if strategy.family == "event":
+        return _export_event(strategy, config, output_dir)
+
+    rules_set = set(strategy.rules)
+    if rules_set & {"sector-tailwind", "medium-trend-quality"}:
+        return _export_context_combo(strategy, config, output_dir)
+
+    return _export_ranker(strategy, config, output_dir)
+
+
+# === Event family ===
+
+
+def _export_event(
+    strategy: Strategy,
+    config: WorkflowExportConfig,
+    output_dir: Path,
+) -> SignalArtifact:
+    market = _build_event_market(config)
+    signal_rows = build_event_weakgate_signal(
+        market=market,
+        sleeve_id=strategy.name,
+        config=config,
+        skip_gate="event-weakgate" not in strategy.rules,
+    )
+    export = build_backtest_signal_frame(market, signal_rows)
+    return write_signal_artifact(export=export, output_dir=output_dir)
+
+
+# === Trend / Pullback ranker pipeline ===
+
+
+def _export_ranker(
+    strategy: Strategy,
+    config: WorkflowExportConfig,
+    output_dir: Path,
+) -> SignalArtifact:
+    """纯 ranker 管道（trend-p2, trend-p3, pullback-pb3）。"""
     market = build_market_frame(_as_market_args(config))
     export, signal_rows, _ = assemble_ranker_signal(
-        market,
-        sleeve.ranker,
-        SignalAssemblyConfig(
-            sleeve_id=sleeve.id,
-            top_n=config.top_n,
-            mv_min=config.mv_min,
-            amount_ma20_min=config.amount_ma20_min,
-        ),
-    )
-    if sleeve.id == "pullback_p0_k0_pb3_cp1_rv0" and config.pb3_regime_gate != "none":
-        signal_rows, export, gating_summary = apply_pb3_regime_gate(
-            market=market,
-            signal_rows=signal_rows,
-            config=config,
-        )
-    else:
-        gating_summary = {
-            "pb3_regime_gate": config.pb3_regime_gate,
-            "pb3_regime_gate_applied": False,
-        }
-
-    summary = {**_summary(export, signal_rows, sleeve_id=sleeve.id), **gating_summary}
-    return write_signal_artifact(
-        export=export,
-        selected=signal_rows,
-        artifact_config=SignalArtifactConfig(
-            sleeve_id=sleeve.id,
-            model_name="static_factor_sleeve",
-            output_root=config.output_root,
-            config=_config_payload(config, sleeve),
-            summary=summary,
-            extra_meta={"feature_count": None},
-        ),
-        started_at=started,
-        repo_root=repo_root,
+        market, strategy.ranker,
+        SignalAssemblyConfig(sleeve_id=strategy.name, top_n=config.top_n, mv_min=config.mv_min, amount_ma20_min=config.amount_ma20_min),
     )
 
+    if "amv-regime-gate" in set(strategy.rules):
+        signal_rows, export, _ = apply_amv_regime_gate(market=market, signal_rows=signal_rows, config=config)
 
-def export_context_sleeve(
-    sleeve: SleeveSpec,
+    return write_signal_artifact(export=export, output_dir=output_dir)
+
+
+# === Context combo (sector + medium penalty rerank) ===
+
+
+def _export_context_combo(
+    strategy: Strategy,
     config: WorkflowExportConfig,
-    *,
-    repo_root: Path | None = None,
-    started_at: datetime | None = None,
+    output_dir: Path,
 ) -> SignalArtifact:
-    if sleeve.ranker is None:
-        raise ValueError(f"sleeve {sleeve.id} does not define a base ranker")
+    """trend-p3-enhanced: sector + medium128 两层 penalty 后 rerank Top3。"""
+    rule_params = strategy.rule_params
+    ctx_args = _context_args(config, rule_params)
 
-    started = started_at or datetime.now()
-    context_args = _as_context_args(config)
+    market = build_market_frame(ctx_args)
+    scored_base = market.join(
+        build_sector_features(ctx_args), on=["date", "code"], how="left"
+    ).join(add_medium_trend_features(market), on=["date", "code"], how="left")
 
-    market = build_market_frame(context_args)
-    sector_features = build_sector_features(context_args)
-    trend_features = add_medium_trend_features(market)
-    scored_base = market.join(sector_features, on=["date", "code"], how="left").join(
-        trend_features,
-        on=["date", "code"],
-        how="left",
-    )
-    sleeve_id, signal_rows, export, summary = build_context_signal(
-        scored_base=scored_base,
-        market=market,
-        sleeve=sleeve,
-        config=config,
-        context_args=context_args,
+    required_cols = ranker_required_columns(strategy.ranker)
+    candidate_expr = base_candidate_expr(required_cols, mv_min=config.mv_min, amount_ma20_min=config.amount_ma20_min)
+
+    scored = (
+        scored_base.with_columns(candidate_expr.alias("_is_signal_candidate"))
+        .pipe(lambda df: apply_sector_tailwind_penalty(df, ctx_args, rule_params))
+        .pipe(lambda df: apply_medium_trend_penalty(df, rule_params))
+        .with_columns([
+            ranker_score_expr(strategy.ranker).alias("_base_signal_score"),
+            (pl.col("_sector_penalty") + pl.col("_medium_penalty")).alias("_context_penalty"),
+        ])
+        .with_columns(
+            pl.when(pl.col("_is_signal_candidate"))
+            .then(pl.col("_base_signal_score") - pl.col("_context_penalty"))
+            .otherwise(None).alias("_signal_score")
+        )
+        .with_columns(pl.col("_signal_score").rank(method="ordinal", descending=True).over("date").alias("_signal_rank"))
     )
 
-    return write_signal_artifact(
-        export=export,
-        selected=signal_rows,
-        artifact_config=SignalArtifactConfig(
-            sleeve_id=sleeve_id,
-            model_name="static_factor_sleeve_context_combo",
-            output_root=config.output_root,
-            config=context_config_payload(config, sleeve_id),
-            summary=summary,
-        ),
-        started_at=started,
-        repo_root=repo_root,
+    signal_rows = (
+        scored.filter(pl.col("_is_signal_candidate") & (pl.col("_signal_rank") <= config.top_n))
+        .select([
+            pl.col("date").alias("signal_date"), "code",
+            pl.lit(strategy.name).alias("sleeve_id"),
+            pl.col("_signal_score").alias("score"),
+            pl.col("_signal_rank").cast(pl.UInt32).alias("rank"),
+        ])
+        .sort(["signal_date", "rank", "code"])
     )
+
+    export = build_backtest_signal_frame(market, signal_rows)
+    return write_signal_artifact(export=export, output_dir=output_dir)
