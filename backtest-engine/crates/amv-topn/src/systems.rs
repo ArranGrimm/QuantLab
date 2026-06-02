@@ -10,7 +10,7 @@ use bt_core::{BacktestStats, Portfolio};
 use std::collections::HashSet;
 
 use crate::components::{ClosedTrade, ExitReason, Position};
-use crate::resources::{AmvTopnConfig, DailyData, MarketData};
+use crate::resources::{AmvTopnConfig, DailyData, MarketData, PriceBar};
 
 pub fn process_buy_signals(
     mut commands: Commands,
@@ -153,16 +153,8 @@ pub fn check_exit_conditions(
         let mut should_sell = false;
         let mut exit_reason = ExitReason::MaxHoldDays;
         if config.early_stop_enabled
-            && hold_trading_days == config.early_stop_trigger_hold_trading_days
-            && bar.close < position.entry_price * (1.0 - config.early_stop_loss_pct)
-            && (!config.early_stop_require_previous_close_below_entry
-                || previous_close_below_entry(
-                    &market_data,
-                    &position.code,
-                    position.entry_trade_index,
-                    hold_trading_days,
-                    position.entry_price,
-                ))
+            && hold_trading_days >= config.early_stop_trigger_hold_trading_days
+            && is_early_stop_triggered(&config, bar, position.entry_price)
         {
             should_sell = true;
             exit_reason = ExitReason::EarlyStop;
@@ -229,40 +221,19 @@ pub fn check_exit_conditions(
                 hold_trading_days,
                 exit_reason,
             });
-            if exit_reason == ExitReason::EarlyStop && config.early_stop_reserve_slot_until_max_hold
-            {
-                // Preserve the static cadence slot after an early stop, so the freed
-                // cash does not create a different refill-style strategy.
-                position.shares = 0;
-                position.cost = 0.0;
-            } else {
-                commands.entity(entity).remove::<Position>();
-            }
+            commands.entity(entity).remove::<Position>();
         }
     }
 }
 
-fn previous_close_below_entry(
-    market_data: &MarketData,
-    code: &str,
-    entry_trade_index: i32,
-    hold_trading_days: i32,
+fn is_early_stop_triggered(
+    config: &AmvTopnConfig,
+    bar: &PriceBar,
     entry_price: f64,
 ) -> bool {
-    let previous_index = entry_trade_index + hold_trading_days - 1;
-    if previous_index < 0 {
-        return false;
-    }
-    let previous_date = match market_data.trading_dates.get(previous_index as usize) {
-        Some(date) => date,
-        None => return false,
-    };
-    market_data
-        .prices
-        .get(code)
-        .and_then(|prices| prices.get(previous_date))
-        .map(|bar| bar.close < entry_price)
-        .unwrap_or(false)
+    // ATR-based stop: close < entry_price - N × ATR_14
+    bar.atr_14 > 0.0
+        && bar.close < entry_price - config.early_stop_atr_multiple * bar.atr_14
 }
 
 pub fn update_stats(

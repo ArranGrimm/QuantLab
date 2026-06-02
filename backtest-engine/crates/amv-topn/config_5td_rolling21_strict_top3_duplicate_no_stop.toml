@@ -1,14 +1,15 @@
-# AMV TopN 6td static sleeve, strict Top3, no stop.
+# AMV TopN 5td rolling cohort, strict Top3, allow duplicate, no stop.
 
 [backtest]
 initial_capital = 500000.0
-max_positions = 3
+max_positions = 21
 max_daily_buys = 3
-position_size_pct = 0.333333333333
-max_hold_trading_days = 6
+position_size_pct = 0.047619047619
+max_hold_trading_days = 5
 start_date = "2021-01-01"
 end_date = ""
 min_position_ratio = 0.5
+allow_duplicate_positions = true
 
 [entry]
 top_n = 3
@@ -22,11 +23,6 @@ sell_on_bear_regime = false
 [stop_loss]
 enabled = false
 pct = 0.05
-
-[early_stop]
-enabled = false
-trigger_hold_trading_days = 2
-atr_multiple = 3.0
 
 [trailing_stop]
 enabled = false

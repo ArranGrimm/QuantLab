@@ -82,9 +82,38 @@
 ## 活跃风险与未决项
 
 - 2026 年：trend 家族全线微亏或微盈，仅 pullback 和 event 在涨。
-- sector-tailwind 需要针对申万分类重新做参数扫描。
+- sector-tailwind 需要针对申万分类重新做参数扫描（当前最优 candidate: `5d/none/bt=0.4/p=0.15` 但 Rust 验证未通过）。
 - pullback-pb3 需要 redo raw-execution allocation 分析。
-- AKShare 已完全移除，行业分类从东方财富 → 申万（Baostock），历史回测中 sector-tailwind 相关数字不可直接对比。
+- AKShare 已完全移除，行业分类从东方财富 → 申万（Baostock，`utils/baostock_utils.py`）。
+- regime 慢退出机制逻辑成立但样本量太小（43 段牛市），需要更多数据避免过拟合。
+
+## 新增能力 (2026-06-02)
+
+### Rust 引擎：ATR 止损（可选）
+
+- `bt-amv-topn` 新增 `[early_stop]` 配置 section，ATR-based 动态止损
+- 从 `trigger_hold_trading_days`（默认 2）起，每天检查 `close < entry_price - atr_multiple × ATR_14` → 卖出
+- 默认关闭。最佳参数 `d2/ATR×3.0` 在测试中给出 +240.3%（+13pp vs baseline）
+- 配置项：`enabled`, `trigger_hold_trading_days`, `atr_multiple`
+- 影响文件：`systems.rs`, `resources.rs`, `main.rs`
+
+### 数据源：上证指数日线
+
+- `utils/baostock_utils.py` 新增 `get_sh_index_daily()`，Baostock 拉取 sh.000001 日线
+- 缓存为 `data/sh_index_daily.parquet`，覆盖 2019-01-02 ~ 至今
+- 可用于 AMV 牛市确认的交叉验证
+
+### 组合天花板分析
+
+- 三 sleeve 等权组合：年化 19.6%，MaxDD 14.6%，Sharpe 1.36
+- 最优权重（50/30/20）：年化 21.0%，MaxDD 9.3%，Sharpe 1.53
+- 三条 sleeve 相关性：trend-pb3 0.247, trend-event 0.222, pb3-event 0.238
+
+### 其他已验证结论
+
+- event-firstboard 不适合 rolling（static +155% → rolling +20%），应保持 static + regime gate 改善
+- event-firstboard 涨停污染极低（仅 3 次/256 笔），天然避开涨停不可买问题
+- sector-tailwind 申万分类 focused grid scan 已完成（240 组合），但最优参数在 Rust 验证中未通过
 
 ## 不要再当当前真实结论使用
 

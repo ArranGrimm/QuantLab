@@ -15,6 +15,7 @@ import polars as pl
 _CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / ".cache"
 _ST_CACHE = _CACHE_DIR / "st_blacklist.json"
 _INDUSTRY_CACHE = _CACHE_DIR / "industry_map.json"
+_SH_INDEX_CACHE = Path(__file__).resolve().parent.parent / "data" / "sh_index_daily.parquet"
 _CACHE_MAX_AGE_DAYS = 1
 
 
@@ -172,6 +173,83 @@ def _fetch_industry_baostock(date_str: str | None = None) -> list[dict]:
     _save_cache(_INDUSTRY_CACHE, {"rows": result})
     print(f"[行业] Baostock 获取成功，共 {len(result)} 只 (已缓存)")
     return result
+
+
+# ── 上证指数日线 ────────────────────────────────────────────────────────
+
+
+def get_sh_index_daily(refresh: bool = False) -> pl.DataFrame:
+    """获取上证指数（sh.000001）日线 OHLCV，结果缓存为 Parquet。
+
+    Args:
+        refresh: True 时强制重新拉取。
+
+    Returns:
+        DataFrame with columns: date, open, high, low, close, volume, amount
+    """
+    if not refresh and _SH_INDEX_CACHE.exists():
+        cache_mtime = datetime.datetime.fromtimestamp(_SH_INDEX_CACHE.stat().st_mtime).date()
+        if (datetime.date.today() - cache_mtime).days <= _CACHE_MAX_AGE_DAYS:
+            df = pl.read_parquet(str(_SH_INDEX_CACHE))
+            print(f"[上证指数] 使用本地缓存，{df.height} 行")
+            return df
+
+    df = _fetch_sh_index_baostock()
+    if df.height > 0:
+        return df
+
+    # 兜底: 使用过期缓存
+    if _SH_INDEX_CACHE.exists():
+        df = pl.read_parquet(str(_SH_INDEX_CACHE))
+        print(f"[上证指数] 实时源失败，使用过期本地缓存，{df.height} 行")
+        return df
+
+    return pl.DataFrame()
+
+
+def _fetch_sh_index_baostock() -> pl.DataFrame:
+    import baostock as bs
+
+    lg = bs.login()
+    if lg.error_code != "0":
+        print(f"[上证指数] Baostock 登录失败: {lg.error_msg}")
+        return pl.DataFrame()
+
+    rs = bs.query_history_k_data_plus(
+        "sh.000001",
+        "date,open,high,low,close,volume,amount",
+        start_date="2019-01-01",
+        end_date=datetime.datetime.now().strftime("%Y-%m-%d"),
+        frequency="d",
+        adjustflag="1",  # 后复权
+    )
+
+    data_list = []
+    while (rs.error_code == "0") & rs.next():
+        data_list.append(rs.get_row_data())
+    bs.logout()
+
+    if not data_list:
+        print("[上证指数] 未获取到数据")
+        return pl.DataFrame()
+
+    fields = rs.fields
+    df = pl.DataFrame(data_list, schema=fields, orient="row").with_columns(
+        [
+            pl.col("date").cast(pl.Utf8),
+            pl.col("open").cast(pl.Float64),
+            pl.col("high").cast(pl.Float64),
+            pl.col("low").cast(pl.Float64),
+            pl.col("close").cast(pl.Float64),
+            pl.col("volume").cast(pl.Float64),
+            pl.col("amount").cast(pl.Float64),
+        ]
+    )
+
+    _SH_INDEX_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(str(_SH_INDEX_CACHE))
+    print(f"[上证指数] Baostock 获取成功，共 {df.height} 行 (已缓存)")
+    return df
 
 
 # ── CLI ────────────────────────────────────────────────────────────────

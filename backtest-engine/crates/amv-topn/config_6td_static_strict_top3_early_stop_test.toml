@@ -1,4 +1,4 @@
-# AMV TopN 6td static sleeve, strict Top3, no stop.
+# AMV TopN 6td static sleeve, strict Top3, early stop ATR test.
 
 [backtest]
 initial_capital = 500000.0
@@ -24,9 +24,13 @@ enabled = false
 pct = 0.05
 
 [early_stop]
-enabled = false
+enabled = true
+mode = "atr"
 trigger_hold_trading_days = 2
-atr_multiple = 3.0
+loss_pct = 0.03
+atr_multiple = 2.0
+require_previous_close_below_entry = true
+reserve_slot_until_max_hold = true
 
 [trailing_stop]
 enabled = false

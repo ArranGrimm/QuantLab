@@ -16,6 +16,7 @@ use chrono::NaiveDate;
 use clap::Parser;
 use polars::prelude::*;
 use serde_json::json;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use bt_core::{BacktestStats, Portfolio, SignalArtifactMeta};
@@ -276,9 +277,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "early_stop_enabled": config.early_stop_enabled,
                 "early_stop_trigger_hold_trading_days": config.early_stop_trigger_hold_trading_days,
                 "early_stop_loss_pct": config.early_stop_loss_pct,
-                "early_stop_require_previous_close_below_entry": config.early_stop_require_previous_close_below_entry,
-                "early_stop_reserve_slot_until_max_hold": config.early_stop_reserve_slot_until_max_hold,
-                "trailing_enabled": config.trailing_enabled,
+                                                "trailing_enabled": config.trailing_enabled,
                 "trailing_activation_pct": config.trailing_activation_pct,
                 "trailing_pct": config.trailing_pct,
                 "commission_rate": config.cost_model.commission_rate,
@@ -385,27 +384,10 @@ fn print_config(config: &AmvTopnConfig) {
         }
     );
     println!(
-        "Early Stop: d{} < -{:.1}%{} ({})",
+        "Early Stop: d{}+ ATR×{:.1} ({})",
         config.early_stop_trigger_hold_trading_days,
-        config.early_stop_loss_pct * 100.0,
-        if config.early_stop_require_previous_close_below_entry {
-            " and previous close < entry"
-        } else {
-            ""
-        },
-        if config.early_stop_enabled {
-            "ON"
-        } else {
-            "OFF"
-        }
-    );
-    println!(
-        "Early Stop Reserve Slot: {}",
-        if config.early_stop_reserve_slot_until_max_hold {
-            "ON"
-        } else {
-            "OFF"
-        }
+        config.early_stop_atr_multiple,
+        if config.early_stop_enabled { "ON" } else { "OFF" }
     );
     println!(
         "Trailing Stop: Activate={:.0}%, Trail={:.0}% ({})",
@@ -433,9 +415,10 @@ fn build_market_data(
     let dates = df.column("date")?.date()?;
     let open_adj = df.column("open_adj")?.f64()?;
     let high_adj = df.column("high_adj")?.f64()?;
+    let low_adj = df.column("low_adj")?.f64()?;
     let close_adj = df.column("close_adj")?.f64()?;
     let pre_close_adj = df.column("pre_close_adj")?.f64()?;
-    let has_raw_prices = ["open_raw", "high_raw", "close_raw", "pre_close_raw"]
+    let has_raw_prices = ["open_raw", "high_raw", "low_raw", "close_raw", "pre_close_raw"]
         .iter()
         .all(|name| df.get_column_names().iter().any(|col| col.as_str() == *name));
     let open_raw = if has_raw_prices {
@@ -445,6 +428,11 @@ fn build_market_data(
     };
     let high_raw = if has_raw_prices {
         Some(df.column("high_raw")?.f64()?)
+    } else {
+        None
+    };
+    let low_raw = if has_raw_prices {
+        Some(df.column("low_raw")?.f64()?)
     } else {
         None
     };
@@ -486,6 +474,10 @@ fn build_market_data(
                 .as_ref()
                 .and_then(|col| col.get(i))
                 .unwrap_or(high_adj_value),
+            low: low_raw
+                .as_ref()
+                .and_then(|col| col.get(i))
+                .unwrap_or(low_adj.get(i).unwrap_or(0.0)),
             close: close_raw
                 .as_ref()
                 .and_then(|col| col.get(i))
@@ -496,12 +488,14 @@ fn build_market_data(
                 .unwrap_or(pre_close_adj_value),
             open_adj: open_adj_value,
             high_adj: high_adj_value,
+            low_adj: low_adj.get(i).unwrap_or(0.0),
             close_adj: close_adj_value,
             pre_close_adj: pre_close_adj_value,
             score: score.get(i).unwrap_or(0.0),
             rank: rank.get(i).unwrap_or(9999u32),
             is_signal: is_signal.get(i).unwrap_or(false),
             is_bull_regime: is_bull_regime.get(i).unwrap_or(false),
+            atr_14: 0.0,
         };
 
         market_data
@@ -510,6 +504,45 @@ fn build_market_data(
             .or_default()
             .insert(date, bar);
         all_dates.push(date);
+    }
+
+    // Compute ATR_14 for each stock after all bars are loaded.
+    let mut atr_values: HashMap<String, HashMap<NaiveDate, f64>> = HashMap::new();
+    for (code_str, price_map) in market_data.prices.iter() {
+        let mut sorted_dates: Vec<NaiveDate> = price_map.keys().cloned().collect();
+        sorted_dates.sort();
+        let mut prev_close = 0.0;
+        let mut tr_buffer: Vec<f64> = Vec::new();
+        let mut code_atr: HashMap<NaiveDate, f64> = HashMap::new();
+        for date in &sorted_dates {
+            if let Some(bar) = price_map.get(date) {
+                let tr = if prev_close > 0.0 {
+                    let h_l = bar.high - bar.low;
+                    let h_pc = (bar.high - prev_close).abs();
+                    let l_pc = (bar.low - prev_close).abs();
+                    h_l.max(h_pc).max(l_pc)
+                } else {
+                    bar.high - bar.low
+                };
+                tr_buffer.push(tr);
+                if tr_buffer.len() > 14 {
+                    tr_buffer.remove(0);
+                }
+                let atr: f64 = tr_buffer.iter().sum::<f64>() / tr_buffer.len() as f64;
+                code_atr.insert(*date, atr);
+                prev_close = bar.close;
+            }
+        }
+        atr_values.insert(code_str.clone(), code_atr);
+    }
+    for (code_str, code_atr) in atr_values {
+        if let Some(price_map) = market_data.prices.get_mut(&code_str) {
+            for (date, atr) in code_atr {
+                if let Some(bar) = price_map.get_mut(&date) {
+                    bar.atr_14 = atr;
+                }
+            }
+        }
     }
 
     all_dates.sort();
@@ -598,29 +631,10 @@ fn format_config(config: &AmvTopnConfig, trading_days: usize) -> String {
     .unwrap();
     writeln!(
         s,
-        "Early Stop:       d{} < -{:.1}%{} ({})",
+        "Early Stop:       d{}+ ATR×{:.1} ({})",
         config.early_stop_trigger_hold_trading_days,
-        config.early_stop_loss_pct * 100.0,
-        if config.early_stop_require_previous_close_below_entry {
-            " and previous close < entry"
-        } else {
-            ""
-        },
-        if config.early_stop_enabled {
-            "ON"
-        } else {
-            "OFF"
-        }
-    )
-    .unwrap();
-    writeln!(
-        s,
-        "Early Stop Reserve Slot: {}",
-        if config.early_stop_reserve_slot_until_max_hold {
-            "ON"
-        } else {
-            "OFF"
-        }
+        config.early_stop_atr_multiple,
+        if config.early_stop_enabled { "ON" } else { "OFF" }
     )
     .unwrap();
     writeln!(
@@ -704,9 +718,7 @@ fn append_amv_topn_registry_entry(
         "early_stop_enabled": config.early_stop_enabled,
         "early_stop_trigger_hold_trading_days": config.early_stop_trigger_hold_trading_days,
         "early_stop_loss_pct": config.early_stop_loss_pct,
-        "early_stop_require_previous_close_below_entry": config.early_stop_require_previous_close_below_entry,
-        "early_stop_reserve_slot_until_max_hold": config.early_stop_reserve_slot_until_max_hold,
-        "trailing_enabled": config.trailing_enabled,
+                        "trailing_enabled": config.trailing_enabled,
         "trailing_activation_pct": config.trailing_activation_pct,
         "trailing_pct": config.trailing_pct,
         "commission_rate": config.cost_model.commission_rate,

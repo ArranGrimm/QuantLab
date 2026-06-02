@@ -79,10 +79,10 @@ pub struct EarlyStopSection {
     pub trigger_hold_trading_days: i32,
     #[serde(default = "default_early_stop_loss_pct")]
     pub loss_pct: f64,
-    #[serde(default)]
-    pub require_previous_close_below_entry: bool,
-    #[serde(default)]
-    pub reserve_slot_until_max_hold: bool,
+    #[serde(default = "default_early_stop_atr_multiple")]
+    pub atr_multiple: f64,
+    #[serde(default = "default_early_stop_mode")]
+    pub mode: String, // deprecated, kept for TOML compat
 }
 
 impl Default for EarlyStopSection {
@@ -91,10 +91,14 @@ impl Default for EarlyStopSection {
             enabled: false,
             trigger_hold_trading_days: default_early_stop_trigger_hold_trading_days(),
             loss_pct: default_early_stop_loss_pct(),
-            require_previous_close_below_entry: false,
-            reserve_slot_until_max_hold: false,
+            atr_multiple: default_early_stop_atr_multiple(),
+            mode: String::new(),
         }
     }
+}
+
+fn default_early_stop_mode() -> String {
+    "fixed".to_string()
 }
 
 fn default_early_stop_trigger_hold_trading_days() -> i32 {
@@ -103,6 +107,10 @@ fn default_early_stop_trigger_hold_trading_days() -> i32 {
 
 fn default_early_stop_loss_pct() -> f64 {
     0.03
+}
+
+fn default_early_stop_atr_multiple() -> f64 {
+    2.0
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -146,8 +154,7 @@ pub struct AmvTopnConfig {
     pub early_stop_enabled: bool,
     pub early_stop_trigger_hold_trading_days: i32,
     pub early_stop_loss_pct: f64,
-    pub early_stop_require_previous_close_below_entry: bool,
-    pub early_stop_reserve_slot_until_max_hold: bool,
+    pub early_stop_atr_multiple: f64,
 
     pub trailing_enabled: bool,
     pub trailing_activation_pct: f64,
@@ -179,8 +186,7 @@ impl Default for AmvTopnConfig {
             early_stop_enabled: false,
             early_stop_trigger_hold_trading_days: 2,
             early_stop_loss_pct: 0.03,
-            early_stop_require_previous_close_below_entry: false,
-            early_stop_reserve_slot_until_max_hold: false,
+            early_stop_atr_multiple: 2.0,
             trailing_enabled: false,
             trailing_activation_pct: 0.10,
             trailing_pct: 0.05,
@@ -218,10 +224,7 @@ impl From<ConfigFile> for AmvTopnConfig {
             early_stop_enabled: cfg.early_stop.enabled,
             early_stop_trigger_hold_trading_days: cfg.early_stop.trigger_hold_trading_days,
             early_stop_loss_pct: cfg.early_stop.loss_pct,
-            early_stop_require_previous_close_below_entry: cfg
-                .early_stop
-                .require_previous_close_below_entry,
-            early_stop_reserve_slot_until_max_hold: cfg.early_stop.reserve_slot_until_max_hold,
+            early_stop_atr_multiple: cfg.early_stop.atr_multiple,
             trailing_enabled: cfg.trailing_stop.enabled,
             trailing_activation_pct: cfg.trailing_stop.activation_pct,
             trailing_pct: cfg.trailing_stop.trailing_pct,
@@ -236,12 +239,15 @@ pub struct PriceBar {
     /// Execution price basis. Prefer raw OHLC; old artifacts fall back to adjusted OHLC.
     pub open: f64,
     pub high: f64,
+    pub low: f64,
     pub close: f64,
     pub pre_close: f64,
     pub open_adj: f64,
     pub high_adj: f64,
+    pub low_adj: f64,
     pub close_adj: f64,
     pub pre_close_adj: f64,
+    pub atr_14: f64,
     pub score: f64,
     pub rank: u32,
     pub is_signal: bool,
