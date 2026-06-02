@@ -1,0 +1,26 @@
+{
+  "name": "trend-p3-medium",
+  "family": "trend",
+  "label": "趋势突破 P3 + 中期结构/趋势质量",
+  "description": "趋势突破 P3 + 128 日中期结构/趋势质量 linear penalty。不含行业顺风，用于隔离 medium 增强效果。",
+  "status": "baseline",
+  "preset": {
+    "name": "6td-static",
+    "config": "backtest-engine/crates/amv-topn/config_6td_static_strict_top3_no_stop.toml"
+  },
+  "ranker": {
+    "type": "components",
+    "template": "trend",
+    "params": { "P": 3.0 }
+  },
+  "rules": [
+    {
+      "id": "medium-trend-quality",
+      "params": {
+        "medium_penalty": 0.03,
+        "medium_penalty_mode": "linear",
+        "medium_weak_threshold": 0.50
+      }
+    }
+  ]
+}

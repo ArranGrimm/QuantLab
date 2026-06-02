@@ -48,7 +48,7 @@ from .backtest import (
 
 # 数据工具
 from .baostock_utils import get_st_blacklist_pl
-from .akshare_utils import generate_sector_file
+from .baostock_utils import get_stock_industry
 from .duckdb_utils import get_adj_factor_frame, load_daily_data_full, load_60m_data_adj, load_daily_data_single, add_price_limit_cols
 
 # IC 分析 + 因子相关性工具
@@ -138,5 +138,5 @@ __all__ = [
     # baostock utils
     "get_st_blacklist_pl",
     # akshare utils
-    "generate_sector_file",
+    "get_stock_industry",
 ]

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import time
 from pathlib import Path
 from typing import Any
 
@@ -30,41 +29,28 @@ def format_stock_code(raw_code: Any) -> str:
     return code
 
 
-def refresh_em_sector_map(path: Path, *, request_sleep: float) -> None:
-    """通过 AkShare 拉取静态东方财富行业映射。"""
+def refresh_em_sector_map(path: Path, *, request_sleep: float = 0.0) -> None:
+    """通过 Baostock 拉取申万行业分类并写入 CSV。"""
 
-    import akshare as ak
+    from utils.baostock_utils import get_stock_industry
 
-    logger.info("Fetching East Money industry board list ...")
-    boards = ak.stock_board_industry_name_em()
-    records: list[dict[str, Any]] = []
-    total = len(boards)
+    logger.info("Fetching industry classification via Baostock ...")
+    df = get_stock_industry()
 
-    for idx, row in boards.iterrows():
-        board_name = row["板块名称"]
-        board_code = row["板块代码"]
-        logger.info(f"Fetching constituents {idx + 1}/{total}: {board_name}")
-        try:
-            constituents = ak.stock_board_industry_cons_em(symbol=board_name)
-        except Exception as exc:  # noqa: BLE001 - external data source can fail per board.
-            logger.warning(f"Skip {board_name}: {exc}")
-            continue
+    if df.height == 0:
+        raise RuntimeError("No industry data from Baostock")
 
-        for _, stock in constituents.iterrows():
-            records.append(
-                {
-                    "code": format_stock_code(stock["代码"]),
-                    "name": stock.get("名称"),
-                    "industry": board_name,
-                    "industry_code": board_code,
-                }
-            )
-        time.sleep(request_sleep)
+    out = (
+        df.select(
+            pl.col("code").map_elements(format_stock_code, return_dtype=pl.Utf8).alias("code"),
+            pl.col("code_name").alias("name"),
+            pl.col("industry"),
+        )
+        .with_columns(pl.lit("").alias("industry_code"))
+        .unique(subset=["code"], keep="first")
+        .sort("code")
+    )
 
-    if not records:
-        raise RuntimeError("No industry constituents were fetched from AkShare/East Money")
-
-    out = pl.DataFrame(records).unique(subset=["code"], keep="first").sort("code")
     path.parent.mkdir(parents=True, exist_ok=True)
     out.write_csv(path)
     logger.info(f"Wrote {out.height:,} stock industry mappings to {path}")

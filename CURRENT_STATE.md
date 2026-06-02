@@ -8,77 +8,83 @@
 
 | 家族 | 逻辑 | 代表策略 |
 |---|---|---|
-| `trend` | 趋势突破延续（贴近 20 日新高） | trend-p2, trend-p3, trend-p3-enhanced |
+| `trend` | 趋势突破延续（贴近 20 日新高） | trend-p2, trend-p3, trend-p3-medium, trend-p3-enhanced |
 | `pullback` | 回调反弹（均线/离散回踩） | pullback-pb3 |
 | `event` | 事件驱动（涨停生态） | event-firstboard |
 
 ## 真实口径
 
 - 可交易结论以 Rust `bt-amv-topn` 为准。
-- signal artifact 提供 raw 字段时，交易执行使用 `raw_ohlc_pre_close`。
+- 交易执行使用 `raw_ohlc_pre_close`（raw OHLC + raw pre-close）。
 - 旧 adjusted-execution 回测只作为历史参考，不能当当前真实指标。
+
+## 策略指标（raw execution，2026-06-02 重跑）
+
+| 策略 | Return | MaxDD | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 |
+|------|--------|-------|------|------|------|------|------|------|
+| **trend-p2** (基线) | +141.8% | 19.0% | +4.9 | +38.5 | +11.0 | +46.9 | +11.3 | -8.8 |
+| **trend-p3** (挑战) | +172.4% | 13.5% | +4.0 | +39.2 | +17.6 | +43.6 | +12.5 | -0.8 |
+| **trend-p3-medium** | +227.3% | 14.1% | +8.5 | +33.7 | +21.0 | +54.5 | +22.6 | -1.3 |
+| **trend-p3-enhanced** | +227.3% | 14.1% | +8.5 | +33.7 | +21.0 | +54.5 | +22.6 | -1.3 |
+| **pullback-pb3** (互补) | +79.3% | 11.8% | +0.3 | +5.5 | +9.7 | +17.3 | +15.4 | +14.0 |
+| **event-firstboard** (研究) | +155.0% | 34.1% | +54.4 | -4.7 | +4.9 | +12.2 | +20.6 | +17.3 |
 
 ## 当前 Baseline
 
-`trend-p2`（趋势突破 P2/K0.5 静态 Top3）
+`trend-p3-medium`（趋势突破 P3 + 中期结构 / 趋势质量）
 
-- Raw execution `6td static strict Top3`
-- 总收益: `+145.10%`，MaxDD: `18.97%`
-- 摘要来源: `strategies/amv/status.py`，入口 `uv run python scripts/qlab.py status`
+- Raw execution `6td static strict Top3`，274 笔交易
+- 相对旧基线 trend-p2: 总收益 `+85.5pp`，回撤更低 `-4.9pp`
+- 相对 trend-p3: 总收益 `+54.9pp`
+- 规则: medium-trend-quality (linear penalty, p=0.03)
+- trend-p2 已归档，不再研究
 
-## 当前核心 Challenger
+## 当前 Challenger
 
-`trend-p3`（趋势突破 P3/K0.5 静态 Top3）
+`trend-p3-enhanced`（trend-p3-medium + 行业顺风）
 
-- Raw execution `6td static strict Top3`
-- 总收益: `+172.37%`，MaxDD: `13.53%`
-- 相对 trend-p2: 总收益 `+27.27pp`，且回撤更低
-- P3 adjusted-vs-raw 归因: `uv run python scripts/qlab.py attribution p3-raw-vs-adjusted`
+- 当前与 trend-p3-medium **完全等价**（sector-tailwind 在申万分类下 penalty 0.02 太小，不改变排名）
+- 待行业分类参数重新调优后再评估
 
-## 当前最强 Static Challenger
+## 历史参考
 
-`trend-p3-enhanced`（trend-p3 + 板块顺风 + 中期结构质量增强）
-
-- Raw execution `6td static strict Top3`
-- 总收益: `+238.54%`，MaxDD: `14.03%`
-- 规则: sector-tailwind (penalty) + medium-trend-quality (penalty)
-- 状态: candidate / forward monitor，暂不直接替换默认 P3
-- 风险: 2026-01 仍被牺牲（-110.4K trade delta）
+`trend-p2`（已归档）— +141.8% / 19.0%
+`trend-p3`（保留）— +172.4% / 13.5%，用于隔离 P-block 权重提升的边际效果
 
 ## Pullback Sleeve
 
 `pullback-pb3`（回调 PB3/CP1/RV0 rolling + AMV 风控）
 
-- Raw execution `6td rolling21 refill Top10`
-- 总收益: `+80.55%`，MaxDD: `11.75%`
-- 规则: amv-regime-gate (gate)
-- 与 trend 家族日收益相关性 ~0.26，是自然互补 sleeve
-- 状态: 进入组合权重前，需要重新做 raw-execution allocation 分析
+- Raw execution `6td rolling21 refill Top10`，1061 笔交易
+- 规则: amv-regime-gate（aged + 非加速 OR 混沌期连续阴跌，开仓日 gate）
+- 唯一 2026 年全为正的策略（+14.0%），与 trend 家族日收益相关性 ~0.26
+- 状态: 互补 sleeve，待做 raw-execution allocation 分析
 
 ## 涨停生态 Sleeve
 
 `event-firstboard`（首板后回踩 + 弱窗口过滤）
 
-- Base `5td`: `+130.95%`, MaxDD `45.38%`
-- Weakgate `5td`: `+155.04%`, MaxDD `34.12%`
+- Raw execution `5td static strict Top3`，256 笔交易
 - 规则: event-weakgate (gate)
-- 状态: 仅保留为 research candidate，尚未 allocation-ready
+- 2021 年爆赚（+54.4%），但 2022 年唯一亏损策略（-4.7%）
+- 年度分布与 trend/pullback 家族完全不同，是潜在独立第三 sleeve
+- MaxDD 34.1% 仍是主要障碍，尚未 allocation-ready
 
 ## 关键判断
 
-- 当前主线已经从 Rotation / B1 / B3 收敛到 AMV Bull Pool TopN；旧路线只作为归档和低相关策略候选回看。
-- raw execution 没有推翻 P3 / context 方向，但显著压低旧 adjusted 口径收益。
-- P3 adjusted-vs-raw 买入的是同一批 `274/274` 笔交易，收益下降主要来自 raw 价格下的资金占用、手数取整、路径复利和少数除权窗口。
-- pullback-pb3 与 trend 家族低相关，是更自然的互补 sleeve 候选。
-- 上下文增强方向保留为 challenger / forward monitor。
-- 涨停生态首板后回踩有 alpha 线索，但弱窗口连续回撤仍重。
+- 当前主线已从 Rotation / B1 / B3 收敛到 AMV Bull Pool TopN。
+- raw execution 没有推翻趋势突破方向，但压低旧 adjusted 口径收益约 25-30pp。
+- pullback-pb3 与 trend 家族低相关，且 2026 年唯一盈利，是自然互补 sleeve。
+- 中期结构/趋势质量增强（medium penalty）是当前最强单因子提升，+55pp vs raw P3。
+- 行业顺风（sector-tailwind）从东方财富切换到申万分类后，原有参数（p=0.02 linear）不再生效，需要重新调参。
+- 涨停生态有独立 alpha 线索，但 MaxDD 34% 仍需改善。
 
 ## 活跃风险与未决项
 
-- 2026 路径脆弱性仍是真风险：上下文增强改善中位路径，但 worst offset 未修复。
-- 行业顺风因子仍需历史行业映射版本复核，避免静态东方财富行业映射造成历史偏差。
-- Pullback sleeve 需要重新做 raw-execution allocation。
-- Event sleeve 需要更好的弱窗口定义或连续 downsize / position sizing。
+- 2026 年：trend 家族全线微亏或微盈，仅 pullback 和 event 在涨。
+- sector-tailwind 需要针对申万分类重新做参数扫描。
+- pullback-pb3 需要 redo raw-execution allocation 分析。
+- AKShare 已完全移除，行业分类从东方财富 → 申万（Baostock），历史回测中 sector-tailwind 相关数字不可直接对比。
 
 ## 不要再当当前真实结论使用
 
