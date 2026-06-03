@@ -87,6 +87,24 @@
 - AKShare 已完全移除，行业分类从东方财富 → 申万（Baostock，`utils/baostock_utils.py`）。
 - regime 慢退出机制逻辑成立但样本量太小（43 段牛市），需要更多数据避免过拟合。
 
+### ETF 动量轮动（原型，2026-06-03）
+
+- 脚本: `strategies/etf_momentum_rotation.py`
+- 数据源: TDX `v_etf_qfq`（动量）/ `v_etf_bfq`（成交），通达信活跃ETF block 自然筛选 22 只
+- 核心逻辑: 25d 加权 OLS 动量分 + AMV 择时 + 信号切换时换仓
+- **纯 Python 原型，未经 Rust 回测引擎验证，不含涨跌停/流动性过滤**
+- 原型指标: +362% / MaxDD 21.3% / Sharpe 1.0 / 116 笔 / 2019-2026 年仅 1 年亏损
+- 回撤偏高（21%），参数敏感性高（15d→+130%，20d→+290%，25d→+362%），尚不适合作为正式 sleeve
+- 与 trend/pullback/event 低相关（2026 年互补明显），是潜在第四维度，待后续 Rust 验证与回撤改善
+
+### 数据源：TDX 通达信行情（2026-06-03）
+
+- `utils/duckdb_utils.py` `load_daily_data_full()` 新增 `db_source="tdx"` 支持
+- TDX `v_stock_qfq` + `v_stock_bfq` → 输出列与 QMT 完全一致（5751 只含北交所 vs QMT 4969）
+- 代码格式自动转换 `sh600000` → `sh.600000`
+- 通过 `WorkflowExportConfig.db_source` 切换，下游 pipeline 无感
+- 可解除 QMT 数据更新的跨设备依赖，但仍需更多验证后才切换为默认源
+
 ## 新增能力 (2026-06-02)
 
 ### Rust 引擎：ATR 止损（可选）

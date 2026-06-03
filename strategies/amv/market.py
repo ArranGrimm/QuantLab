@@ -22,7 +22,7 @@ def build_market_frame(args: argparse.Namespace) -> pl.DataFrame:
         ).lazy()
 
         q_full = (
-            load_daily_data_full(conn)
+            load_daily_data_full(conn, db_source=getattr(args, "db_source", "qmt"), tdx_db=getattr(args, "tdx_db", ""))
             .filter(pl.col("date") >= pl.lit(args.start_date).str.strptime(pl.Date, "%Y-%m-%d"))
             .filter(pl.col("date") <= pl.lit(args.end_date).str.strptime(pl.Date, "%Y-%m-%d"))
             .join(st_blacklist_df, on="code", how="anti")

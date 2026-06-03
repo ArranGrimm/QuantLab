@@ -38,6 +38,8 @@ class WorkflowExportConfig:
     """所有 AMV 策略共用的基础导出配置。"""
 
     qmt_db: Path
+    db_source: str = "qmt"
+    tdx_db: Path = Path("")
     start_date: str = "2019-01-01"
     end_date: str = ""  # 空 = 自动取数据库最新日期
     st_snapshot_date: str = "2026-03-31"
@@ -70,6 +72,8 @@ def _resolve_end_date(config: WorkflowExportConfig) -> str:
 def _as_market_args(config: WorkflowExportConfig) -> argparse.Namespace:
     return argparse.Namespace(
         qmt_db=config.qmt_db,
+        db_source=config.db_source,
+        tdx_db=str(config.tdx_db) if config.tdx_db and str(config.tdx_db) else "",
         start_date=config.start_date,
         end_date=_resolve_end_date(config),
         st_snapshot_date=config.st_snapshot_date,

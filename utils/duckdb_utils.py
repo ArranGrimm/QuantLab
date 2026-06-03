@@ -55,19 +55,23 @@ def get_adj_factor_frame(conn):
 # ==============================================================================
 # 方法 1: 加载日线数据 (包含复权计算 + 市值计算)
 # ==============================================================================
-def load_daily_data_full(conn, codes: list[str] = None):
+def load_daily_data_full(conn, codes: list[str] = None, *, db_source: str = "qmt", tdx_db: str = ""):
     """
     功能：
-    1. 读取 stock_daily (Raw)
-    2. 动态计算前复权 (Adj)
-    3. 关联股本计算市值 (Market Cap)
+    1. 读取行情数据（QMT: stock_daily 手动复权, TDX: v_stock_qfq 预计算）
+    2. 计算前复权价格 (QMT) / 直接使用 (TDX)
+    3. 关联股本计算市值
     4. 保持与旧代码一致的列结构
 
     Args:
-        conn: DuckDB 连接
-        codes: 股票代码列表 (如 ["sh.600570", "sz.000001"])，为 None 或空列表则加载全部
+        conn: DuckDB 连接 (QMT)
+        codes: 股票代码列表 (QMT: sh.600000, TDX: sh600000)
+        db_source: "qmt" | "tdx"
+        tdx_db: TDX 数据库路径 (db_source="tdx" 时必填)
     """
-    
+    if db_source == "tdx":
+        return _load_daily_from_tdx(tdx_db, codes, start_date="2019-01-01")
+
     code_filter = ""
     if codes:
         placeholders = ", ".join(f"'{c}'" for c in codes)
@@ -163,7 +167,50 @@ def load_daily_data_full(conn, codes: list[str] = None):
         .sort(["code", "date"])
     )
     
-    return q_full # 返回 LazyFrame，如果需要立即结果可加 .collect()
+    return q_full
+
+
+def _load_daily_from_tdx(db_path: str, codes: list[str] = None, *, start_date: str = "2019-01-01"):
+    """从 TDX 数据库加载日线，输出列与 QMT load_daily_data_full 完全一致。"""
+    import duckdb
+    code_sql = ""
+    if codes:
+        tdx_codes = [c.replace(".", "") for c in codes]
+        placeholders = ", ".join(f"'{c}'" for c in tdx_codes)
+        code_sql = f" AND q.symbol IN ({placeholders})"
+
+    tdx_conn = duckdb.connect(db_path, read_only=True)
+    try:
+        result = pl.read_database(
+            f"""
+            SELECT
+                left(q.symbol, 2) || '.' || right(q.symbol, -2) AS code,
+                q.date,
+                q.open   AS open_adj,   q.high   AS high_adj,
+                q.low    AS low_adj,    q.close  AS close_adj,
+                q.preclose AS pre_close_adj,
+                b.open   AS open_raw,   b.high   AS high_raw,
+                b.low    AS low_raw,    b.close  AS close_raw,
+                b.preclose AS pre_close_raw,
+                CAST(b.volume AS DOUBLE) AS volume,
+                b.amount,
+                (q.open + q.high + q.low + q.close) / 4.0 AS vwap_adj,
+                (b.open + b.high + b.low + b.close) / 4.0 AS vwap_raw,
+                q.floatmv AS market_cap_100m,
+                0.0       AS circulating_capital
+            FROM v_stock_qfq q
+            JOIN v_stock_bfq b USING(symbol, date)
+            WHERE q.date >= '{start_date}'
+              AND q.close > 0 AND b.close > 0
+              {code_sql}
+            ORDER BY code, q.date
+            """,
+            tdx_conn,
+        )
+        return result.lazy()
+    finally:
+        tdx_conn.close()
+
 
 # ==============================================================================
 # 方法 2: 加载 60分钟数据 (只计算前复权)

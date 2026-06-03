@@ -2,8 +2,8 @@
 
 ## 马上要做
 
-- [ ] 提交今日改动（AKShare 移除 + 申万分类切换 + 基线变更）
 - [ ] 同步到 Mac，在 Mac 上重跑所有 canonical 回测确认两设备一致性
+- [ ] 验证 TDX 数据源在 Mac 上的可用性
 
 ## 近期
 
@@ -12,15 +12,21 @@
 - [ ] event-firstboard MaxDD 改善（当前 34.1%，base 5td 无 weakgate 为 45.4%）
 - [ ] 补 `qlab results --diff` 的年度归因拆解
 
+## 探索中/待跟进
+
+- [ ] ETF 动量轮动：原型 +362% 但回撤 21%、参数敏感、未经 Rust 验证。待 上证 MA20 叠加 + 回撤改善后重评估
+- [ ] 上证交叉验证 AMV 牛市真伪（数据已就绪，未分析）
+- [ ] regime 慢退出机制（逻辑成立但样本量小，待更多数据）
+- [ ] TDX 数据源：已验证兼容，待更多测试后考虑切换为默认
+
 ## 已确认但暂缓
 
-- [ ] P3 早期止损（d2 cum_ret < -3%，what-if +166K，需改 Rust 退出逻辑）
+- [ ] P3 早期止损（ATR 模式已实现在 Rust，默认关闭）
 - [ ] 延长持有（what-if 不成立，信噪比太低）
 - [ ] 板块宽度 gating（P3 在窄基反而更强，二元过滤是错的）
-- [ ] 动量策略探索（涨停污染未解决，P-block 已是折中）
 
 ## 搁置
 
-- [ ] `qlab explore` 子命令（因子扫描、规则诊断、网格探索）
-- [ ] `qlab backtest --top-n` / `--max-hold` 的临时 TOML 合成（基础框架已写好，未测）
-- [ ] ETF 相关文件（strategies/etf_momentum_rotation.py, notebooks/etf_momentum_rotation.py）仍引用 akshare，后续处理
+- [ ] `qlab explore` 子命令
+- [ ] `qlab backtest --top-n` / `--max-hold` 的临时 TOML 合成
+- [ ] ETF 相关文件（strategies/etf_momentum_rotation.py 仍引用 akshare，后续处理）
