@@ -14,8 +14,10 @@ import numpy as np
 import polars as pl
 from loguru import logger
 
+from utils.data_source import DEFAULT_TDX_DB
+
 # ── 全局配置 ──────────────────────────────────────────────────────────
-TDX_DB = Path("D:/WorkSpace/Tinkering/tdx2db/tdx.db")
+TDX_DB = DEFAULT_TDX_DB
 LOOKBACK = 25
 ANNUAL_DAYS = 250
 SCORE_MIN, SCORE_MAX = 0.0, 5.0  # 安全区间

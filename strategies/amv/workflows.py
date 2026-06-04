@@ -7,7 +7,7 @@ AMV 策略导出编排层。
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -15,13 +15,12 @@ import polars as pl
 
 from strategies.amv.export import SignalArtifact, write_signal_artifact
 from strategies.amv.factors.limit_ecology import LIMIT_TOLERANCE, add_limit_ecology_features, load_raw_daily
-from strategies.amv.factors.medium_trend_quality import add_medium_trend_features
+from strategies.amv.factors.medium_trend_quality import add_medium_trend_features, compute_medium_penalty
 from strategies.amv.factors.sector_tailwind import build_sector_features
-from strategies.amv.market import build_market_frame
+from strategies.amv.market import build_market_frame, build_market_raw
 from strategies.amv.registry import Strategy
 from strategies.amv.rules.amv_regime import apply_amv_regime_gate
 from strategies.amv.rules.event_weakgate import build_event_weakgate_signal
-from strategies.amv.rules.medium_penalty import apply_medium_trend_penalty
 from strategies.amv.rules.sector_penalty import apply_sector_tailwind_penalty
 from strategies.amv.signals import (
     SignalAssemblyConfig,
@@ -31,15 +30,14 @@ from strategies.amv.signals import (
     ranker_required_columns,
     ranker_score_expr,
 )
+from utils.data_source import DataSourceSettings, daily_reader, resolve_data_source
 
 
 @dataclass(frozen=True)
 class WorkflowExportConfig:
     """所有 AMV 策略共用的基础导出配置。"""
 
-    qmt_db: Path
-    db_source: str = "qmt"
-    tdx_db: Path = Path("")
+    data_source: DataSourceSettings = field(default_factory=resolve_data_source)
     start_date: str = "2019-01-01"
     end_date: str = ""  # 空 = 自动取数据库最新日期
     st_snapshot_date: str = "2026-03-31"
@@ -63,17 +61,13 @@ class WorkflowExportConfig:
 def _resolve_end_date(config: WorkflowExportConfig) -> str:
     if config.end_date:
         return config.end_date
-    import duckdb
-    with duckdb.connect(str(config.qmt_db), read_only=True) as conn:
-        max_date = conn.execute("SELECT MAX(date) FROM v_stock_daily_qfq_qmt").fetchone()[0]
-        return str(max_date)
+    with daily_reader(config.data_source) as reader:
+        return reader.resolve_end_date()
 
 
 def _as_market_args(config: WorkflowExportConfig) -> argparse.Namespace:
     return argparse.Namespace(
-        qmt_db=config.qmt_db,
-        db_source=config.db_source,
-        tdx_db=str(config.tdx_db) if config.tdx_db and str(config.tdx_db) else "",
+        data_source=config.data_source,
         start_date=config.start_date,
         end_date=_resolve_end_date(config),
         st_snapshot_date=config.st_snapshot_date,
@@ -161,7 +155,11 @@ def _export_ranker(
     output_dir: Path,
 ) -> SignalArtifact:
     """纯 ranker 管道（trend-p2, trend-p3, pullback-pb3）。"""
-    market = build_market_frame(_as_market_args(config))
+    from strategies.amv.factors.base import build_amv_base_factors
+
+    market_raw = build_market_raw(_as_market_args(config))
+    required = ranker_required_columns(strategy.ranker)
+    market = build_amv_base_factors(market_raw, required).collect(streaming=True)
     export, signal_rows, _ = assemble_ranker_signal(
         market, strategy.ranker,
         SignalAssemblyConfig(sleeve_id=strategy.name, top_n=config.top_n, mv_min=config.mv_min, amount_ma20_min=config.amount_ma20_min),
@@ -181,25 +179,36 @@ def _export_context_combo(
     config: WorkflowExportConfig,
     output_dir: Path,
 ) -> SignalArtifact:
-    """trend-p3-enhanced: sector + medium128 两层 penalty 后 rerank Top3。"""
+    """context combo: 按 strategy.rules 只构建需要的 penalty 特征后 rerank Top3。"""
     rule_params = strategy.rule_params
     ctx_args = _context_args(config, rule_params)
+    rules_set = set(strategy.rules)
 
     market = build_market_frame(ctx_args)
-    scored_base = market.join(
-        build_sector_features(ctx_args), on=["date", "code"], how="left"
-    ).join(add_medium_trend_features(market), on=["date", "code"], how="left")
-
     required_cols = ranker_required_columns(strategy.ranker)
     candidate_expr = base_candidate_expr(required_cols, mv_min=config.mv_min, amount_ma20_min=config.amount_ma20_min)
 
+    scored = market.with_columns(candidate_expr.alias("_is_signal_candidate"))
+    if "sector-tailwind" in rules_set:
+        sector = build_sector_features(ctx_args)
+        scored = scored.join(sector, on=["date", "code"], how="left")
+        scored = apply_sector_tailwind_penalty(scored, ctx_args, rule_params)
+    if "medium-trend-quality" in rules_set:
+        medium_penalty = compute_medium_penalty(market, rule_params)
+        scored = scored.join(medium_penalty, on=["date", "code"], how="left")
+
+    penalty_terms: list[pl.Expr] = []
+    if "sector-tailwind" in rules_set:
+        penalty_terms.append(pl.col("_sector_penalty"))
+    if "medium-trend-quality" in rules_set:
+        penalty_terms.append(pl.col("_medium_penalty"))
+    context_penalty = pl.sum_horizontal(penalty_terms) if penalty_terms else pl.lit(0.0)
+
     scored = (
-        scored_base.with_columns(candidate_expr.alias("_is_signal_candidate"))
-        .pipe(lambda df: apply_sector_tailwind_penalty(df, ctx_args, rule_params))
-        .pipe(lambda df: apply_medium_trend_penalty(df, rule_params))
+        scored
         .with_columns([
             ranker_score_expr(strategy.ranker).alias("_base_signal_score"),
-            (pl.col("_sector_penalty") + pl.col("_medium_penalty")).alias("_context_penalty"),
+            context_penalty.alias("_context_penalty"),
         ])
         .with_columns(
             pl.when(pl.col("_is_signal_candidate"))

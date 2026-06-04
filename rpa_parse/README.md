@@ -68,6 +68,28 @@ uv run python rpa_parse/ingest_active_market_value.py \
 
 活跃市值不是 QMT 数据源, 因此单独维护 `active_market_value.duckdb`。需要和 QMT 行情联表时, 在研究 SQL 里同时 `ATTACH` 两个库。
 
+## 单日人工补录 (Windows / Mac)
+
+Mac OCR 未跑、只差 1~2 个交易日时, 可从指南针 App 手工抄 readout, 直接 upsert DuckDB (**不写 parquet**, 不影响批量 OCR):
+
+手机 App 通常只有 **9 行** (开/高/低/收/幅/量/额/振). **盘 / 率** 是 PC 截图 readout 才有, 可省略; `manual_active_market_value.py` 会用前一日「盘」+ 当日「量」推算「率」. AMV regime 判定不依赖这两项.
+
+模板: `rpa_parse/examples/manual_entry_template.txt`
+
+```bash
+# 查看 AMV 与 TDX 日期差
+uv run python rpa_parse/manual_active_market_value.py --show-gap
+
+# 粘贴 11 行 readout (空行结束)
+uv run python rpa_parse/manual_active_market_value.py
+
+# 或从文件 / 命令行 (可先改 examples/manual_entry_template.txt)
+uv run python rpa_parse/manual_active_market_value.py --text-file rpa_parse/examples/manual_entry_template.txt
+uv run python rpa_parse/manual_active_market_value.py --dry-run --text-file rpa_parse/examples/manual_entry_template.txt
+```
+
+写入行 `source=manual_entry`。日后 Mac OCR + ingest 到同一 `trade_date` 时会自动覆盖为 `rpa_vision_v1`。
+
 ## 输出文件
 
 ```text

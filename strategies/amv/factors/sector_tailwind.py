@@ -4,9 +4,10 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-import duckdb
 import polars as pl
 from loguru import logger
+
+from utils.data_source import DataSourceSettings, daily_reader
 
 
 def format_stock_code(raw_code: Any) -> str:
@@ -79,20 +80,13 @@ def load_sector_map(path: Path, *, refresh: bool, request_sleep: float) -> pl.Da
     )
 
 
-def load_daily_with_industry(db_path: Path, sector_map: pl.DataFrame, start_date: str) -> pl.DataFrame:
-    conn = duckdb.connect(str(db_path), read_only=True)
-    try:
-        daily = conn.execute(
-            """
-            SELECT code, date, open, high, low, close, volume, amount
-            FROM v_stock_daily_qfq_qmt
-            WHERE date >= ?
-            ORDER BY code, date
-            """,
-            [start_date],
-        ).pl()
-    finally:
-        conn.close()
+def load_daily_with_industry(
+    data_source: DataSourceSettings,
+    sector_map: pl.DataFrame,
+    start_date: str,
+) -> pl.DataFrame:
+    with daily_reader(data_source) as reader:
+        daily = reader.load_daily_qfq_simple(start_date)
 
     joined = daily.join(sector_map, on="code", how="left")
     missing_rows = joined.filter(pl.col("industry").is_null()).height
@@ -214,12 +208,13 @@ def build_sector_tailwind_features(daily: pl.DataFrame) -> pl.DataFrame:
 
 
 def build_sector_features(args: argparse.Namespace) -> pl.DataFrame:
+    """板块特征必须在全市场 QFQ 截面上计算；勿传入 AMV market 子集。"""
     sector_map = load_sector_map(
         args.sector_map,
         refresh=args.refresh_sector_map,
         request_sleep=args.sector_map_request_sleep,
     )
-    daily = load_daily_with_industry(args.qmt_db, sector_map, args.sector_start_date)
+    daily = load_daily_with_industry(args.data_source, sector_map, args.sector_start_date)
     return build_sector_tailwind_features(daily).select(
         [
             "date",

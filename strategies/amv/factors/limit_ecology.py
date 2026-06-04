@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import argparse
 
-import duckdb
 import polars as pl
 
 from utils import get_st_blacklist_pl
+from utils.data_source import daily_reader
 
 
 LIMIT_TOLERANCE = 0.001
@@ -37,19 +37,8 @@ def safe_div(numerator: pl.Expr, denominator: pl.Expr) -> pl.Expr:
 
 
 def load_raw_daily(args: argparse.Namespace) -> pl.DataFrame:
-    conn = duckdb.connect(str(args.qmt_db), read_only=True)
-    try:
-        daily = conn.execute(
-            """
-            SELECT code, date, open, high, low, close, volume, amount
-            FROM stock_daily
-            WHERE date >= ? AND date <= ?
-            ORDER BY code, date
-            """,
-            [args.start_date, args.end_date],
-        ).pl()
-    finally:
-        conn.close()
+    with daily_reader(args.data_source) as reader:
+        daily = reader.load_raw_ohlc(args.start_date, args.end_date)
 
     st_blacklist = get_st_blacklist_pl(args.st_snapshot_date)
     st_blacklist_df = pl.DataFrame({"code": st_blacklist}, schema={"code": pl.Utf8})

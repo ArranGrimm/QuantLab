@@ -105,6 +105,15 @@
 - 通过 `WorkflowExportConfig.db_source` 切换，下游 pipeline 无感
 - 可解除 QMT 数据更新的跨设备依赖，但仍需更多验证后才切换为默认源
 
+### 数据源抽象 + 因子按需加载（2026-06-04，进行中）
+
+- `utils/data_source.py`: DataSourceSettings + QmtDailyReader/TdxDailyReader Protocol，单一路径切换数据源，默认 TDX
+- `strategies/amv/factors/registry.py`: 因子注册表，每个因子自描述依赖和表达式，pipeline 按需计算
+- market.py 拆分为 `build_market_raw`（纯 OHLC） + `build_market_frame`（兼容旧调用）
+- qlab CLI 新增 `--data-source`/`--output-dir`，支持 QLAB_DATA_SOURCE 环境变量
+- medium penalty 收敛为自包含 `compute_medium_penalty`，不额外 join
+- 注意：lazy frame 与 reader 生命周期耦合导致 double collect，内存尚需优化
+
 ## 新增能力 (2026-06-02)
 
 ### Rust 引擎：ATR 止损（可选）

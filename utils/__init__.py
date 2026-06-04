@@ -49,6 +49,14 @@ from .backtest import (
 # 数据工具
 from .baostock_utils import get_st_blacklist_pl
 from .baostock_utils import get_stock_industry
+from .data_source import (
+    DEFAULT_QMT_DB,
+    DEFAULT_TDX_DB,
+    DataSourceSettings,
+    daily_reader,
+    open_daily_reader,
+    resolve_data_source,
+)
 from .duckdb_utils import get_adj_factor_frame, load_daily_data_full, load_60m_data_adj, load_daily_data_single, add_price_limit_cols
 
 # IC 分析 + 因子相关性工具
@@ -68,6 +76,13 @@ from .factor_analysis import (
 from .signal_export import export_for_rust, export_rotation_scores, export_renko_scores, validate_export
 
 __all__ = [
+    # data source
+    "DEFAULT_QMT_DB",
+    "DEFAULT_TDX_DB",
+    "DataSourceSettings",
+    "daily_reader",
+    "open_daily_reader",
+    "resolve_data_source",
     # duckdb utils
     "get_adj_factor_frame",
     "load_daily_data_full",

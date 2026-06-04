@@ -19,8 +19,7 @@ if str(ROOT) not in sys.path:
 
 from strategies.amv.registry import KNOWN_STRATEGIES, Strategy, resolve_project_path  # noqa: E402
 from strategies.amv.workflows import WorkflowExportConfig, export_strategy  # noqa: E402
-
-DEFAULT_QMT_DB = ROOT.parent / "QuantData" / "Ashare" / "qmt_data.duckdb"
+from utils.data_source import DEFAULT_QMT_DB, DEFAULT_TDX_DB, resolve_data_source  # noqa: E402
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -115,13 +114,30 @@ def command_status(args: argparse.Namespace) -> int:
 # === export ===
 
 
+def _build_workflow_config(args: argparse.Namespace) -> WorkflowExportConfig:
+    return WorkflowExportConfig(
+        data_source=resolve_data_source(
+            provider=getattr(args, "data_source", None),
+            qmt_db=Path(args.qmt_db) if getattr(args, "qmt_db", None) else None,
+            tdx_db=Path(args.tdx_db) if getattr(args, "tdx_db", None) else None,
+        ),
+    )
+
+
 def command_export(args: argparse.Namespace) -> int:
     strategy = KNOWN_STRATEGIES[args.strategy]
-    config = WorkflowExportConfig(qmt_db=Path(args.qmt_db))
-    output_dir = ARTIFACTS_DIR / strategy.name
+    config = _build_workflow_config(args)
+    if getattr(args, "output_dir", None):
+        output_dir = Path(args.output_dir)
+        if not output_dir.is_absolute():
+            output_dir = ROOT / output_dir
+    else:
+        output_dir = ARTIFACTS_DIR / strategy.name
+    ds = config.data_source
+    db_path = ds.tdx_db if ds.provider == "tdx" else ds.qmt_db
 
     print(f"导出策略: {strategy.name} — {strategy.label}")
-    print(f"数据库: {display_path(config.qmt_db)}")
+    print(f"数据源: {ds.provider} ({display_path(db_path)})")
     print(f"输出: {display_path(output_dir)}")
 
     artifact = export_strategy(strategy, config, output_dir)
@@ -320,7 +336,13 @@ def command_results(args: argparse.Namespace) -> int:
 
 
 def command_run(args: argparse.Namespace) -> int:
-    export_args = argparse.Namespace(strategy=args.strategy, qmt_db=args.qmt_db)
+    export_args = argparse.Namespace(
+        strategy=args.strategy,
+        data_source=getattr(args, "data_source", None),
+        qmt_db=getattr(args, "qmt_db", None),
+        tdx_db=getattr(args, "tdx_db", None),
+        output_dir=getattr(args, "output_dir", None),
+    )
     rc = command_export(export_args)
     if rc != 0:
         return rc
@@ -341,7 +363,14 @@ def build_parser() -> argparse.ArgumentParser:
     # export
     p = subparsers.add_parser("export", help="导出信号文件")
     p.add_argument("strategy", choices=sorted(KNOWN_STRATEGIES.keys()), help="策略名")
-    p.add_argument("--qmt-db", default=str(DEFAULT_QMT_DB), help="QMT 数据库路径")
+    p.add_argument("--data-source", choices=["qmt", "tdx"], help="行情数据源 (默认 tdx，可用 QLAB_DATA_SOURCE 覆盖)")
+    p.add_argument("--qmt-db", default=None, help=f"QMT 数据库路径 (默认 {DEFAULT_QMT_DB})")
+    p.add_argument("--tdx-db", default=None, help=f"TDX 数据库路径 (默认 {DEFAULT_TDX_DB})")
+    p.add_argument(
+        "--output-dir",
+        default=None,
+        help="信号输出目录 (默认 artifacts/<strategy>；对比实验可用 artifacts/_compare/...)",
+    )
     p.set_defaults(func=command_export)
 
     # backtest
@@ -361,7 +390,14 @@ def build_parser() -> argparse.ArgumentParser:
     # run
     p = subparsers.add_parser("run", help="export + backtest 一步完成")
     p.add_argument("strategy", choices=sorted(KNOWN_STRATEGIES.keys()), help="策略名")
-    p.add_argument("--qmt-db", default=str(DEFAULT_QMT_DB), help="QMT 数据库路径")
+    p.add_argument("--data-source", choices=["qmt", "tdx"], help="行情数据源 (默认 tdx，可用 QLAB_DATA_SOURCE 覆盖)")
+    p.add_argument("--qmt-db", default=None, help=f"QMT 数据库路径 (默认 {DEFAULT_QMT_DB})")
+    p.add_argument("--tdx-db", default=None, help=f"TDX 数据库路径 (默认 {DEFAULT_TDX_DB})")
+    p.add_argument(
+        "--output-dir",
+        default=None,
+        help="信号输出目录 (默认 artifacts/<strategy>；对比实验可用 artifacts/_compare/...)",
+    )
     p.add_argument("--top-n", type=int)
     p.add_argument("--max-hold", type=int)
     p.add_argument("--max-positions", type=int)
