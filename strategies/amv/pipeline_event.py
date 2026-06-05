@@ -188,7 +188,7 @@ def export_event_strategy(
     # ── Phase 1: Market frame + limit ecology ──
     reader, lf = build_market_lazy(market_cfg)
     lf = calc_amv_core_factors(lf)
-    market = lf.collect(streaming=True)
+    market = lf.collect()
     reader.close()
 
     raw_daily = _load_event_raw_daily(config, end_date)

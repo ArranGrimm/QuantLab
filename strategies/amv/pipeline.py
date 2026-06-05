@@ -118,7 +118,7 @@ def export_ranker_strategy(
         sector_df = _build_sector_df(config, rule_params)
 
     # ── Phase 2: ONE collect ──
-    market = lf.collect(streaming=True)
+    market = lf.collect()
     reader.close()
 
     # ── Phase 3: Eager post-processing ──
@@ -297,26 +297,24 @@ def _score_and_select(
 
     # Score on FULL cross-section for correct rank/pl.len() baseline.
     # Non-candidates get _signal_score = None → ordinal rank pushes them to the end.
-    market = (
-        market.lazy()
-        .with_columns([
-            candidate_expr.alias("_is_signal_candidate"),
-            base_score.alias("_base_signal_score"),
-            context_penalty.alias("_context_penalty"),
-        ])
-        .with_columns(
-            pl.when(pl.col("_is_signal_candidate"))
-            .then(pl.col("_base_signal_score") - pl.col("_context_penalty"))
-            .otherwise(None)
-            .alias("_signal_score"),
-        )
-        .with_columns(
-            pl.col("_signal_score")
-            .rank(method="ordinal", descending=True)
-            .over("date")
-            .alias("_signal_rank"),
-        )
-        .collect(streaming=True)
+    market = market.with_columns([
+        candidate_expr.alias("_is_signal_candidate"),
+        base_score.alias("_base_signal_score"),
+        context_penalty.alias("_context_penalty"),
+    ])
+
+    market = market.with_columns(
+        pl.when(pl.col("_is_signal_candidate"))
+        .then(pl.col("_base_signal_score") - pl.col("_context_penalty"))
+        .otherwise(None)
+        .alias("_signal_score"),
+    )
+
+    market = market.with_columns(
+        pl.col("_signal_score")
+        .rank(method="ordinal", descending=True)
+        .over("date")
+        .alias("_signal_rank"),
     )
 
     return (

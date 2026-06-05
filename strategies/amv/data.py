@@ -103,7 +103,7 @@ def build_market_frame(
 
     reader, lf = build_market_lazy(config)
     try:
-        result = build_amv_base_factors(lf, required_factors).collect(streaming=True)
+        result = build_amv_base_factors(lf, required_factors).collect()
     finally:
         reader.close()
     return result
