@@ -7,6 +7,9 @@
 
 ## 近期
 
+- [ ] factor registry 按需计算：替代 calc_amv_core_factors 全量 15 因子，只算 ranker 需要的 4 个（列数 50→25，内存减半）
+- [ ] 架构解耦：ranker 核心流程 + rule 钩子挂载，消除 pipeline.py 里 if has_medium/has_sector 分支
+- [ ] post-collect 中间副本优化：减少 collect 后 filter/with_columns 产生的临时 DataFrame 副本
 - [ ] sector-tailwind 针对申万分类重新调参（当前 penalty=0.02 linear 未生效）
 - [ ] pullback-pb3 raw-execution allocation 分析（当前 +79.3% / 11.8%，与 trend 日相关 0.26）
 - [ ] event-firstboard MaxDD 改善（当前 34.1%，base 5td 无 weakgate 为 45.4%）
