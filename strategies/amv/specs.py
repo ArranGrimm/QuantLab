@@ -8,6 +8,7 @@ from typing import Literal
 
 FactorDirection = Literal["higher", "lower"]
 FactorRole = Literal["alpha", "risk", "gate", "context", "diagnostic"]
+RuleType = Literal["penalty", "gate", "rerank"]
 
 
 @dataclass(frozen=True)
@@ -79,3 +80,50 @@ class RankerSpec:
             "factor": self.factor,
             "descending": self.descending,
         }
+
+
+@dataclass(frozen=True)
+class RuleSpec:
+    """一条可复用的策略规则。"""
+
+    id: str
+    type: RuleType
+    description: str
+    known_compatible: tuple[str, ...] = ()
+    known_incompatible: tuple[str, ...] = ()
+
+    @property
+    def applicable_strategies(self) -> list[str]:
+        return list(self.known_compatible)
+
+
+RULES: dict[str, RuleSpec] = {
+    "sector-tailwind": RuleSpec(
+        id="sector-tailwind",
+        type="penalty",
+        description="行业 10/20 日收益排名底部扣分 + 个股相对行业弱势确认。",
+        known_compatible=("trend-p2", "trend-p3", "trend-p3-enhanced"),
+        known_incompatible=("pullback-pb3", "event-firstboard"),
+    ),
+    "medium-trend-quality": RuleSpec(
+        id="medium-trend-quality",
+        type="penalty",
+        description="128 日中期结构 + 趋势质量扣分。",
+        known_compatible=("trend-p2", "trend-p3", "trend-p3-enhanced"),
+        known_incompatible=("pullback-pb3", "event-firstboard"),
+    ),
+    "amv-regime-gate": RuleSpec(
+        id="amv-regime-gate",
+        type="gate",
+        description="AMV 活跃市值内部阶段风控：(aged + 非加速) OR chaos。",
+        known_compatible=("pullback-pb3",),
+        known_incompatible=("trend-p2", "trend-p3", "trend-p3-enhanced"),
+    ),
+    "event-weakgate": RuleSpec(
+        id="event-weakgate",
+        type="gate",
+        description="首板后回踩弱窗口过滤：7 维市场/候选/AMV 状态评分。",
+        known_compatible=("event-firstboard",),
+        known_incompatible=("trend-p2", "trend-p3", "trend-p3-enhanced", "pullback-pb3"),
+    ),
+}

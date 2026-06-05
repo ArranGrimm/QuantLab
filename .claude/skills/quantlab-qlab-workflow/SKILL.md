@@ -48,5 +48,5 @@ Stable export targets: `trend-p2`, `trend-p3`, `trend-p3-enhanced`, `pullback-pb
 - Put reusable strategy logic in `strategies/amv/`.
 - Put generic data/price helpers in `utils/`.
 - New strategy: add a JSON file in `strategies/amv/configs/`.
-- New rule: add implementation to `strategies/amv/rules/` + register in `rules/__init__.py`.
+- New rule: implement in `pipeline.py` / `pipeline_event.py`, register in `specs.py::RULES`.
 - `end_date` auto-detects from DuckDB; set explicitly only for backtesting historical ranges.

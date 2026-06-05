@@ -18,7 +18,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from strategies.amv.registry import KNOWN_STRATEGIES, Strategy, resolve_project_path  # noqa: E402
-from strategies.amv.workflows import WorkflowExportConfig, export_strategy  # noqa: E402
+from strategies.amv.pipeline import PipelineConfig, export_ranker_strategy  # noqa: E402
+from strategies.amv.pipeline_event import export_event_strategy  # noqa: E402
 from utils.data_source import DEFAULT_QMT_DB, DEFAULT_TDX_DB, resolve_data_source  # noqa: E402
 
 
@@ -114,8 +115,8 @@ def command_status(args: argparse.Namespace) -> int:
 # === export ===
 
 
-def _build_workflow_config(args: argparse.Namespace) -> WorkflowExportConfig:
-    return WorkflowExportConfig(
+def _build_pipeline_config(args: argparse.Namespace) -> PipelineConfig:
+    return PipelineConfig(
         data_source=resolve_data_source(
             provider=getattr(args, "data_source", None),
             qmt_db=Path(args.qmt_db) if getattr(args, "qmt_db", None) else None,
@@ -126,7 +127,7 @@ def _build_workflow_config(args: argparse.Namespace) -> WorkflowExportConfig:
 
 def command_export(args: argparse.Namespace) -> int:
     strategy = KNOWN_STRATEGIES[args.strategy]
-    config = _build_workflow_config(args)
+    config = _build_pipeline_config(args)
     if getattr(args, "output_dir", None):
         output_dir = Path(args.output_dir)
         if not output_dir.is_absolute():
@@ -140,7 +141,10 @@ def command_export(args: argparse.Namespace) -> int:
     print(f"数据源: {ds.provider} ({display_path(db_path)})")
     print(f"输出: {display_path(output_dir)}")
 
-    artifact = export_strategy(strategy, config, output_dir)
+    if strategy.family == "event":
+        artifact = export_event_strategy(strategy, config, output_dir)
+    else:
+        artifact = export_ranker_strategy(strategy, config, output_dir)
     print(f"Done: {display_path(artifact.signal_path)}")
     return 0
 

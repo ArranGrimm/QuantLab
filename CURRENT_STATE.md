@@ -18,24 +18,24 @@
 - 交易执行使用 `raw_ohlc_pre_close`（raw OHLC + raw pre-close）。
 - 旧 adjusted-execution 回测只作为历史参考，不能当当前真实指标。
 
-## 策略指标（raw execution，2026-06-02 Mac 重跑）
+## 策略指标（raw execution，2026-06-05 Windows TDX 重跑）
 
 | 策略 | Return | MaxDD | Trades | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 |
 |------|--------|-------|--------|------|------|------|------|------|------|
-| **trend-p3-medium** (基线) | +196.7% | 18.6% | 280 | +8.5 | +33.7 | +19.4 | +54.5 | +22.5 | -9.3 |
-| **trend-p3** (挑战) | +147.1% | 16.3% | 280 | +4.0 | +39.2 | +16.0 | +43.7 | +12.5 | -8.8 |
-| **pullback-pb3** (互补) | +68.6% | 11.8% | 1089 | +0.3 | +5.5 | +9.7 | +17.3 | +15.4 | +7.2 |
-| **event-firstboard** (研究) | +118.0% | 34.1% | 265 | +54.4 | -4.7 | +4.9 | +12.2 | +20.6 | +0.2 |
+| **trend-p3-medium** (基线) | +178.6% | 18.0% | 280 | +5.4 | +29.7 | +9.4 | +68.4 | +20.7 | -8.2 |
+| **trend-p3** (挑战) | +114.9% | 17.6% | 280 | — | — | — | — | — | — |
+| **pullback-pb3** (互补) | +46.4% | 15.8% | 1075 | — | — | — | — | — | — |
+| **event-firstboard** (研究) | +203.6% | 41.3% | 271 | — | — | — | — | — | — |
 
-> 注：数据源为 Mac DuckDB（raw OHLC），与 Windows 设备存在系统性差异但相对排序一致。Windows 重跑后会更新本表。trend-p3-enhanced = trend-p3-medium（sector 在申万分类下暂未生效）。
+> 注：数据源为 Windows TDX，与 Mac QMT 存在系统性差异但相对排序一致。trend-p3-enhanced = trend-p3-medium（sector 在申万分类下暂未生效）。
 
 ## 当前 Baseline
 
 `trend-p3-medium`（趋势突破 P3 + 中期结构 / 趋势质量）
 
 - Raw execution `6td static strict Top3`，280 笔交易
-- 总收益 `+196.7%`，MaxDD `18.6%`
-- 相对 trend-p3: 总收益 `+49.6pp`
+- 总收益 `+178.6%`，MaxDD `18.0%`
+- 相对 trend-p3: 总收益 `+63.7pp`
 - 规则: medium-trend-quality (linear penalty, p=0.03)
 - trend-p2 已归档，不再研究
 
@@ -105,14 +105,15 @@
 - 通过 `WorkflowExportConfig.db_source` 切换，下游 pipeline 无感
 - 可解除 QMT 数据更新的跨设备依赖，但仍需更多验证后才切换为默认源
 
-### 数据源抽象 + 因子按需加载（2026-06-04，进行中）
+### 架构重构（2026-06-05）
 
-- `utils/data_source.py`: DataSourceSettings + QmtDailyReader/TdxDailyReader Protocol，单一路径切换数据源，默认 TDX
-- `strategies/amv/factors/registry.py`: 因子注册表，每个因子自描述依赖和表达式，pipeline 按需计算
-- market.py 拆分为 `build_market_raw`（纯 OHLC） + `build_market_frame`（兼容旧调用）
-- qlab CLI 新增 `--data-source`/`--output-dir`，支持 QLAB_DATA_SOURCE 环境变量
-- medium penalty 收敛为自包含 `compute_medium_penalty`，不额外 join
-- 注意：lazy frame 与 reader 生命周期耦合导致 double collect，内存尚需优化
+- `strategies/amv/data.py`: MarketConfig + build_market_lazy（reader 生命周期外提，一次 collect）
+- `strategies/amv/factors/__init__.py`: 因子公式唯一真相源 + lazy medium features
+- `strategies/amv/pipeline.py`: ranker 系统一入口（trend/pullback），JSON 配置驱动
+- `strategies/amv/pipeline_event.py`: event 专用管道
+- 删除：workflows.py / signals.py / scoring.py / market.py / rules/
+- 从 22 文件收敛到 ~10 文件，一条 `qlab export` 穿过 4 个文件
+- 内存尚未优化（全量 15 因子 + 128d 特征，约 6.5GB），后续迭代
 
 ## 新增能力 (2026-06-02)
 

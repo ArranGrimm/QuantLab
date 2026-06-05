@@ -73,9 +73,16 @@ uv run python scripts/qlab.py run trend-p3
 
 不要把 DuckDB 访问、报告写入、一次性诊断放在这里。
 
-当前轻量 registry：
+当前文件结构：
 
-- `strategies/amv/registry.py`: 维护 `qlab.py` 的 export target、backtest preset、report alias。
+- `strategies/amv/data.py`: MarketConfig + build_market_lazy，市场数据层
+- `strategies/amv/factors/`: 因子公式唯一真相源 + re-exports
+- `strategies/amv/pipeline.py`: ranker 系统一出口（trend/pullback），JSON 配置驱动
+- `strategies/amv/pipeline_event.py`: event 策略专用管道
+- `strategies/amv/export.py`: signal.parquet 写出
+- `strategies/amv/registry.py`: 维护 `qlab.py` 的 export target、backtest preset
+- `strategies/amv/specs.py`: RankerSpec / ScoreComponent / RuleSpec 类型定义
+- `strategies/amv/configs/`: JSON 策略配置
 
 ### `utils/`
 

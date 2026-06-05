@@ -326,6 +326,12 @@ def add_medium_trend_features(market: pl.DataFrame) -> pl.DataFrame:
 
 
 def build_medium_trend_features(args: argparse.Namespace) -> pl.DataFrame:
-    from strategies.amv.market import build_market_frame
+    from strategies.amv.data import MarketConfig, build_market_frame
 
-    return add_medium_trend_features(build_market_frame(args))
+    config = MarketConfig(
+        data_source=args.data_source,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        st_snapshot_date=args.st_snapshot_date,
+    )
+    return add_medium_trend_features(build_market_frame(config))

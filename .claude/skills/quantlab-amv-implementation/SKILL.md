@@ -12,11 +12,10 @@ Use this skill for code changes to the current AMV implementation layer.
 - `scripts/qlab.py`: CLI parsing, command orchestration, user-facing output only.
 - `strategies/amv/registry.py`: Strategy loader from `configs/*.json`.
 - `strategies/amv/configs/`: JSON strategy definitions (single source of truth).
-- `strategies/amv/workflows.py`: native export workflow orchestration.
-- `strategies/amv/rules/`: strategy-specific gates and penalty rules.
-- `strategies/amv/factors/`: reusable AMV factor construction.
-- `strategies/amv/signals.py`: ranker scoring + T+1 shift + parquet assembly.
-- `strategies/amv/market.py`: DuckDB → Polars market frame construction.
+- `strategies/amv/data.py`: market data layer (DuckDB → Polars LazyFrame).
+- `strategies/amv/factors/`: all factor formulas (single source of truth) + scoring/ranker primitives.
+- `strategies/amv/pipeline.py`: unified ranker export (trend-/pullback-), JSON config driven.
+- `strategies/amv/pipeline_event.py`: event strategy export (first-board pullback + weakgate).
 - `strategies/amv/export.py`: signal.parquet write only (no metadata files).
 - `utils/`: generic data, price, filesystem, ST, industry, and Polars helpers.
 
@@ -32,7 +31,7 @@ Use this skill for code changes to the current AMV implementation layer.
 ## Editing Workflow
 
 1. Read the nearest existing module before editing.
-2. Prefer extending existing registries/rules over adding a new script.
-3. New strategy: add JSON to `configs/`. New ranker template: add to `_rankers.json`.
+2. Prefer extending existing pipeline helpers/factors over adding a new script.
+3. New strategy: add JSON to `configs/`. New ranker template: add to `_rankers.json`. New rule: register in `specs.py::RULES`.
 4. Validate with `ruff check`, `qlab export <strategy>`, follow with `qlab backtest <strategy>`.
 5. Update docs only when the change affects current commands, stable conclusions, or cleanup policy.
