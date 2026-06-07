@@ -2,25 +2,32 @@
 
 ## 马上要做
 
-- [ ] 同步到 Mac，在 Mac 上重跑所有 canonical 回测确认两设备一致性
-- [ ] 验证 TDX 数据源在 Mac 上的可用性
+- [ ] 跨设备 baseline 对齐：Mac TDX vs Windows TDX 数据源差异确认（trend-p3-medium Mac +165.6% vs Windows +178.6%）
+- [ ] event pipeline 内存继续优化（10GB → 8GB，仍有空间）
 
 ## 近期
 
-- [ ] factor registry 按需计算：替代 calc_amv_core_factors 全量 15 因子，只算 ranker 需要的 4 个（列数 50→25，内存减半）
-- [ ] 架构解耦：ranker 核心流程 + rule 钩子挂载，消除 pipeline.py 里 if has_medium/has_sector 分支
-- [ ] post-collect 中间副本优化：减少 collect 后 filter/with_columns 产生的临时 DataFrame 副本
 - [ ] sector-tailwind 针对申万分类重新调参（当前 penalty=0.02 linear 未生效）
-- [ ] pullback-pb3 raw-execution allocation 分析（当前 +79.3% / 11.8%，与 trend 日相关 0.26）
-- [ ] event-firstboard MaxDD 改善（当前 34.1%，base 5td 无 weakgate 为 45.4%）
+- [ ] pullback-pb3 raw-execution allocation 分析（当前 +44.3% / 15.0%，与 trend 日相关 0.26）
+- [ ] event-firstboard MaxDD 改善（当前 36.1%，base 为 42.3%）
 - [ ] 补 `qlab results --diff` 的年度归因拆解
+- [ ] 探索循环脚本：grid → Rust → 收集结果 → 结构化反馈
 
 ## 探索中/待跟进
 
-- [ ] ETF 动量轮动：原型 +362% 但回撤 21%、参数敏感、未经 Rust 验证。待 上证 MA20 叠加 + 回撤改善后重评估
+- [ ] ETF 动量轮动：原型 +362% 但回撤 21%、参数敏感、未经 Rust 验证
 - [ ] 上证交叉验证 AMV 牛市真伪（数据已就绪，未分析）
 - [ ] regime 慢退出机制（逻辑成立但样本量小，待更多数据）
-- [ ] TDX 数据源：已验证兼容，待更多测试后考虑切换为默认
+
+## 已完成
+
+- [x] factor registry 按需计算：compute_required_factors 替代全量 calc_amv_core_factors（trend 只算 4 因子）
+- [x] Rule Hook 系统：ranker + rules 完全解耦，JSON 配置驱动，pipeline 零 if 分支
+- [x] post-collect 中间副本优化：penalty 合并为单次 with_columns，零中间副本
+- [x] medium_trend_quality.py 内联进 MediumTrendQualityHook
+- [x] Mac 全量 canonical 回测重跑
+- [x] TDX 数据源 Mac 可用性验证 + 北交所过滤
+- [x] AGENTS.md 精简（228→76 行）
 
 ## 已确认但暂缓
 
@@ -32,4 +39,3 @@
 
 - [ ] `qlab explore` 子命令
 - [ ] `qlab backtest --top-n` / `--max-hold` 的临时 TOML 合成
-- [ ] ETF 相关文件（strategies/etf_momentum_rotation.py 仍引用 akshare，后续处理）
