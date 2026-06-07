@@ -1,0 +1,17 @@
+{
+  "name": "trend-p3",
+  "family": "trend",
+  "label": "趋势突破 P3 挑战者",
+  "description": "趋势突破延续，P=3 权重，更激进贴近新高。相对 trend-p2 +27.27pp，MaxDD 更低。",
+  "status": "challenger",
+  "preset": {
+    "name": "6td-static",
+    "config": "backtest-engine/crates/amv-topn/config_6td_static_strict_top3_no_stop.toml"
+  },
+  "ranker": {
+    "type": "components",
+    "template": "trend",
+    "params": { "P": 3.0 }
+  },
+  "rules": []
+}

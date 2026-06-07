@@ -2,6 +2,12 @@ import polars as pl
 
 _A_SHARE_LOT_SIZE = 100.0
 
+
+def duckdb_query_lazy(conn, sql: str) -> pl.LazyFrame:
+    """DuckDB 原生 SQL → Polars LazyFrame（延迟到 collect 才执行）。"""
+    return conn.sql(sql).pl(lazy=True)
+
+
 def get_adj_factor_frame(conn):
     """
     [辅助函数] 从数据库读取因子表，并计算所有股票的'前复权系数'
@@ -10,10 +16,10 @@ def get_adj_factor_frame(conn):
     2. 使用 lazy 模式处理，提高性能
     """
     # 1. 读取因子数据
-    q_factor = pl.read_database(
-        "SELECT code, date, dr FROM qmt_factors ORDER BY code, date", 
-        conn
-    ).lazy()
+    q_factor = duckdb_query_lazy(
+        conn,
+        "SELECT code, date, dr FROM qmt_factors ORDER BY code, date",
+    )
 
     # 2. 计算累积因子 (Cumulative Product)
     # 注意：如果没有因子记录的日子，后续 join_asof 会自动沿用最近的一次因子
@@ -58,16 +64,13 @@ def get_adj_factor_frame(conn):
 def load_daily_data_full(conn, codes: list[str] = None):
     """
     功能：
-    1. 读取 stock_daily (Raw)
-    2. 动态计算前复权 (Adj)
-    3. 关联股本计算市值 (Market Cap)
+    1. 读取 QMT stock_daily 行情
+    2. 计算前复权价格
+    3. 关联股本计算市值
     4. 保持与旧代码一致的列结构
 
-    Args:
-        conn: DuckDB 连接
-        codes: 股票代码列表 (如 ["sh.600570", "sz.000001"])，为 None 或空列表则加载全部
+    TDX 数据源请使用 utils.data_source.open_daily_reader()。
     """
-    
     code_filter = ""
     if codes:
         placeholders = ", ".join(f"'{c}'" for c in codes)
@@ -75,16 +78,16 @@ def load_daily_data_full(conn, codes: list[str] = None):
 
     # --- A. 读取基础数据 ---
     # 1. 日线行情 (Raw Data)
-    q_daily = pl.read_database(
-        f"SELECT code, date, open, high, low, close, volume, amount FROM stock_daily{code_filter}", 
-        conn
-    ).lazy().with_columns(pl.col("date").cast(pl.Date))
+    q_daily = duckdb_query_lazy(
+        conn,
+        f"SELECT code, date, open, high, low, close, volume, amount FROM stock_daily{code_filter}",
+    ).with_columns(pl.col("date").cast(pl.Date))
 
     # 2. 股本数据
-    q_cap = pl.read_database(
-        f"SELECT code, date, circulating_capital FROM finance_capital{code_filter} ORDER BY code, date", 
-        conn
-    ).lazy().with_columns(pl.col("date").cast(pl.Date))
+    q_cap = duckdb_query_lazy(
+        conn,
+        f"SELECT code, date, circulating_capital FROM finance_capital{code_filter} ORDER BY code, date",
+    ).with_columns(pl.col("date").cast(pl.Date))
 
     # 3. 复权因子 (调用辅助函数)
     q_factors = get_adj_factor_frame(conn)
@@ -163,7 +166,8 @@ def load_daily_data_full(conn, codes: list[str] = None):
         .sort(["code", "date"])
     )
     
-    return q_full # 返回 LazyFrame，如果需要立即结果可加 .collect()
+    return q_full
+
 
 # ==============================================================================
 # 方法 2: 加载 60分钟数据 (只计算前复权)
@@ -178,10 +182,10 @@ def load_60m_data_adj(conn):
     
     # --- A. 读取数据 ---
     # 1. 60分钟行情
-    q_60m = pl.read_database(
-        "SELECT code, time, open, high, low, close, volume, amount FROM stock_60m", 
-        conn
-    ).lazy()
+    q_60m = duckdb_query_lazy(
+        conn,
+        "SELECT code, time, open, high, low, close, volume, amount FROM stock_60m",
+    )
 
     # 2. 复权因子 (复用)
     q_factors = get_adj_factor_frame(conn)
@@ -243,15 +247,15 @@ def load_daily_data_single(conn, code):
     """
     
     # --- A. 读取基础数据 (Lazy) ---
-    q_daily = pl.read_database(
-        f"SELECT code, date, open, high, low, close, volume, amount FROM stock_daily WHERE code = '{code}'", 
-        conn
-    ).lazy().with_columns(pl.col("date").cast(pl.Date))
+    q_daily = duckdb_query_lazy(
+        conn,
+        f"SELECT code, date, open, high, low, close, volume, amount FROM stock_daily WHERE code = '{code}'",
+    ).with_columns(pl.col("date").cast(pl.Date))
 
-    q_cap = pl.read_database(
-        f"SELECT code, date, circulating_capital FROM finance_capital WHERE code = '{code}' ORDER BY code, date", 
-        conn
-    ).lazy().with_columns(pl.col("date").cast(pl.Date))
+    q_cap = duckdb_query_lazy(
+        conn,
+        f"SELECT code, date, circulating_capital FROM finance_capital WHERE code = '{code}' ORDER BY code, date",
+    ).with_columns(pl.col("date").cast(pl.Date))
 
     # --- B. 处理复权因子 (核心修改点) ---
     
@@ -332,18 +336,29 @@ def add_price_limit_cols(df: pl.LazyFrame) -> pl.LazyFrame:
     为 DataFrame 添加 is_limit_up / is_limit_down 标记列.
 
     要求输入含 code, close_adj, pre_close_adj 列.
-    规则与 Rust bt-core 完全一致:
-      主板 (60/00) → ±10%, 创业板 (300/301) → ±20%, 科创板 (688/689) → ±20%
+    规则与 Rust bt-core / limit_ecology 一致:
+      主板 (60/00) → ±10%, 创业板/科创板 → ±20%, 北交所/三板 → ±30%
 
     不删除任何行, 仅打标记.
     """
-    is_gem_star = (
-        pl.col("code").str.starts_with("300")
-        | pl.col("code").str.starts_with("301")
-        | pl.col("code").str.starts_with("688")
-        | pl.col("code").str.starts_with("689")
+    code = pl.col("code")
+    is_30pct_board = (
+        code.str.starts_with("bj.")
+        | code.str.starts_with("4")
+        | code.str.starts_with("8")
+        | code.str.starts_with("92")
     )
-    limit_pct = pl.when(is_gem_star).then(0.20).otherwise(0.10)
+    is_20pct_board = (
+        code.str.starts_with("sz.300")
+        | code.str.starts_with("sz.301")
+        | code.str.starts_with("sh.688")
+        | code.str.starts_with("sh.689")
+        | code.str.starts_with("300")
+        | code.str.starts_with("301")
+        | code.str.starts_with("688")
+        | code.str.starts_with("689")
+    )
+    limit_pct = pl.when(is_30pct_board).then(0.30).when(is_20pct_board).then(0.20).otherwise(0.10)
     daily_ret = pl.col("close_adj") / pl.col("pre_close_adj") - 1
 
     return df.with_columns([

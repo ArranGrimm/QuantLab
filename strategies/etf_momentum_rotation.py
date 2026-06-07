@@ -1,325 +1,351 @@
-# -*- coding: utf-8 -*-
-import vectorbt as vbt
+"""ETF 行业轮动策略 — 活跃ETF动量排名 + AMV择时。
+纯 Python 原型：TDX qfq 价格做动量 → bfq raw 价格做成交 → 信号切换时换仓。
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import duckdb
 import numpy as np
-import pandas as pd
-import numba
+import polars as pl
 from loguru import logger
-import sys
-import os
-import akshare as ak # <--- 新增akshare导入
 
-# --- 全局配置 ---
-strategy_name = "ETF_Momentum_Rotation_Akshare" # <--- 名称稍作修改以示区分
-etf_symbols_original = ['518880.SH', '513100.SH', '513130.SH', '159915.SZ'] # 黄金, 纳指, 恒生科技, 创业板
-# ETF代码给akshare使用 (不带后缀)
-etf_codes_for_akshare = [s.split('.')[0] for s in etf_symbols_original]
+from utils.data_source import DEFAULT_TDX_DB
 
-start_date = '2020-01-01'
-end_date = '2025-05-12'
+# ── 全局配置 ──────────────────────────────────────────────────────────
+TDX_DB = DEFAULT_TDX_DB
+LOOKBACK = 25
+ANNUAL_DAYS = 250
+SCORE_MIN, SCORE_MAX = 0.0, 5.0  # 安全区间
+START_DATE = "2019-01-01"
+END_DATE = "2026-06-03"
 
-data_directory = "Data_Akshare" # 如果需要本地缓存akshare数据 (本脚本直接在线获取)
-output_dir = "results"
+ETF_POOL: list[str] = [
+    "sh510050",  # 上证50
+    "sh510210",  # 上证指数
+    "sh510300",  # 沪深300
+    "sh512000",  # 券商
+    "sh512010",  # 医药
+    "sh512070",  # 证券保险
+    "sh512100",  # 中证1000
+    "sh512170",  # 医疗
+    "sh512400",  # 有色金属
+    "sh512480",  # 半导体
+    "sh512690",  # 酒
+    "sh512760",  # 芯片
+    "sh512800",  # 银行
+    "sh512880",  # 证券
+    "sh512890",  # 红利低波
+    "sh513050",  # 中概互联
+    "sh513100",  # 纳指
+    "sh513880",  # 日经
 
-# --- 日志配置 ---
-if not os.path.exists(output_dir):
+    "sz159915",  # 创业板
+    # "sh588000",  # 科创50 (暂注释)
+    "sz159941",  # 纳指(dup)
+    "sz159949",  # 创业板50
+    "sz159967",  # 创业板成长
+]
+
+OUTPUT_DIR = Path("artifacts/etf-momentum-rotation")
+
+# ── 1. 数据加载 ──────────────────────────────────────────────────────
+
+def load_etf_data() -> tuple[pl.DataFrame, pl.DataFrame]:
+    etf_str = "', '".join(ETF_POOL)
+    conn = duckdb.connect(str(TDX_DB), read_only=True)
     try:
-        os.makedirs(output_dir)
-        print(f"已创建输出目录: {output_dir}")
-    except OSError as e:
-        print(f"创建目录 {output_dir} 失败: {e}")
-        sys.exit(1)
-
-logger.remove()
-log_format = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
-logger.add(sys.stderr, level="INFO", format=log_format)
-log_file_path = os.path.join(output_dir, f"{strategy_name}_backtest.log")
-logger.add(log_file_path, level="DEBUG", rotation="10 MB", format=log_format)
-
-logger.info(f"------ {strategy_name} 回测开始 ------")
-logger.info(f"策略名称: {strategy_name}")
-logger.info(f"原始ETF池: {etf_symbols_original}")
-
-# --- 策略参数 ---
-lookback_period = 25
-annual_trading_days = 250
-initial_cash = 100000
-commission_rate = 0.0002
-slippage_rate = 0.0005
-
-# --- 辅助函数：动量计算 (Numba优化) ---
-@numba.njit
-def nb_calc_momentum_score(i, col, y_arr, annual_days): # 签名保持不变，接收vectorbt传入的参数
-    n = len(y_arr)
-    if np.isnan(y_arr).any() or n < 2: return np.nan
-    
-    log_y = np.log(y_arr)
-    x = np.arange(n)
-    
-    # --- 开始修改：引入线性递增权重 ---
-    weights = np.linspace(1.0, 2.0, n) # 权重从1线性增加到2
-    
-    # 加权线性回归计算 (参考Numpy的polyfit对于加权w的实现思路，或直接实现加权最小二乘法)
-    # Numba环境下直接用np.polyfit(x, y, 1, w=weights)可能不支持或效率不高
-    # 我们需要手动实现加权最小二乘法的斜率和截距计算
-    
-    w_sum = np.sum(weights)
-    w_x_sum = np.sum(weights * x)
-    w_y_sum = np.sum(weights * log_y)
-    w_x2_sum = np.sum(weights * x**2)
-    w_xy_sum = np.sum(weights * x * log_y)
-    
-    denominator = w_sum * w_x2_sum - w_x_sum**2
-    if denominator == 0: return np.nan
-    
-    slope = (w_sum * w_xy_sum - w_x_sum * w_y_sum) / denominator
-    intercept = (w_y_sum - slope * w_x_sum) / w_sum # 也可以是 (w_x2_sum * w_y_sum - w_x_sum * w_xy_sum) / denominator
-    
-    # 计算加权R²
-    y_pred = slope * x + intercept
-    weighted_residuals_sq = weights * (log_y - y_pred)**2
-    
-    # 加权均值
-    weighted_mean_y = np.sum(weights * log_y) / w_sum
-    weighted_ss_tot = np.sum(weights * (log_y - weighted_mean_y)**2)
-    
-    if weighted_ss_tot == 0: # 如果加权总平方和为0 (例如加权后的y值恒定)
-        r_squared = 0.0 # 或1.0，取决于定义。如果预测完美，残差为0，R^2应为1。若y本身无波动，R^2通常无意义或为0。
-                        # MarioC代码中是 np.sum(weights * (y - np.mean(y))**2)，这里用加权均值更一致。
-                        # 如果 y 值本身恒定（即使加权后），weighted_ss_tot 会是0，导致除零。
-                        # 如果 y 值恒定，log_y也恒定，那么slope会是0，y_pred也是恒定等于log_y。
-                        # 此时 weighted_residuals_sq 会是0。如果 weighted_ss_tot 也是0，R^2可以定义为1（完美拟合常数）或0（无趋势）。
-                        # 我们参考MarioC的实现，如果 y - np.mean(y) 部分加权后为0，则R^2可能出问题。
-                        # 安全起见，如果 weighted_ss_tot 为0，且 weighted_residuals_sq 也为0，说明完美拟合常数，R^2=1。
-                        # 如果 weighted_ss_tot 为0，但 weighted_residuals_sq 不为0（理论上不太可能），则R^2未定义或为0。
-                        # 简单处理：若 weighted_ss_tot 为0，则 r_squared 为0 (表示没有可解释的方差，或趋势不明显)
-        r_squared = 0.0
-    else:
-        r_squared = 1.0 - (np.sum(weighted_residuals_sq) / weighted_ss_tot)
-        r_squared = max(0.0, r_squared) # 确保R²不为负
-
-    # --- 修改结束 ---
-        
-    daily_factor = np.exp(slope)
-    annualized_returns = daily_factor**annual_days - 1.0
-    score = annualized_returns * r_squared
-    
-    if not np.isfinite(score): return np.nan
-    return score
-
-# --- 主执行程序 ---
-if __name__ == "__main__":
-    # --- 1. 加载数据 (使用 Akshare) ---
-    logger.info(f"开始使用 akshare 加载数据，日期范围: {start_date} to {end_date}")
-    
-    # 转换日期格式为akshare需要的 'YYYYMMDD'
-    ak_start_date = start_date.replace('-', '')
-    ak_end_date = end_date.replace('-', '')
-
-    all_etf_close_prices = {} # 存储每个ETF的收盘价Series，键为原始带后缀的symbol
-
-    for i, ak_code in enumerate(etf_codes_for_akshare):
-        original_symbol = etf_symbols_original[i] # 获取对应的原始带后缀的名称
-        logger.debug(f"尝试从 akshare 加载 {original_symbol} (代码: {ak_code})...")
-        try:
-            etf_hist_df = ak.fund_etf_hist_em(
-                symbol=ak_code,
-                period="daily",
-                start_date=ak_start_date,
-                end_date=ak_end_date,
-                adjust="hfq"  # 使用后复权数据
-            )
-
-            if etf_hist_df.empty:
-                logger.warning(f"akshare 未返回 {original_symbol} (代码: {ak_code}) 的数据。")
-                continue
-            
-            # 重命名列
-            etf_hist_df.rename(columns={
-                '日期': 'Date',
-                '开盘': 'Open',
-                '收盘': 'Close',
-                '最高': 'High',
-                '最低': 'Low',
-                '成交量': 'Volume'
-                # 其他列如 '成交额', '振幅', '涨跌幅', '涨跌额', '换手率' 可按需保留或重命名
-            }, inplace=True)
-
-            # 将'Date'列转换为datetime对象并设为索引
-            etf_hist_df['Date'] = pd.to_datetime(etf_hist_df['Date'])
-            etf_hist_df.set_index('Date', inplace=True)
-
-            # 确保关键列是数值类型
-            numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-            for col in numeric_cols:
-                if col in etf_hist_df.columns:
-                    etf_hist_df[col] = pd.to_numeric(etf_hist_df[col], errors='coerce')
-                elif col == 'Volume': # 如果akshare没返回成交量，则补0
-                     etf_hist_df[col] = 0
-                else: # O,H,L,C是必须的
-                    logger.error(f"ETF {original_symbol} 的akshare数据缺少关键列: {col}")
-                    raise ValueError(f"ETF {original_symbol} 数据不完整")
+        qfq = conn.execute(f"""
+            SELECT symbol, date, close FROM v_etf_qfq
+            WHERE symbol IN ('{etf_str}')
+            AND date >= '{START_DATE}' AND date <= '{END_DATE}'
+            AND close > 0 ORDER BY symbol, date
+        """).pl()
+        bfq = conn.execute(f"""
+            SELECT symbol, date, open, close FROM v_etf_bfq
+            WHERE symbol IN ('{etf_str}')
+            AND date >= '{START_DATE}' AND date <= '{END_DATE}'
+            AND open > 0 AND close > 0 ORDER BY symbol, date
+        """).pl()
+    finally:
+        conn.close()
+    logger.info(f"ETF qfq: {qfq.height:,} rows, {qfq['symbol'].n_unique()} symbols")
+    logger.info(f"ETF bfq: {bfq.height:,} rows, {bfq['symbol'].n_unique()} symbols")
+    return qfq, bfq
 
 
-            # 仅保留我们需要的 'Close' 列，并以原始带后缀的symbol命名
-            if 'Close' in etf_hist_df.columns:
-                all_etf_close_prices[original_symbol] = etf_hist_df['Close']
-                logger.success(f"成功加载并处理了 {original_symbol} (代码: {ak_code}) 的数据。")
+# ── 2. 动量计算 (numba OLS) ──────────────────────────────────────────
+
+def compute_momentum(qfq: pl.DataFrame) -> pl.DataFrame:
+    import numba
+
+    @numba.njit
+    def _momentum_1d(y: np.ndarray) -> float:
+        n = len(y)
+        if n < 2 or np.any(np.isnan(y)):
+            return np.nan
+        log_y = np.log(y)
+        x = np.arange(n, dtype=np.float64)
+        weights = np.linspace(1.0, 2.0, n)
+        w_sum = np.sum(weights)
+        w_x = np.sum(weights * x)
+        w_y = np.sum(weights * log_y)
+        w_xx = np.sum(weights * x * x)
+        w_xy = np.sum(weights * x * log_y)
+        denom = w_sum * w_xx - w_x * w_x
+        if denom == 0.0:
+            return np.nan
+        slope = (w_sum * w_xy - w_x * w_y) / denom
+        intercept = (w_y - slope * w_x) / w_sum
+        y_pred = slope * x + intercept
+        residuals = weights * (log_y - y_pred) ** 2
+        weighted_mean_y = w_y / w_sum
+        ss_tot = np.sum(weights * (log_y - weighted_mean_y) ** 2)
+        r2 = 1.0 - np.sum(residuals) / ss_tot if ss_tot > 0 else 0.0
+        if r2 < 0.0:
+            r2 = 0.0
+        daily_factor = np.exp(slope)
+        annualized = daily_factor ** ANNUAL_DAYS - 1.0
+        score = annualized * r2
+        if not np.isfinite(score):
+            return np.nan
+        return score
+
+    @numba.njit
+    def _momentum_matrix(n_t: int, n_m: int, close_mat: np.ndarray) -> np.ndarray:
+        scores = np.full((n_t, n_m), np.nan)
+        for j in range(n_m):
+            for i in range(LOOKBACK - 1, n_t):
+                scores[i, j] = _momentum_1d(close_mat[i - LOOKBACK + 1 : i + 1, j])
+        return scores
+
+    pivot = qfq.pivot(values="close", index="date", columns="symbol").sort("date")
+    dates = pivot["date"].to_list()
+    symbols = [c for c in pivot.columns if c != "date"]
+    close_mat = pivot.select(symbols).to_numpy()
+
+    scores_mat = _momentum_matrix(len(dates), len(symbols), close_mat)
+
+    rows = []
+    for j, sym in enumerate(symbols):
+        for i, d in enumerate(dates):
+            if i >= LOOKBACK - 1 and not np.isnan(scores_mat[i, j]):
+                rows.append({"date": d, "symbol": sym, "momentum": float(scores_mat[i, j])})
+
+    logger.info(f"Computed {len(rows):,} momentum scores for {len(symbols)} ETFs")
+    return pl.DataFrame(rows).sort(["date", "symbol"])
+
+
+# ── 3. 信号生成 ──────────────────────────────────────────────────────
+
+def generate_signals(momentum: pl.DataFrame) -> pl.DataFrame:
+    from strategies.amv.regime import build_amv_phase_frame
+
+    amv = build_amv_phase_frame().with_columns(pl.col("date").cast(pl.Utf8))
+    amv_bull = amv.filter(pl.col("is_bull_regime")).select(pl.col("date").alias("sig_date"))
+
+    signals = (
+        momentum.with_columns(pl.col("date").cast(pl.Utf8))
+        .filter((pl.col("momentum") > SCORE_MIN) & (pl.col("momentum") <= SCORE_MAX))
+        .sort(["date", "momentum"], descending=[False, True])
+        .group_by("date")
+        .first()
+        .sort("date")
+    )
+
+    signals = signals.with_columns(pl.col("symbol").shift(1).alias("_prev"))
+    signals = signals.with_columns(
+        (pl.col("symbol") != pl.col("_prev")).fill_null(True).alias("changed")
+    )
+
+    switch = (
+        signals.filter(pl.col("changed"))
+        .join(amv_bull, left_on="date", right_on="sig_date", how="inner")
+        .select(pl.col("date").alias("signal_date"), "symbol", "momentum")
+        .sort("signal_date")
+    )
+
+    logger.info(f"{switch.height} switch signals on {amv_bull.height} bull days")
+    return switch
+
+
+# ── 4. 回测模拟 ──────────────────────────────────────────────────────
+
+def simulate_trades(
+    signals: pl.DataFrame, bfq: pl.DataFrame, initial_cap: float = 500_000.0, min_hold_days: int = 5
+) -> dict[str, Any]:
+    px: dict[tuple[str, str], tuple[float, float]] = {}
+    for r in bfq.iter_rows():
+        px[(r[0], str(r[1]))] = (float(r[2]), float(r[3]))
+
+    from strategies.amv.regime import build_amv_phase_frame
+    amv = build_amv_phase_frame().with_columns(pl.col("date").cast(pl.Utf8))
+    bear_dates = set(amv.filter(~pl.col("is_bull_regime"))["date"].to_list())
+
+    all_dates = sorted(set(str(d) for d in bfq["date"].to_list()))
+    sig_list = signals.sort("signal_date").to_dicts()
+
+    trades: list[dict] = []
+    equity: list[dict] = []
+    cash = initial_cap
+    pos: dict | None = None
+    last_entry_idx = -999
+    si = 0
+
+    for di, cd in enumerate(all_dates):
+        is_bear = cd in bear_dates
+
+        if is_bear and pos is not None:
+            ep = px.get((pos["symbol"], cd), (0.0, 0.0))[1]
+            if ep > 0:
+                gross = pos["shares"] * ep
+                net = gross - gross * 0.00025 - gross * 0.001 - gross * 0.001
+                pnl = net - pos["cost"]
+                trades.append({
+                    "code": pos["symbol"], "entry_date": pos["entry_date"], "exit_date": cd,
+                    "entry_price": pos["entry_price"], "exit_price": ep,
+                    "shares": pos["shares"], "cost": pos["cost"], "exit_value": net,
+                    "pnl": pnl, "pnl_pct": pnl / pos["cost"],
+                    "hold_trading_days": di - all_dates.index(pos["entry_date"]),
+                    "exit_reason": "BearRegime",
+                })
+                cash += net
+            pos = None
+
+        if si < len(sig_list) and sig_list[si]["signal_date"] == cd and not is_bear:
+            if pos is not None and (di - last_entry_idx) < min_hold_days:
+                si += 1
             else:
-                logger.warning(f"ETF {original_symbol} 处理后缺少 'Close' 列。")
+                new_sym = sig_list[si]["symbol"]
+                if pos is not None:
+                    ep = px.get((pos["symbol"], cd), (0.0, 0.0))[1]
+                    if ep > 0:
+                        gross = pos["shares"] * ep
+                        net = gross - gross * 0.00025 - gross * 0.001 - gross * 0.001
+                        pnl = net - pos["cost"]
+                        trades.append({
+                            "code": pos["symbol"], "entry_date": pos["entry_date"], "exit_date": cd,
+                            "entry_price": pos["entry_price"], "exit_price": ep,
+                            "shares": pos["shares"], "cost": pos["cost"], "exit_value": net,
+                            "pnl": pnl, "pnl_pct": pnl / pos["cost"],
+                            "hold_trading_days": di - all_dates.index(pos["entry_date"]),
+                            "exit_reason": "SignalSwitch",
+                        })
+                        cash += net
+                    pos = None
+                ep = px.get((new_sym, cd), (0.0, 0.0))[0]
+                if ep > 0:
+                    eff = ep * (1 + 0.00025 + 0.001)
+                    shares = int(cash / eff / 100) * 100
+                    if shares > 0:
+                        cost = shares * eff
+                        cash -= cost
+                        pos = {"symbol": new_sym, "entry_date": cd, "entry_price": ep,
+                               "shares": shares, "cost": cost}
+                        last_entry_idx = di
+                si += 1
 
-        except Exception as e_ak:
-            logger.error(f"使用 akshare 加载 {original_symbol} (代码: {ak_code}) 时出错: {e_ak}")
+        pv = 0.0
+        if pos is not None:
+            ep = px.get((pos["symbol"], cd), (0.0, 0.0))[1]
+            if ep > 0:
+                pv = pos["shares"] * ep
+        equity.append({"date": cd, "cash": cash, "positions_value": pv, "total_value": cash + pv})
 
-    if not all_etf_close_prices:
-        logger.error("未能从 akshare 加载任何有效的ETF数据。请检查ETF代码、日期范围和网络连接。")
-        sys.exit(1)
+    if pos is not None:
+        ld = all_dates[-1]
+        ep = px.get((pos["symbol"], ld), (0.0, 0.0))[1]
+        if ep > 0:
+            gross = pos["shares"] * ep
+            net = gross - gross * 0.00025 - gross * 0.001 - gross * 0.001
+            pnl = net - pos["cost"]
+            trades.append({
+                "code": pos["symbol"], "entry_date": pos["entry_date"], "exit_date": ld,
+                "entry_price": pos["entry_price"], "exit_price": ep,
+                "shares": pos["shares"], "cost": pos["cost"], "exit_value": net,
+                "pnl": pnl, "pnl_pct": pnl / pos["cost"],
+                "hold_trading_days": len(all_dates) - 1 - all_dates.index(pos["entry_date"]),
+                "exit_reason": "EndOfData",
+            })
 
-    # 合并所有ETF的收盘价到一个DataFrame
-    price_df = pd.DataFrame(all_etf_close_prices)
-    
-    # 数据清洗：填充周末等缺失的交易日数据，然后删除完全没有数据的行/列
-    # 先基于第一个有效ETF的索引重新索引所有列，然后填充
-    if not price_df.empty:
-        base_index = price_df.index # 使用合并后的索引，它应该包含了所有交易日
-        price_df = price_df.reindex(base_index).ffill() # 向前填充
-        price_df = price_df.dropna(axis=0, how='all') # 删除所有列都为NaN的行（通常不会发生在此处）
-        price_df = price_df.dropna(axis=1, how='all') # 删除数据加载后完全是NaN的ETF列
-        # 进一步确保开始阶段没有NaN（动量计算对NaN敏感）
-        # price_df = price_df.dropna(axis=0, how='any', subset=price_df.columns[:1]) # 基于第一个ETF确保起始数据完整
+    trades_df = pl.DataFrame(trades).sort("entry_date") if trades else pl.DataFrame()
+    eq_df = pl.DataFrame(equity).sort("date")
 
-    if price_df.empty or price_df.shape[1] < 2: # 需要至少两个ETF才能轮动
-        logger.error(f"数据加载或处理后，有效的ETF数量 ({price_df.shape[1]}) 少于2个，无法进行轮动。")
-        sys.exit(1)
-    
-    # 更新实际参与轮动的ETF列表名称
-    final_etf_symbols = price_df.columns.tolist()
-    logger.info(f"最终使用的数据范围: {price_df.index.min()} 到 {price_df.index.max()}. 共 {len(price_df)} 行.")
-    logger.info(f"最终参与轮动的ETF: {final_etf_symbols}")
+    final_val = eq_df["total_value"][-1]
+    total_ret = (final_val / initial_cap - 1) * 100
+    eq_vals = eq_df["total_value"].to_numpy().astype(float)
+    peak = np.maximum.accumulate(eq_vals)
+    max_dd = float(np.min((eq_vals - peak) / peak * 100))
+    daily_r = np.diff(eq_vals) / eq_vals[:-1]
+    sharpe = float(np.mean(daily_r) / np.std(daily_r) * np.sqrt(252)) if np.std(daily_r) > 0 else 0
 
-    # --- 2. 计算动量得分 ---
-    logger.info(f"开始计算动量得分，回顾期: {lookback_period} 天...")
-    try:
-        momentum_scores = price_df.vbt.rolling_apply(
-            lookback_period,              # window (positional)
-            nb_calc_momentum_score,       # apply_func_nb (positional)
-            annual_trading_days           # *args (positional)
-            # Removed args=, use_raw=, cache_func= based on documentation
-        )
-        logger.success("动量得分计算完成。")
-    except Exception as e:
-        logger.error(f"计算动量得分时出错: {e}")
-        sys.exit(1)
+    yearly = {}
+    for y in range(2019, 2027):
+        ye = eq_df.filter(pl.col("date").str.starts_with(str(y)))
+        if ye.height < 2:
+            continue
+        yearly[str(y)] = round((ye["total_value"][-1] / ye["total_value"][0] - 1) * 100, 2)
 
-    # --- 3. 生成交易信号
-    logger.info("根据动量得分生成目标权重 (安全摸狗逻辑)...")
-    try:
-        # --- 开始修改：加入安全区间过滤 ---
-        # 1. 复制一份动量得分用于操作，避免修改原始的 momentum_scores
-        filtered_momentum_scores = momentum_scores.copy()
-
-        # 2. 应用安全区间过滤条件: (0, 5]
-        # 将不符合条件的得分设为负无穷小或NaN，这样它们在后续排名中会排在最后或被忽略
-        # MarioC的逻辑是直接筛选DataFrame，我们这里通过修改得分来实现类似效果，以便后续排名
-        condition = (filtered_momentum_scores > 0) & (filtered_momentum_scores <= 5)
-        # 对于不满足条件的，我们给一个非常低的值，确保它们不会被选中
-        # 或者，可以直接将它们设为NaN，rank函数会处理NaN
-        filtered_momentum_scores[~condition] = np.nan 
-        
-        logger.info(f"应用安全区间 (0, 5] 过滤后的动量得分 (部分显示NaN为不合格):\n{filtered_momentum_scores.tail()}")
-
-        # 3. 对过滤后的得分进行排名
-        #   如果所有ETF都被过滤掉（即filtered_momentum_scores该行全是NaN），则ranks对应行也会是NaN
-        ranks = filtered_momentum_scores.rank(axis=1, ascending=False, method='first')
-        
-        # 4. 生成目标权重：选择排名第一的（如果存在）
-        #   如果某行ranks全是NaN，那么np.where(ranks == 1,...) 的结果在该行仍将是False(0.0)
-        target_weights = pd.DataFrame(np.where(ranks == 1, 1.0, 0.0),
-                                      index=price_df.index, 
-                                      columns=price_df.columns)
-        
-        # 检查是否有任何一天选出了ETF (即是否有权重为1的情况)
-        # 如果某天 target_weights.sum(axis=1) == 0，则表示当天无ETF可选，即空仓
-        days_with_selection = target_weights.sum(axis=1) > 0
-        logger.info(f"在 {days_with_selection.sum()} 天中选出了ETF进行持有 (共 {len(days_with_selection)} 个交易日)。")
-        if days_with_selection.sum() == 0:
-            logger.warning("警告：在整个回测期间，根据安全摸狗逻辑，没有选出任何ETF持有！请检查过滤条件或市场状况。")
-
-        # --- 修改结束 ---
-        logger.success("目标权重生成完成。")
-    except Exception as e:
-        logger.error(f"生成目标权重时出错: {e}")
-        sys.exit(1)
-
-    # 以黄金ETF (518880.SH) 为基准
-    if '518880.SH' in price_df.columns:
-        gold_etf_prices = price_df['518880.SH'].copy()
-        # 确保基准价格序列与投资组合的索引对齐 (通常在price_df层面已经对齐)
-        # gold_etf_prices = gold_etf_prices.reindex(portfolio.wrapper.index, method='ffill').fillna(method='bfill') # 对齐索引并填充
-        benchmark_gold_returns = gold_etf_prices.vbt.to_returns()
-        logger.info("已准备黄金ETF (518880.SH) 作为基准的收益率数据。")
-    else:
-        logger.warning("ETF池中未找到黄金ETF (518880.SH)，无法将其设为基准。")
-        benchmark_gold_returns = None
-
-    # 以纳指ETF (513100.SH) 为基准
-    if '513100.SH' in price_df.columns:
-        nasdaq_etf_prices = price_df['513100.SH'].copy()
-        # nasdaq_etf_prices = nasdaq_etf_prices.reindex(portfolio.wrapper.index, method='ffill').fillna(method='bfill') # 对齐索引并填充
-        benchmark_nasdaq_returns = nasdaq_etf_prices.vbt.to_returns()
-        logger.info("已准备纳指ETF (513100.SH) 作为基准的收益率数据。")
-    else:
-        logger.warning("ETF池中未找到纳指ETF (513100.SH)，无法将其设为基准。")
-        benchmark_nasdaq_returns = None
+    return {
+        "total_return_pct": round(total_ret, 2),
+        "max_drawdown_pct": round(max_dd, 2),
+        "sharpe": round(sharpe, 2),
+        "total_trades": trades_df.height,
+        "win_rate_pct": round(trades_df.filter(pl.col("pnl") > 0).height / trades_df.height * 100, 1) if trades_df.height > 0 else 0,
+        "yearly": yearly,
+        "final_value": round(float(final_val), 2),
+        "trades": trades_df,
+        "equity": eq_df,
+    }
 
 
-    vbt.settings['portfolio']['stats']['settings']['benchmark_rets'] = benchmark_nasdaq_returns
-    
-    # --- 4. 执行组合回测 ---
-    logger.info(f"开始执行VectorBT组合回测，初始资金: {initial_cash:.2f}...")
-    try:
-        portfolio = vbt.Portfolio.from_orders(
-            close=price_df, size=target_weights, size_type='targetpercent',
-            group_by=True, cash_sharing=True, fees=commission_rate,
-            slippage=slippage_rate, freq='D'
-        )
-        logger.success("组合回测执行完毕。")
-    except Exception as e:
-        logger.error(f"执行组合回测时出错: {e}")
-        sys.exit(1)
-    # 在 portfolio 回测完成之后，生成统计和绘图之前
+# ── 5. 主流程 ──────────────────────────────────────────────────────────
 
-    # --- 5. 显示与保存结果 ---
-    logger.info("------ 回测结果 ------")
-    stats_df = portfolio.stats()
-    print(stats_df)
-    stats_output_path = os.path.join(output_dir, f"{strategy_name}_stats.txt")
-    try:
-        with open(stats_output_path, 'w', encoding='utf-8') as f: # 添加utf-8编码
-            f.write(f"Strategy: {strategy_name}\n")
-            f.write(f"Symbols: {final_etf_symbols}\n") # 使用最终的ETF列表
-            f.write(f"Date Range: {price_df.index.min()} to {price_df.index.max()}\n")
-            f.write(f"Lookback Period: {lookback_period}\n")
-            f.write("-" * 30 + "\n")
-            f.write(stats_df.to_string())
-        logger.info(f"回测统计数据已保存到: {stats_output_path}")
-    except Exception as e:
-        logger.error(f"保存统计数据文件时出错: {e}")
+def main() -> None:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    trades_df = portfolio.orders.records_readable
-    trades_output_path = os.path.join(output_dir, f"{strategy_name}_trades_vectorbt.csv")
-    try:
-        trades_df.to_csv(trades_output_path, index=False, encoding='utf-8-sig') #确保CSV中文正确显示
-        logger.info(f"交易记录已保存到: {trades_output_path}")
-    except Exception as e:
-        logger.error(f"保存交易记录时出错: {e}")
+    logger.info("1/4 Load ETF data ...")
+    qfq, bfq = load_etf_data()
 
-    report_path = os.path.join(output_dir, f"{strategy_name}_vectorbt_report.html")
-    logger.info(f"正在生成交互式HTML报告到: {report_path} ...")
-    try:
-        fig = portfolio.plot()
-        fig.write_html(report_path)
-        logger.success(f"交互式报告已生成: {report_path}")
-    except Exception as e:
-        logger.error(f"生成HTML报告时出错: {e}")
+    logger.info("2/4 Compute momentum ...")
+    mom = compute_momentum(qfq)
 
-    logger.info(f"------ {strategy_name} 回测结束 ------")
+    logger.info("3/4 Generate signals ...")
+    sig = generate_signals(mom)
+
+    logger.info("4/4 Simulate ...")
+    r = simulate_trades(sig, bfq)
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    rd = OUTPUT_DIR / ts
+    rd.mkdir(parents=True, exist_ok=True)
+    r["trades"].write_csv(rd / "trades.csv")
+    r["equity"].write_csv(rd / "daily_equity.csv")
+    report = {
+        "strategy": "etf-momentum-rotation",
+        "ran_at": ts,
+        "total_return_pct": r["total_return_pct"],
+        "max_drawdown_pct": r["max_drawdown_pct"],
+        "sharpe": r["sharpe"],
+        "total_trades": r["total_trades"],
+        "win_rate_pct": r["win_rate_pct"],
+        "yearly": r["yearly"],
+    }
+    (rd / "result.json").write_text(json.dumps(report, indent=2, ensure_ascii=False))
+
+    print(f"\n{'='*50}")
+    print("ETF Momentum Rotation — Results")
+    print(f"{'='*50}")
+    print(f"Total Return: {r['total_return_pct']:+.2f}%  MaxDD: {r['max_drawdown_pct']:.2f}%  Sharpe: {r['sharpe']:.2f}")
+    print(f"Trades: {r['total_trades']}  WR: {r['win_rate_pct']:.1f}%")
+    for y, yr in r["yearly"].items():
+        print(f"  {y}: {yr:>+8.2f}%")
+    print(f"\nSaved to {rd}")
+
+
+if __name__ == "__main__":
+    main()

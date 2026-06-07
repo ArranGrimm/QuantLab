@@ -2,6 +2,15 @@
 
 本目录代码运行在 **Windows 环境**, 唯一职责是 **截图 + 文件落地**, 不做任何 OCR / 解析 / 入库。
 
+## 为什么需要 RPA
+
+- `0AMV (活跃市值)` 是指南针专利指标, 客户端没有导出接口, 也没有公开 API。
+- 项目里的 AMV bull pool / regime 研究依赖完整历史序列, 不能继续靠手工圈定的 `LOOSE_PERIODS`。
+- 当前唯一可行路径: 在 **指南针全赢系统** 里打开 readout, 用方向键逐日前进, 截图后交给 `rpa_parse/` 做 OCR 和入库。
+- Capture PoC 已通过 (`2026-04-21`); 当前重点是 **历史回填** 和 **收盘后增量截图**。
+
+完整管道: `rpa_capture/` (Windows 截图) → 共享文件夹 → `rpa_parse/` (Mac OCR + DuckDB)。Parse 侧说明见 [`../rpa_parse/README.md`](../rpa_parse/README.md)。
+
 ## 部署形态
 
 - **当前阶段**: 直接在物理 Windows 机器上跑通 PoC, 图片留本地即可
@@ -19,13 +28,15 @@
 ## 阶段拆分
 
 ```
-[Windows 端 - 当前阶段]              [Mac/Windows 解析端 - 后续阶段]
-rpa_capture/                          rpa_parse/  (暂未实现)
+[Windows 端]                           [Mac 端]
+rpa_capture/                           rpa_parse/
    ↓                                       ↑
 shots/                  本地或共享       shots/
   ├── seq_00000.png    ─────────────→     ├── seq_00000.png
   ├── seq_00001.png                       ├── seq_00001.png
   └── manifest.jsonl                      └── manifest.jsonl
+                                              ↓
+                                    active_market_value.duckdb
 ```
 
 时间方向: `seq=0` 是 **最早起始日** (例如 2019-01-04), `seq=N` 是 **最新一天**。
@@ -185,10 +196,26 @@ python run_capture.py --days 5 --start-seq 1772 --output ./shots
 python run_capture.py --days 5 --start-seq 1772 --output ./shots --overwrite
 ```
 
+## 后续工作
+
+- [ ] 历史回填: `--days 1700` 全量截图 (建议在 PD VM 或固定 Windows 环境一次性跑完)
+- [ ] 日更: Windows 计划任务 + `--start-seq` 增量截图
+- [ ] 与 `rpa_parse/` 联调: 新增截图后跑 `--incremental` 解析和 DuckDB upsert
+
+长期可复用同一套框架抓取其他指南针 readout 指标; 每次只需重新标定 `region.json`。
+
 ## 已知限制 / TODO
 
 - [ ] 目前没有"窗口找不到自动启动指南针"的容错; 需手动开
-- [ ] 截图全屏, 文件较大 (~2~3 MB/张, 1700 张约 4 GB); 后续可裁剪 readout 区域
-- [ ] 没有"按错键发现日期不连续就报警"的校验; 留给后续解析阶段做
-- [ ] 没有 Windows 计划任务的日更脚本; PoC 验证后再做
-- [ ] 没有"光标走到右边缘后图表是否会自动向左滚动"的兜底; 假设跟向左拖时表现一致 (向右走时图表也会自动滚动). 跑大批量前先用 `--days 50` 验证一下.
+- [ ] 未标定 `region.json` 时全屏截图较大 (~2~3 MB/张); 标定 readout 区域后单张约 tens of KB
+- [ ] 日期连续性校验在 `rpa_parse/` 阶段完成, 不在 capture 阶段报警
+- [ ] 没有 Windows 计划任务的日更脚本
+- [ ] 没有"光标走到右边缘后图表是否会自动向左滚动"的兜底; 跑大批量前先用 `--days 50` 验证
+
+## 风险备忘
+
+| 风险 | 缓解 |
+|---|---|
+| 指南针 UI 改版 | 重跑 `calibrate_region.py` |
+| cursor 漂移 | 优先 `--no-focus`; 见上文 troubleshooting |
+| 屏幕分辨率 / DPI 变化 | 固定最大化窗口; 重标定 region |

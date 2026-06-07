@@ -1,0 +1,34 @@
+# AMV TopN 5td rolling cohort, refill from Top10, no stop. (event-firstboard variant)
+
+[backtest]
+initial_capital = 500000.0
+max_positions = 21
+max_daily_buys = 3
+position_size_pct = 0.047619047619
+max_hold_trading_days = 5
+start_date = "2021-01-01"
+end_date = ""
+min_position_ratio = 0.5
+
+[entry]
+top_n = 10
+entry_rank_limit = 10
+min_score = 0.0
+require_bull_regime = true
+
+[exit]
+sell_on_bear_regime = false
+
+[stop_loss]
+enabled = false
+pct = 0.05
+
+[trailing_stop]
+enabled = false
+activation_pct = 0.10
+trailing_pct = 0.05
+
+[costs]
+commission_rate = 0.00025
+stamp_duty_rate = 0.001
+slippage_pct = 0.001

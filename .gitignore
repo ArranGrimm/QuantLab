@@ -68,6 +68,7 @@ logs/
 !README.md
 
 # --- Rust ---
+target/
 backtest-engine/target/
 **/*.rs.bk
 Cargo.lock

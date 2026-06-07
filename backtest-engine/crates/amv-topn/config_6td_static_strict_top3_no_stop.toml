@@ -23,6 +23,11 @@ sell_on_bear_regime = false
 enabled = false
 pct = 0.05
 
+[early_stop]
+enabled = false
+trigger_hold_trading_days = 2
+atr_multiple = 3.0
+
 [trailing_stop]
 enabled = false
 activation_pct = 0.10

@@ -139,6 +139,15 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
     """
     print("[Rotation] 计算截面轮动因子...")
 
+    schema_names = df.collect_schema().names()
+    if "turnover" in schema_names:
+        # TDX v_stock_qfq.turnover: decimal ratio (0.002185 = 0.2185%)
+        turnover_rate_expr = (pl.col("turnover") * 100.0).fill_nan(0.0)
+    else:
+        turnover_rate_expr = (
+            (pl.col("volume") * _A_SHARE_LOT_SIZE) / pl.col("circulating_capital").fill_null(1) * 100
+        ).fill_nan(0.0)
+
     result = (
         df.sort(["code", "date"])
 
@@ -157,8 +166,7 @@ def calc_rotation_factors(df: pl.LazyFrame, lookback: int = 128) -> pl.LazyFrame
                 (pl.col("high_adj") - pl.col("_pc")).abs(),
                 (pl.col("low_adj") - pl.col("_pc")).abs(),
             ).alias("_tr"),
-            ((pl.col("volume") * _A_SHARE_LOT_SIZE) / pl.col("circulating_capital").fill_null(1) * 100)
-                .fill_nan(0.0).alias("turnover_rate"),
+            turnover_rate_expr.alias("turnover_rate"),
         ])
 
         # ── Step 3: 动量/反转因子 ────────────────────────────────────

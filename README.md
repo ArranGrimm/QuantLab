@@ -2,31 +2,25 @@
 
 QuantLab 是面向 A 股的多策略量化研究仓库，核心目标是把“标签侧看起来有效”的因子探索，推进到可执行口径下的真实回测和组合归因。
 
-当前主线已经收口到 **AMV Bull Pool TopN**：使用 Python/Polars 做因子与 executable-aware 评估，用 Rust `bt-amv-topn` 做 `T+1 open` 真实交易回测，并通过 Canvas/JSON 文档化年度表现、交易归因和 sleeve 互补性。
+当前主线已经收口到 **AMV Bull Pool TopN**：使用 Python/Polars 做因子与 executable-aware 评估，用 Rust `bt-amv-topn` 做 `T+1 open` 真实交易回测，并通过 `scripts/qlab.py` 统一日常导出、回测、对比和归因入口。
 
 ## 当前主线
 
-- 主策略底座: `manual_p2_k0p5_r0_6td`
-  - 修正 A 股手数后，Rust `6td static strict Top3` 净收益 `+170.80%`, MaxDD `15.30%`
-- 主基线替换候选: `P3/K0.5/R0`
-  - Rust `6td static strict Top3` 净收益 `+201.69%`, MaxDD `13.52%`
-  - 优势主要来自少量边际换票，机制偏向更纯的高位突破延续
-- 互补 sleeve 代表: `PB3/CP1/RV0 rolling21 refill`
-  - rolling21 refill Top10 净收益 `+99.62%`, MaxDD `20.70%`
-  - 与 P/K 主线低相关，用于后续 allocation/gating
-- 已降级路线:
-  - P/K/M 动量增强: 标签侧收益强，但真实 Rust 回测未兑现为更好主基线
-  - Direct LTR Top3: executable label 与真实执行口径错配，暂不接交易
-  - B3/TDX、B1、rotation: 作为归档或辅助策略线，不再是当前主线
+- 当前真实口径: Rust `bt-amv-topn` + raw OHLC / raw pre-close 执行；旧 adjusted-execution 指标只作历史参考。
+- Reference baseline: `reference_p2_k0p5_b0_c0_r0`，Raw `6td static strict Top3` 总收益 `+145.10%`, MaxDD `18.97%`。
+- 核心替换候选: `candidate_p3_k0p5_b0_c0_r0`，Raw `6td static strict Top3` 总收益 `+172.37%`, MaxDD `13.53%`。
+- 当前最强静态 challenger: `p3_ctx_sectormix1020_linear_b0p4_sp0p02_medium128_linear_t0p5_mp0p03_rel20_under0`，Raw `6td static strict Top3` 总收益 `+238.54%`, MaxDD `14.03%`。
+- Pullback sleeve 代表: `pullback_p0_k0_pb3_cp1_rv0` + regime gate，Raw `6td rolling21 refill Top10` 总收益 `+80.55%`, MaxDD `11.75%`。
+- 涨停生态 sleeve 仍是 research candidate，`limit-weakgate` 防守改善但还不是 allocation-ready。
 
 ## 研究框架
 
 ```
 Python 研究与导出
-  ├─ 因子计算 / 权重网格 / 全因子扫描
+  ├─ scripts/qlab.py: status / export / backtest / compare / attribution
+  ├─ strategies/amv/: canonical sleeve id、score expression、规则模块
   ├─ executable-aware 评估: D+1 open -> horizon close
-  ├─ 污染归因: close 涨停 / T+1 高开 / 补位表现
-  └─ 信号导出: selected_signals.csv / signal.parquet
+  └─ 信号 artifact: signal.parquet / signal.meta.json
 
 Rust 真实回测
   ├─ bt-core: 账户、费用、涨跌停、交易统计
@@ -34,10 +28,10 @@ Rust 真实回测
   └─ bt-amv-cohort-diagnostic: close-to-close cohort 诊断
 
 归因与可视化
-  ├─ reports/*.json: 结构化实验结果
-  ├─ reports/canvases/*.canvas.tsx: 可视化分析
-  ├─ progress.md: 实验流水账
-  └─ project-status.md: 当前状态看板
+  ├─ reports/canvases/*.canvas.tsx: 少量核心可视化分析
+  ├─ strategies/amv/status.py: 当前 raw ground truth 摘要
+  ├─ CURRENT_STATE.md: 第一阅读入口 / 当前状态看板
+  └─ strategies/archive-index.md: 已归档路线索引
 ```
 
 ## 目录结构
@@ -45,11 +39,16 @@ Rust 真实回测
 ```
 QuantLab/
 ├── scripts/
-│   ├── amv_executable_weight_grid.py      # executable-aware 权重网格
-│   ├── amv_executable_factor_scan.py      # 早期因子 executable 重扫
-│   ├── amv_executable_pullback_grid.py    # pullback combo grid
-│   ├── amv_static_sleeve_signal_export.py # AMV sleeve 信号导出
-│   └── backtest_trade_attribution.py      # 通用 bt-amv-topn 交易归因
+│   └── qlab.py                    # 日常 CLI 入口
+│
+├── strategies/
+│   ├── target-strategy-evolution.md  # 外部对标：博主策略演化
+│   ├── archive-index.md              # 已归档路线索引
+│   └── amv/
+│       ├── attribution.py         # qlab attribution 归因实现
+│       ├── registry.py            # export target / backtest preset / report alias
+│       ├── workflows.py           # qlab native workflow 编排
+│       └── rules/                 # context、PB3 gate、limit weakgate 规则
 │
 ├── backtest-engine/
 │   └── crates/
@@ -63,12 +62,10 @@ QuantLab/
 │
 ├── reports/
 │   └── canvases/                  # 可追踪 Canvas 分析
-├── experiments/                   # 归档实验文档
 ├── utils/                         # Python 数据与因子工具
 ├── notebooks/                     # Marimo 研究入口
-├── .agents/skills/                # 项目级 Agent Skills
-├── progress.md                    # 实验流水账
-└── project-status.md              # 当前状态看板
+├── CURRENT_STATE.md               # 第一阅读入口 / 当前状态看板
+└── AGENTS.md                      # agent 工作规则
 ```
 
 ## 快速开始
@@ -82,11 +79,22 @@ uv sync
 后续 Python 命令统一使用 `uv run`：
 
 ```bash
-uv run python scripts/amv_executable_weight_grid.py
-uv run python scripts/backtest_trade_attribution.py --help
+uv run python scripts/qlab.py status
+uv run python scripts/qlab.py export p3
+uv run python scripts/qlab.py export context
+uv run python scripts/qlab.py backtest artifacts/amv_static_sleeve_signals/<signal_id> --preset 6td-static
+uv run python scripts/qlab.py compare p3 context
 ```
 
 ### Rust 回测
+
+日常优先使用 `qlab backtest`，不再要求手写 Rust config 路径：
+
+```bash
+uv run python scripts/qlab.py backtest artifacts/amv_static_sleeve_signals/<signal_id> --preset 6td-static
+```
+
+底层 Rust 命令仍可用于排障：
 
 ```bash
 cd backtest-engine
@@ -96,36 +104,38 @@ cargo run -p bt-amv-topn --release -- \
   --output-dir ../artifacts/amv_static_sleeve_signals/<signal_id>/backtests/<run_id>
 ```
 
-常用 AMV 配置位于：
+常用 preset 位于 `strategies/amv/registry.py`：
 
 ```
-backtest-engine/crates/amv-topn/config_6td_static_strict_top3_no_stop.toml
-backtest-engine/crates/amv-topn/config_6td_static_refill_top10_no_stop.toml
-backtest-engine/crates/amv-topn/config_6td_rolling21_strict_top3_no_stop.toml
-backtest-engine/crates/amv-topn/config_6td_rolling21_refill_top10_no_stop.toml
+6td-static
+5td-static
+3td-static
+6td-rolling
 ```
 
 ### 交易归因
 
 ```bash
-uv run python scripts/backtest_trade_attribution.py \
+uv run python scripts/qlab.py attribution trade \
   --left-backtest artifacts/.../backtests/<left_run> \
   --right-backtest artifacts/.../backtests/<right_run> \
   --left-label "Ref" \
   --right-label "Candidate" \
-  --out reports/<name>.json
+  --out artifacts/attribution/<name>.json
 ```
 
 ## 文档入口
 
-- `project-status.md`: 当前结论、优先级、主线状态
-- `progress.md`: 按日期倒序的实验流水账
+- `CURRENT_STATE.md`: 第一阅读入口和当前状态看板，记录真实口径、baseline、关键判断、活跃风险和日常命令
+- `AGENTS.md`: agent 工作规则、代码分层、跨设备注意事项
+- `strategies/target-strategy-evolution.md`: 外部对标（博主策略演化）
+- `strategies/archive-index.md`: 已归档探索路线索引
 - `reports/canvases/`: 可视化分析与关键 Canvas
-- `.agents/skills/amv-trade-attribution/SKILL.md`: AMV 回测对比与交易归因工作流
 
 ## 注意事项
 
 - `data/`、`artifacts/`、`results/` 等大文件目录默认被 `.gitignore` 忽略
-- `reports/` 下的关键 JSON 和 Canvas 用于追踪稳定结论
-- `.cursor/` 保持 ignore；需要跨设备追踪的 Agent Skill 放在 `.agents/skills/`
-- 可执行评估优先级高于 close-to-close 标签收益，所有新因子探索都需要关注涨停/高开污染
+- `reports/` 只保留少量核心 Canvas；结构化状态摘要迁入 `strategies/amv/status.py`
+- `.cursor/` 保持 ignore
+- 产品化清理已告一段落，当前重新回到 AMV 探索阶段；新探索仍应复用 `qlab.py` 和 `strategies/amv/`
+- 可交易结论以 Rust raw execution 为准；Python close-to-close 标签收益只作参考

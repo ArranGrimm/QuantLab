@@ -220,12 +220,26 @@ pub struct ReportBundlePaths {
 // ============================================================================
 
 /// 根据股票代码判断涨跌幅限制
-/// 主板 (60/00) → 10%, 创业板 (300/301) → 20%, 科创板 (688/689) → 20%
+/// 主板 (60/00) → 10%, 创业板 (300/301) → 20%, 科创板 (688/689) → 20%, 北交所 (bj./920) → 30%
 pub fn price_limit_pct(code: &str) -> f64 {
     let normalized = code
         .strip_prefix("sz.")
         .or_else(|| code.strip_prefix("sh."))
+        .or_else(|| code.strip_prefix("bj."))
+        .or_else(|| code.strip_prefix("SZ."))
+        .or_else(|| code.strip_prefix("SH."))
+        .or_else(|| code.strip_prefix("BJ."))
         .unwrap_or(code);
+
+    if code.starts_with("bj.")
+        || code.starts_with("BJ.")
+        || normalized.starts_with("920")
+        || normalized.starts_with('4')
+        || normalized.starts_with('8')
+        || normalized.starts_with("92")
+    {
+        return 0.30;
+    }
     if normalized.starts_with("300")
         || normalized.starts_with("301")
         || normalized.starts_with("688")
@@ -813,5 +827,7 @@ mod tests {
 
         assert_eq!(price_limit_pct("300750"), 0.20);
         assert_eq!(price_limit_pct("688981"), 0.20);
+        assert_eq!(price_limit_pct("bj.920045"), 0.30);
+        assert_eq!(price_limit_pct("920045"), 0.30);
     }
 }

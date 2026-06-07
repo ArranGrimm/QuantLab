@@ -2,6 +2,8 @@
 
 本目录负责把 `rpa_capture/shots/seq_*.png` 解析成结构化的 `active_market_value` 数据。
 
+Capture 侧为什么存在、如何在指南针里截图, 见 [`../rpa_capture/README.md`](../rpa_capture/README.md)。
+
 设计上与 `rpa_capture/` 解耦:
 
 - `rpa_capture/`: Windows 端只截图, 不做 OCR
@@ -65,6 +67,28 @@ uv run python rpa_parse/ingest_active_market_value.py \
 ```
 
 活跃市值不是 QMT 数据源, 因此单独维护 `active_market_value.duckdb`。需要和 QMT 行情联表时, 在研究 SQL 里同时 `ATTACH` 两个库。
+
+## 单日人工补录 (Windows / Mac)
+
+Mac OCR 未跑、只差 1~2 个交易日时, 可从指南针 App 手工抄 readout, 直接 upsert DuckDB (**不写 parquet**, 不影响批量 OCR):
+
+手机 App 通常只有 **9 行** (开/高/低/收/幅/量/额/振). **盘 / 率** 是 PC 截图 readout 才有, 可省略; `manual_active_market_value.py` 会用前一日「盘」+ 当日「量」推算「率」. AMV regime 判定不依赖这两项.
+
+模板: `rpa_parse/examples/manual_entry_template.txt`
+
+```bash
+# 查看 AMV 与 TDX 日期差
+uv run python rpa_parse/manual_active_market_value.py --show-gap
+
+# 粘贴 11 行 readout (空行结束)
+uv run python rpa_parse/manual_active_market_value.py
+
+# 或从文件 / 命令行 (可先改 examples/manual_entry_template.txt)
+uv run python rpa_parse/manual_active_market_value.py --text-file rpa_parse/examples/manual_entry_template.txt
+uv run python rpa_parse/manual_active_market_value.py --dry-run --text-file rpa_parse/examples/manual_entry_template.txt
+```
+
+写入行 `source=manual_entry`。日后 Mac OCR + ingest 到同一 `trade_date` 时会自动覆盖为 `rpa_vision_v1`。
 
 ## 输出文件
 
@@ -148,3 +172,20 @@ data/active_market_value/active_market_value_review.csv
 
 脚本先用 macOS Vision 提取文本行, 再用字段名和数字正则解析。
 只要字段名稳定, 后续 OCR 后端细节不会影响表结构。
+
+## 后续工作
+
+- [ ] 全量历史入库后, 抽样人工对账 OCR 字段
+- [ ] 基于 `active_market_value.duckdb` 设计机械化的多/空头 regime 规则, 替代手工 `LOOSE_PERIODS`
+- [ ] 与 AMV 主线 (`strategies/amv/`, `qlab export`) 联调 regime feature 消费路径
+- [ ] 收盘后日更: capture 增量截图 → `--incremental` 解析 → `ingest ... --mode upsert`
+
+长期系统目标 (多策略 + regime 切换) 见 `strategies/target-strategy-evolution.md`; 本目录只负责把活跃市值变成可查询的数据源。
+
+## 风险备忘
+
+| 风险 | 缓解 |
+|---|---|
+| OCR 误识 | `active_market_value_review.csv` + OHLC 范围校验 |
+| 日期跳变 / 重复 | 解析阶段检查; 必要时回到 capture 重抓 |
+| 数据源中断 | 定期备份 `shots/` 和 DuckDB dump |
