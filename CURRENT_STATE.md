@@ -18,24 +18,25 @@
 - 交易执行使用 `raw_ohlc_pre_close`（raw OHLC + raw pre-close）。
 - 旧 adjusted-execution 回测只作为历史参考，不能当当前真实指标。
 
-## 策略指标（raw execution，2026-06-05 Windows TDX 重跑）
+## 策略指标（raw execution，2026-06-07 Mac TDX 重跑）
 
 | 策略 | Return | MaxDD | Trades | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 |
 |------|--------|-------|--------|------|------|------|------|------|------|
-| **trend-p3-medium** (基线) | +178.6% | 18.0% | 280 | +5.4 | +29.7 | +9.4 | +68.4 | +20.7 | -8.2 |
-| **trend-p3** (挑战) | +114.9% | 17.6% | 280 | — | — | — | — | — | — |
-| **pullback-pb3** (互补) | +46.4% | 15.8% | 1075 | — | — | — | — | — | — |
-| **event-firstboard** (研究) | +203.6% | 41.3% | 271 | — | — | — | — | — | — |
+| **trend-p3** | +171.8% | 17.6% | 282 | — | — | — | — | — | — |
+| **trend-p3-medium** (基线) | +165.6% | 19.1% | 282 | — | — | — | — | — | — |
+| **pullback-pb3** (互补) | +44.3% | 15.0% | 1081 | — | — | — | — | — | — |
+| **event-firstboard** (研究) | +205.5% | 36.1% | 268 | — | — | — | — | — | — |
+| **event-firstboard-base** | +119.0% | 42.3% | 320 | — | — | — | — | — | — |
 
-> 注：数据源为 Windows TDX，与 Mac QMT 存在系统性差异但相对排序一致。trend-p3-enhanced = trend-p3-medium（sector 在申万分类下暂未生效）。
+> 注：数据源 Mac TDX（排除北交所）。与 Windows TDX 存在小幅系统性差异但相对排序一致。trend-p3-enhanced = trend-p3-medium（sector 在申万分类下暂未生效）。
 
 ## 当前 Baseline
 
 `trend-p3-medium`（趋势突破 P3 + 中期结构 / 趋势质量）
 
-- Raw execution `6td static strict Top3`，280 笔交易
-- 总收益 `+178.6%`，MaxDD `18.0%`
-- 相对 trend-p3: 总收益 `+63.7pp`
+- Raw execution `6td static strict Top3`，282 笔交易
+- Mac TDX 上 medium 对纯 trend-p3 的增量不成立（+165.6% vs +171.8%），但 Windows TDX 上成立
+- 当前保留为 baseline，待跨设备数据源对齐后重新裁决
 - 规则: medium-trend-quality (linear penalty, p=0.03)
 - trend-p2 已归档，不再研究
 
@@ -75,13 +76,14 @@
 - 当前主线已从 Rotation / B1 / B3 收敛到 AMV Bull Pool TopN。
 - raw execution 没有推翻趋势突破方向，但压低旧 adjusted 口径收益约 25-30pp。
 - pullback-pb3 与 trend 家族低相关，是自然互补 sleeve。
-- 中期结构/趋势质量增强（medium penalty）是当前最强单因子提升，+49.6pp vs raw P3。
+- 中期结构/趋势质量增强（medium penalty）在 QMT 上曾 +49.6pp vs raw P3，但在 Mac TDX 上增量不成立（trend-p3 +171.8% vs medium +165.6%），基线选择需跨设备确认。
 - 行业顺风（sector-tailwind）从东方财富切换到申万分类后，原有参数（p=0.02 linear）不再生效，需要重新调参。
 - 涨停生态有独立 alpha 线索，但 MaxDD 34% 仍需改善。
 
 ## 活跃风险与未决项
 
-- 2026 年：trend 家族全线亏损（-8~-9%），pullback 正收益（+7.2%），event 持平。
+- Mac TDX 与 Windows TDX 存在系统性差异（北交所过滤 + 股票池不同），跨设备 baseline 尚未对齐。
+- 2026 年：trend 家族全线亏损，pullback 和 event 正收益。
 - sector-tailwind 需要针对申万分类重新做参数扫描（当前最优 candidate: `5d/none/bt=0.4/p=0.15` 但 Rust 验证未通过）。
 - pullback-pb3 需要 redo raw-execution allocation 分析。
 - AKShare 已完全移除，行业分类从东方财富 → 申万（Baostock，`utils/baostock_utils.py`）。
@@ -105,15 +107,15 @@
 - 通过 `WorkflowExportConfig.db_source` 切换，下游 pipeline 无感
 - 可解除 QMT 数据更新的跨设备依赖，但仍需更多验证后才切换为默认源
 
-### 架构重构（2026-06-05）
+### 架构重构（2026-06-05 ~ 2026-06-07）
 
-- `strategies/amv/data.py`: MarketConfig + build_market_lazy（reader 生命周期外提，一次 collect）
-- `strategies/amv/factors/__init__.py`: 因子公式唯一真相源 + lazy medium features
-- `strategies/amv/pipeline.py`: ranker 系统一入口（trend/pullback），JSON 配置驱动
-- `strategies/amv/pipeline_event.py`: event 专用管道
-- 删除：workflows.py / signals.py / scoring.py / market.py / rules/
-- 从 22 文件收敛到 ~10 文件，一条 `qlab export` 穿过 4 个文件
-- 内存尚未优化（全量 15 因子 + 128d 特征，约 6.5GB），后续迭代
+- `strategies/amv/hooks.py`: RuleHook 基类 + 3 个 hook（MediumTrendQualityHook / AmvRegimeGateHook / EventWeakgateHook）
+  - 规则从 pipeline 的 if 分支解耦为可插拔 hook，JSON 配置驱动
+  - penalty 合并为单次 `with_columns`，gate 合并为单次 `filter`，零中间副本
+- `strategies/amv/pipeline.py`: ranker 系统一入口，4 阶段流程（lazy → select pushdown → one with_columns → one filter）
+- `strategies/amv/pipeline_event.py`: event 专用管道，合并双数据源为单 lazy chain（内存 10GB → 8GB）
+- 删除：medium_trend_quality.py（内联进 hook）、workflows.py / signals.py / scoring.py / market.py / rules/
+- 因子注册表 `compute_required_factors` 按需计算（trend 只算 4 因子 + 3 中间列，vs 全量 20+）
 
 ## 新增能力 (2026-06-02)
 
