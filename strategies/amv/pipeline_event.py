@@ -21,7 +21,7 @@ from strategies.amv.export import SignalArtifact, write_signal_artifact
 from strategies.amv.factors import calc_amv_core_factors, finite_expr
 from strategies.amv.factors.limit_ecology import (
     LIMIT_TOLERANCE,
-    add_limit_ecology_features,
+    add_limit_ecology_features_lazy,
 )
 from strategies.amv.pipeline import PipelineConfig, _shift_to_execution, _build_backtest_signal_frame, EXPORT_COLUMNS
 from strategies.amv.registry import Strategy
@@ -185,16 +185,14 @@ def export_event_strategy(
         effective_lag_days=config.amv_effective_lag_days,
     )
 
-    # ── Phase 1: Market frame + limit ecology ──
+    # ── Phase 1: Single lazy chain → ONE collect ──
     reader, lf = build_market_lazy(market_cfg)
-    lf = calc_amv_core_factors(lf)
+    lf = calc_amv_core_factors(lf)  # full factor set, same as before
+    lf = add_limit_ecology_features_lazy(lf, tolerance=LIMIT_TOLERANCE)
     market = lf.collect()
     reader.close()
 
-    raw_daily = _load_event_raw_daily(config, end_date)
-    ecology = add_limit_ecology_features(raw_daily, tolerance=LIMIT_TOLERANCE)
-
-    market = market.join(ecology, on=["date", "code"], how="left").with_columns(
+    market = market.with_columns(
         (pl.col("atr_14_pct").rank("average").over("date") / pl.len().over("date")).alias("atr_14_pct_rank_pct"),
         (pl.col("panic_vol_ratio_20d").rank("average").over("date") / pl.len().over("date")).alias("panic_vol_ratio_20d_rank_pct"),
     )
@@ -255,17 +253,3 @@ def export_event_strategy(
     market = market.select(available)
     export = _build_backtest_signal_frame(market, signal_rows)
     return write_signal_artifact(export=export, output_dir=output_dir)
-
-
-def _load_event_raw_daily(config: PipelineConfig, end_date: str) -> pl.DataFrame:
-    """Load raw OHLC (not QFQ) for limit ecology feature computation."""
-    from utils.data_source import daily_reader
-    from utils import get_st_blacklist_pl
-
-    st_list = get_st_blacklist_pl(config.st_snapshot_date)
-    with daily_reader(config.data_source) as reader:
-        raw = (
-            reader.load_raw_ohlc(config.start_date, end_date)
-            .filter(~pl.col("code").is_in(st_list))
-        )
-    return raw

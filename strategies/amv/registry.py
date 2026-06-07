@@ -31,6 +31,7 @@ class Strategy:
     preset: Preset
     rules: tuple[str, ...] = ()
     rule_params: dict[str, Any] = field(default_factory=dict)
+    raw_rules: tuple[dict[str, Any], ...] = ()
     status: str = "research"
     description: str = ""
 
@@ -89,6 +90,7 @@ def load_strategy(name: str) -> Strategy:
     preset = Preset(name=preset_raw["name"], config=preset_raw["config"]) if isinstance(preset_raw, dict) else Preset(name=preset_raw, config="")
 
     rules = tuple(r["id"] for r in config.get("rules", []))
+    raw_rules = tuple(config.get("rules", []))
     rule_params: dict[str, Any] = {}
     for r in config.get("rules", []):
         if r.get("params"):
@@ -102,6 +104,7 @@ def load_strategy(name: str) -> Strategy:
         preset=preset,
         rules=rules,
         rule_params=rule_params,
+        raw_rules=raw_rules,
         status=config["status"],
         description=config.get("description", ""),
     )

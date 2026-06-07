@@ -17,9 +17,6 @@ from strategies.amv.factors.limit_ecology import (
     add_limit_ecology_features,
     load_raw_daily,
 )
-from strategies.amv.factors.medium_trend_quality import (
-    add_medium_trend_features_lazy,
-)
 from strategies.amv.factors.sector_tailwind import (
     build_sector_features,
     build_sector_tailwind_features,
@@ -113,7 +110,6 @@ __all__ = [
     "AMV_BASE_FACTOR_SPECS",
     "LIMIT_TOLERANCE",
     "add_limit_ecology_features",
-    "add_medium_trend_features_lazy",
     "build_sector_features",
     "build_sector_tailwind_features",
     "build_amv_base_factors",

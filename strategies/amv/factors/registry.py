@@ -67,21 +67,20 @@ def _ensure_intermediates(frame: pl.LazyFrame, needed: set[str]) -> pl.LazyFrame
     tier2 = {"panic_vol_ratio_20d", "_atr14", "_ma20", "_high_20d", "_c_min_20", "_c_max_20"}
     exprs2: list[pl.Expr] = []
     if missing & tier2:
-        schema_names = set(frame.collect_schema().names())  # refresh after tier1
-        if "panic_vol_ratio_20d" not in schema_names:
+        if "panic_vol_ratio_20d" in missing:
             exprs2.append(
                 (pl.col("_down_vol_sum_20") / pl.max_horizontal(pl.col("_total_vol_sum_20"), pl.lit(1.0)))
                 .alias("panic_vol_ratio_20d")
             )
-        if "_atr14" not in schema_names:
+        if "_atr14" in missing:
             exprs2.append(pl.col("_tr").rolling_mean(14).over("code").alias("_atr14"))
-        if "_ma20" not in schema_names:
+        if "_ma20" in missing:
             exprs2.append(pl.col("close_adj").rolling_mean(20).over("code").alias("_ma20"))
-        if "_high_20d" not in schema_names:
+        if "_high_20d" in missing:
             exprs2.append(pl.col("high_adj").rolling_max(20).over("code").alias("_high_20d"))
-        if "_c_min_20" not in schema_names:
+        if "_c_min_20" in missing:
             exprs2.append(pl.col("close_adj").rolling_min(20).over("code").alias("_c_min_20"))
-        if "_c_max_20" not in schema_names:
+        if "_c_max_20" in missing:
             exprs2.append(pl.col("close_adj").rolling_max(20).over("code").alias("_c_max_20"))
     if exprs2:
         frame = frame.with_columns(exprs2)

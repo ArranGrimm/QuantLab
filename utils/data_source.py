@@ -152,6 +152,8 @@ class TdxDailyReader:
             WHERE q.date >= '{self.settings.start_date}'
               AND q.close > 0 AND b.close > 0
               AND b.volume > 0
+              AND q.symbol NOT LIKE 'bj%'
+              AND b.symbol NOT LIKE 'bj%'
               {code_sql}
             ORDER BY code, q.date
             """,
@@ -168,6 +170,7 @@ class TdxDailyReader:
             FROM v_stock_bfq
             WHERE date >= ? AND date <= ?
               AND close > 0
+              AND symbol NOT LIKE 'bj%'
             ORDER BY code, date
             """,
             [start_date, end_date],
@@ -184,6 +187,7 @@ class TdxDailyReader:
             FROM v_stock_qfq
             WHERE date >= ?
               AND close > 0
+              AND symbol NOT LIKE 'bj%'
             ORDER BY code, date
             """,
             [start_date],
