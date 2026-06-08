@@ -24,20 +24,32 @@ START_DATE = "2019-01-01"
 END_DATE   = "2026-06-03"
 FORWARD    = 5          # 前向收益天数
 K          = 3000       # 风险厌恶系数（高质量动量用）
-FACTOR_TAG = "terrified_score_20d"
+FACTOR_TAG = "stv_score_20d"
 
 def make_factor_expr() -> tuple[list[list[pl.Expr]], pl.Expr]:
     """返回 (steps, final_factor_expr)。
     steps 是 [[step1_exprs], [step2_exprs], ...]，每个内层 list 对应一次 with_columns。
     """
-    # ── Terrified Score (凸显理论 STR 的简化版，同篇研报 Cell 9) ──
+    # ── STV: Terrified Score 量价变体 (同篇研报 Cell 22-24)
+    # feature: |ret|>=0.1 → |ret|*100; else → turnover_rate
     ret_expr = (pl.col("close_adj") / pl.col("close_adj").shift(1).over("code") - 1.0).alias("_ret")
-    mkt_expr = pl.col("_ret").mean().over("date").alias("_mkt")
-    sigma = (pl.col("_ret") - pl.col("_mkt")).abs() / (pl.col("_ret").abs() + pl.col("_mkt").abs() + 0.1)
-    weighted = sigma * pl.col("_ret")
+    abs_ret = pl.col("_ret").abs()
+    stv_feature = pl.when(abs_ret >= 0.1).then(abs_ret * 100.0).otherwise(pl.col("turnover")).alias("_stv_f")
+    mkt_expr = pl.col("_stv_f").mean().over("date").alias("_mkt")
+    sigma = (pl.col("_stv_f") - pl.col("_mkt")).abs() / (pl.col("_stv_f").abs() + pl.col("_mkt").abs() + 0.1)
+    weighted = sigma * pl.col("_stv_f")
     avg = weighted.rolling_mean(20).over("code")
     std = weighted.rolling_std(20).over("code")
-    return [[ret_expr], [mkt_expr]], ((avg + std) * 0.5).alias("factor")
+    return [[ret_expr], [stv_feature], [mkt_expr]], ((avg + std) * 0.5).alias("factor")
+
+    # ── Terrified Score ──
+    # ret_expr = (pl.col("close_adj") / pl.col("close_adj").shift(1).over("code") - 1.0).alias("_ret")
+    # mkt_expr = pl.col("_ret").mean().over("date").alias("_mkt")
+    # sigma = (pl.col("_ret") - pl.col("_mkt")).abs() / (pl.col("_ret").abs() + pl.col("_mkt").abs() + 0.1)
+    # weighted = sigma * pl.col("_ret")
+    # avg = weighted.rolling_mean(20).over("code")
+    # std = weighted.rolling_std(20).over("code")
+    # return [[ret_expr], [mkt_expr]], ((avg + std) * 0.5).alias("factor")
 
     # ── 高质量动量 ──
     # r_60 = pl.col("close_adj") / pl.col("close_adj").shift(60).over("code") - 1.0

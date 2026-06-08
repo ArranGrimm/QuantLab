@@ -15,6 +15,8 @@
 
 ## 探索中/待跟进
 
+- [ ] **因子探索**（scripts/explore_factor.py）：已验证 Terrified Score（IC -0.085 IR 0.64 ⭐）、高质量动量（IC 0.064 IR 0.33）、MA 收敛 PCF（IC ~0.05）、STV（IC -0.067 IR 0.40）。待测：CGO 处置效应、球队硬币、RSRS gate
+- [ ] QuantsPlaybook 审计报告：reports/quantsplaybook-audit.md，Tier-1 10 个候选因子/策略
 - [ ] ETF 动量轮动：原型 +362% 但回撤 21%、参数敏感、未经 Rust 验证
 - [ ] 上证交叉验证 AMV 牛市真伪（数据已就绪，未分析）
 - [ ] regime 慢退出机制（逻辑成立但样本量小，待更多数据）
