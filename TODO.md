@@ -12,21 +12,23 @@
 - [ ] event-firstboard MaxDD 改善（当前 36.1%，base 为 42.3%）
 - [ ] 补 `qlab results --diff` 的年度归因拆解
 - [ ] 探索循环脚本：grid → Rust → 收集结果 → 结构化反馈
+- [ ] **抽取 top-level factors/**: 从 strategies/amv/factors/ 提升为顶级模块，strategy 和 research 共享
 
 ## 探索中/待跟进
 
-- [ ] **因子探索**（scripts/explore_factor.py）：已验证 Terrified Score（IC -0.085 IR 0.64 ⭐）、高质量动量（IC 0.064 IR 0.33）、MA 收敛 PCF（IC ~0.05）、STV（IC -0.067 IR 0.40）。待测：CGO 处置效应、球队硬币、RSRS gate
-- [ ] QuantsPlaybook 审计报告：reports/quantsplaybook-audit.md，Tier-1 10 个候选因子/策略
+- [ ] **因子探索**（research/explore_factor.py）：已验证 Terrified Score（IC -0.085 IR 0.64 ⭐）、高质量动量（IC 0.064 IR 0.33）、MA 收敛 PCF（IC ~0.05）、STV（IC -0.067 IR 0.40）、CGO（IC -0.052 IR 0.43）
+- [ ] QuantsPlaybook Tier-1 待测：球队硬币、RSRS gate、CSVC 熊牛指标、扩散指标 Breadth
 - [ ] ETF 动量轮动：原型 +362% 但回撤 21%、参数敏感、未经 Rust 验证
 - [ ] 上证交叉验证 AMV 牛市真伪（数据已就绪，未分析）
 - [ ] regime 慢退出机制（逻辑成立但样本量小，待更多数据）
 
 ## 已完成
 
-- [x] factor registry 按需计算：compute_required_factors 替代全量 calc_amv_core_factors（trend 只算 4 因子）
-- [x] Rule Hook 系统：ranker + rules 完全解耦，JSON 配置驱动，pipeline 零 if 分支
-- [x] post-collect 中间副本优化：penalty 合并为单次 with_columns，零中间副本
-- [x] medium_trend_quality.py 内联进 MediumTrendQualityHook
+- [x] 架构重构：22 → ~10 文件，pipeline.py 统一入口，Hook 系统解耦
+- [x] research/ 模块独立：explore_factor.py + factor_ledger.jsonl 因子实验账本
+- [x] QuantsPlaybook 审计：6-agent 并行扫描，Tier-1 10 个候选，report 写入
+- [x] 架构全貌文档：reports/architecture.md
+- [x] pdf skill: pdfplumber 可读取研报 PDF
 - [x] Mac 全量 canonical 回测重跑
 - [x] TDX 数据源 Mac 可用性验证 + 北交所过滤
 - [x] AGENTS.md 精简（228→76 行）
