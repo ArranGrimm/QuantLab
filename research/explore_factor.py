@@ -1,11 +1,15 @@
-"""轻量因子探索脚本 — 改 FACTOR_EXPR → uv run → 看 Rank IC + 分组收益。
+"""轻量因子探索脚本 — 改 FACTOR_TAG + make_factor_expr → uv run → 看 Rank IC + 分组收益。
 
-用法: uv run python scripts/explore_factor.py
+自动记录到 research/factor_ledger.jsonl，避免重复探索。
+
+用法: uv run python research/explore_factor.py
 """
 from __future__ import annotations
 
+import json
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import polars as pl
@@ -13,6 +17,8 @@ from loguru import logger
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+LEDGER_PATH = Path(__file__).resolve().parent / "factor_ledger.jsonl"
 
 from utils.data_source import TdxDailyReader, DataSourceSettings
 
@@ -88,10 +94,73 @@ def make_factor_expr() -> tuple[list[list[pl.Expr]], pl.Expr]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 因子账本
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _read_ledger() -> list[dict]:
+    """读取历史因子实验结果。"""
+    if not LEDGER_PATH.exists():
+        return []
+    entries = []
+    with open(LEDGER_PATH, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+    return entries
+
+
+def _check_history(factor_tag: str) -> None:
+    """检查当前因子是否已有历史记录，打印对比。"""
+    entries = _read_ledger()
+    matches = [e for e in entries if e.get("factor") == factor_tag]
+    if not matches:
+        return
+    latest = matches[-1]  # 最新一条
+    qr = latest.get("quintile_returns")
+    spread = f"{qr[-1] - qr[0]:.4%}" if qr and len(qr) >= 5 else "n/a"
+    print(f"\n  [ledger] 已有 {len(matches)} 条历史记录，最近一次 ({latest['ran_at']}):")
+    print(f"    IC={latest['mean_ic']:.4f}, IR={latest['ic_ir']:.2f}, "
+          f"spread={spread}")
+    print(f"  本次将重新计算并追加新记录。\n")
+
+
+def _write_ledger(
+    factor_tag: str,
+    forward: int,
+    mean_ic: float,
+    std_ic: float | None,
+    ic_ir: float,
+    pos_ratio: float,
+    n_days: int,
+    quintile_returns: list[float] | None,
+) -> None:
+    """追加一条实验结果到账本。"""
+    entry = {
+        "ran_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "factor": factor_tag,
+        "forward_days": forward,
+        "mean_ic": round(mean_ic, 6) if mean_ic is not None else None,
+        "ic_std": round(std_ic, 6) if std_ic is not None else None,
+        "ic_ir": round(ic_ir, 2),
+        "positive_ratio": round(pos_ratio, 4),
+        "n_days": n_days,
+        "quintile_returns": [round(r, 6) for r in quintile_returns] if quintile_returns else None,
+    }
+    with open(LEDGER_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    logger.info(f"实验结果已记录到 {LEDGER_PATH}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 加载 + 计算
 # ═══════════════════════════════════════════════════════════════════════════
 
 def main() -> None:
+    _check_history(FACTOR_TAG)
     t0 = time.perf_counter()
 
     tdx_db = ROOT.parent / "QuantData" / "Ashare" / "tdx.db"
@@ -204,6 +273,11 @@ def main() -> None:
     q1 = grouped.filter(pl.col("_q") == 1)["avg_ret"][0]
     q5 = grouped.filter(pl.col("_q") == 5)["avg_ret"][0]
     print(f"  {'Q5-Q1':>10}  {(q5 - q1)*100:>10.4f}%")
+
+    # ── 记录到因子账本 ──
+    q_returns = [grouped.filter(pl.col("_q") == q)["avg_ret"][0] for q in range(1, 6)]
+    _write_ledger(FACTOR_TAG, FORWARD, mean_ic, std_ic, ic_ir, pos_ratio, ic.height, q_returns)
+
     print(f"\n  耗时: {time.perf_counter() - t0:.1f}s\n")
 
 

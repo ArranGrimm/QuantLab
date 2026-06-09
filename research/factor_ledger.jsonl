@@ -1,0 +1,2 @@
+{"ran_at": "2026-06-09T09:50:17", "factor": "cgo_100d", "forward_days": 5, "mean_ic": -0.051589, "ic_std": 0.118795, "ic_ir": -0.43, "positive_ratio": 0.3255, "n_days": 1693, "quintile_returns": [0.004943, 0.003576, 0.003389, 0.003319, 0.000793]}
+{"ran_at": "2026-06-09T09:51:15", "factor": "cgo_100d", "forward_days": 5, "mean_ic": -0.051589, "ic_std": 0.118795, "ic_ir": -0.43, "positive_ratio": 0.3255, "n_days": 1693, "quintile_returns": [0.004943, 0.003576, 0.003389, 0.003319, 0.000793]}
