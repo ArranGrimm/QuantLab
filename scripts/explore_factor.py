@@ -24,23 +24,34 @@ START_DATE = "2019-01-01"
 END_DATE   = "2026-06-03"
 FORWARD    = 5          # 前向收益天数
 K          = 3000       # 风险厌恶系数（高质量动量用）
-FACTOR_TAG = "stv_score_20d"
+FACTOR_TAG = "cgo_100d"
 
 def make_factor_expr() -> tuple[list[list[pl.Expr]], pl.Expr]:
     """返回 (steps, final_factor_expr)。
     steps 是 [[step1_exprs], [step2_exprs], ...]，每个内层 list 对应一次 with_columns。
     """
+    # ── CGO 资本利得突出量 (纯 Lazy: cumprod + rolling_sum)
+    # RP_t = Σ(turnover_i / G_i × vwap_i) / Σ(turnover_i / G_i)  over 100d
+    # G_i = cumprod(1 - turnover_i), G_T 在分子分母比值中抵消 → 权重比例正确
+    t = (pl.col("turnover") / 100.0).clip(1e-7, 1.0 - 1e-7)  # % → ratio
+    vwap = pl.col("amount") / pl.col("volume")
+    g = (1.0 - t).alias("_g")
+    G = pl.col("_g").cum_prod().over("code").alias("_G")
+    w = (t / pl.col("_G")).alias("_w")
+    rp = ((pl.col("_w") * vwap).rolling_sum(100).over("code")
+          / pl.col("_w").rolling_sum(100).over("code"))
+    return [[g], [G], [w]], ((pl.col("close_adj") / rp - 1.0).alias("factor"))
+
     # ── STV: Terrified Score 量价变体 (同篇研报 Cell 22-24)
-    # feature: |ret|>=0.1 → |ret|*100; else → turnover_rate
-    ret_expr = (pl.col("close_adj") / pl.col("close_adj").shift(1).over("code") - 1.0).alias("_ret")
-    abs_ret = pl.col("_ret").abs()
-    stv_feature = pl.when(abs_ret >= 0.1).then(abs_ret * 100.0).otherwise(pl.col("turnover")).alias("_stv_f")
-    mkt_expr = pl.col("_stv_f").mean().over("date").alias("_mkt")
-    sigma = (pl.col("_stv_f") - pl.col("_mkt")).abs() / (pl.col("_stv_f").abs() + pl.col("_mkt").abs() + 0.1)
-    weighted = sigma * pl.col("_stv_f")
-    avg = weighted.rolling_mean(20).over("code")
-    std = weighted.rolling_std(20).over("code")
-    return [[ret_expr], [stv_feature], [mkt_expr]], ((avg + std) * 0.5).alias("factor")
+    # ret_expr = (pl.col("close_adj") / pl.col("close_adj").shift(1).over("code") - 1.0).alias("_ret")
+    # abs_ret = pl.col("_ret").abs()
+    # stv_feature = pl.when(abs_ret >= 0.1).then(abs_ret * 100.0).otherwise(pl.col("turnover")).alias("_stv_f")
+    # mkt_expr = pl.col("_stv_f").mean().over("date").alias("_mkt")
+    # sigma = (pl.col("_stv_f") - pl.col("_mkt")).abs() / (pl.col("_stv_f").abs() + pl.col("_mkt").abs() + 0.1)
+    # weighted = sigma * pl.col("_stv_f")
+    # avg = weighted.rolling_mean(20).over("code")
+    # std = weighted.rolling_std(20).over("code")
+    # return [[ret_expr], [stv_feature], [mkt_expr]], ((avg + std) * 0.5).alias("factor")
 
     # ── Terrified Score ──
     # ret_expr = (pl.col("close_adj") / pl.col("close_adj").shift(1).over("code") - 1.0).alias("_ret")
