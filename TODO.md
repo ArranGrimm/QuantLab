@@ -2,36 +2,42 @@
 
 ## 马上要做
 
-- [ ] 跨设备 baseline 对齐：Mac TDX vs Windows TDX 数据源差异确认（trend-p3-medium Mac +165.6% vs Windows +178.6%）
-- [ ] event pipeline 内存继续优化（10GB → 8GB，仍有空间）
+- [ ] 跨设备 baseline 对齐：Mac TDX vs Windows TDX 数据源差异确认
 
 ## 近期
 
-- [ ] sector-tailwind 针对申万分类重新调参（当前 penalty=0.02 linear 未生效）
-- [ ] pullback-pb3 raw-execution allocation 分析（当前 +44.3% / 15.0%，与 trend 日相关 0.26）
-- [ ] event-firstboard MaxDD 改善（当前 36.1%，base 为 42.3%）
+- [ ] sector-tailwind 针对申万分类重新调参
+- [ ] pullback-pb3 raw-execution allocation 分析（当前 +42.5% / 15.0%，与 trend 日相关 0.26）
+- [ ] event-firstboard MaxDD 改善（当前 36.1%）
 - [ ] 补 `qlab results --diff` 的年度归因拆解
 - [ ] 探索循环脚本：grid → Rust → 收集结果 → 结构化反馈
-- [ ] **抽取 top-level factors/**: 从 strategies/amv/factors/ 提升为顶级模块，strategy 和 research 共享
+- [ ] Terrified Score (IC -0.085) 接入策略——最强实验因子，值得上 Rust
 
 ## 探索中/待跟进
 
-- [ ] **因子探索**（research/explore_factor.py）：已验证 Terrified Score（IC -0.085 IR 0.64 ⭐）、高质量动量（IC 0.064 IR 0.33）、MA 收敛 PCF（IC ~0.05）、STV（IC -0.067 IR 0.40）、CGO（IC -0.052 IR 0.43）
-- [ ] QuantsPlaybook Tier-1 待测：球队硬币、RSRS gate、CSVC 熊牛指标、扩散指标 Breadth
+- [ ] **因子探索**（research/explore_factor.py）：已验证 6 个实验因子
+- [ ] QuantsPlaybook Tier-1 待测：隔夜-日间网络因子（O(N²) 跳过）、上下影线单独因子（蜡烛上_mean IC -0.031、威廉下_mean IC -0.046）
 - [ ] ETF 动量轮动：原型 +362% 但回撤 21%、参数敏感、未经 Rust 验证
 - [ ] 上证交叉验证 AMV 牛市真伪（数据已就绪，未分析）
 - [ ] regime 慢退出机制（逻辑成立但样本量小，待更多数据）
 
+## 择时 gate 已验证结论（2026-06-10）
+
+- [x] AMV 活跃市值是最好的全市场择时 gate（牛市随机买 20 日月均 +2.3%，t=+2.02）
+- [x] RSRS、Breadth、CSVC 均不如 AMV 适用于全市场选股场景
+- [x] AMV 在趋势年（2022/2024）极其有效，震荡年（2023）反效
+- [x] P3 Top3 选股可以与 AMV 择时互补（2023 择时亏 -1.5% 但选股赚 +16.6%）
+
 ## 已完成
 
-- [x] 架构重构：22 → ~10 文件，pipeline.py 统一入口，Hook 系统解耦
-- [x] research/ 模块独立：explore_factor.py + factor_ledger.jsonl 因子实验账本
-- [x] QuantsPlaybook 审计：6-agent 并行扫描，Tier-1 10 个候选，report 写入
-- [x] 架构全貌文档：reports/architecture.md
-- [x] pdf skill: pdfplumber 可读取研报 PDF
+- [x] 架构重构：Hook 系统 + pipeline 无 if 分支 + projection pushdown
+- [x] factors/ 顶层共享模块 + research/ 探索管线
+- [x] QuantsPlaybook 审计：Tier-1 10 个候选，6 个已测
 - [x] Mac 全量 canonical 回测重跑
 - [x] TDX 数据源 Mac 可用性验证 + 北交所过滤
 - [x] AGENTS.md 精简（228→76 行）
+- [x] trend-p3 升格为 baseline（medium 在 Mac 上不敌纯 P3）
+- [x] explore_regime.py：MC 100 次 × 4 个持有期 × 4 个 gate 扫描
 
 ## 已确认但暂缓
 

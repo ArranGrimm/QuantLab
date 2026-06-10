@@ -28,7 +28,7 @@ uv run python scripts/qlab.py results trend-p3 --diff
 uv run python scripts/qlab.py run trend-p3
 ```
 
-Stable export targets: `trend-p2`, `trend-p3`, `trend-p3-enhanced`, `pullback-pb3`, `event-firstboard`, `event-firstboard-base`.
+Stable export targets: `trend-p3` (baseline), `trend-p3-medium`, `trend-p3-enhanced`, `pullback-pb3`, `event-firstboard`, `event-firstboard-base`. (trend-p2 archived)
 
 ## Naming Convention
 
