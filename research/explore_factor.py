@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 
 LEDGER_PATH = Path(__file__).resolve().parent / "factor_ledger.jsonl"
 
+from factors.registry import FACTOR_REGISTRY, compute_required_factors
 from utils.data_source import TdxDailyReader, DataSourceSettings
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -29,68 +30,23 @@ from utils.data_source import TdxDailyReader, DataSourceSettings
 START_DATE = "2019-01-01"
 END_DATE   = "2026-06-03"
 FORWARD    = 5          # 前向收益天数
-K          = 3000       # 风险厌恶系数（高质量动量用）
 FACTOR_TAG = "cgo_100d"
 
-def make_factor_expr() -> tuple[list[list[pl.Expr]], pl.Expr]:
-    """返回 (steps, final_factor_expr)。
-    steps 是 [[step1_exprs], [step2_exprs], ...]，每个内层 list 对应一次 with_columns。
+# -------- 因子定义 --------
+# 优先从 FACTOR_REGISTRY 读取 → 找不到才走 make_factor_expr()
+# 切换因子只需改 FACTOR_TAG + make_factor_expr() 返回 None
+
+def make_factor_expr() -> tuple[list[list[pl.Expr]], pl.Expr] | None:
+    """返回 (steps, final_factor_expr)。返回 None = 使用 registry。
+    只在 registry 里没有的新因子时写公式。
+    旧公式存档在 git history 和 factor_ledger.jsonl 中。
+
+    示例模板:
+      # steps = [[expr1, expr2], [expr3]]
+      # final = (pl.col("close_adj") / pl.col("close_adj").shift(60).over("code") - 1).alias("factor")
+      # return steps, final
     """
-    # ── CGO 资本利得突出量 (纯 Lazy: cumprod + rolling_sum)
-    # RP_t = Σ(turnover_i / G_i × vwap_i) / Σ(turnover_i / G_i)  over 100d
-    # G_i = cumprod(1 - turnover_i), G_T 在分子分母比值中抵消 → 权重比例正确
-    t = (pl.col("turnover") / 100.0).clip(1e-7, 1.0 - 1e-7)  # % → ratio
-    vwap = pl.col("amount") / pl.col("volume")
-    g = (1.0 - t).alias("_g")
-    G = pl.col("_g").cum_prod().over("code").alias("_G")
-    w = (t / pl.col("_G")).alias("_w")
-    rp = ((pl.col("_w") * vwap).rolling_sum(100).over("code")
-          / pl.col("_w").rolling_sum(100).over("code"))
-    return [[g], [G], [w]], ((pl.col("close_adj") / rp - 1.0).alias("factor"))
-
-    # ── STV: Terrified Score 量价变体 (同篇研报 Cell 22-24)
-    # ret_expr = (pl.col("close_adj") / pl.col("close_adj").shift(1).over("code") - 1.0).alias("_ret")
-    # abs_ret = pl.col("_ret").abs()
-    # stv_feature = pl.when(abs_ret >= 0.1).then(abs_ret * 100.0).otherwise(pl.col("turnover")).alias("_stv_f")
-    # mkt_expr = pl.col("_stv_f").mean().over("date").alias("_mkt")
-    # sigma = (pl.col("_stv_f") - pl.col("_mkt")).abs() / (pl.col("_stv_f").abs() + pl.col("_mkt").abs() + 0.1)
-    # weighted = sigma * pl.col("_stv_f")
-    # avg = weighted.rolling_mean(20).over("code")
-    # std = weighted.rolling_std(20).over("code")
-    # return [[ret_expr], [stv_feature], [mkt_expr]], ((avg + std) * 0.5).alias("factor")
-
-    # ── Terrified Score ──
-    # ret_expr = (pl.col("close_adj") / pl.col("close_adj").shift(1).over("code") - 1.0).alias("_ret")
-    # mkt_expr = pl.col("_ret").mean().over("date").alias("_mkt")
-    # sigma = (pl.col("_ret") - pl.col("_mkt")).abs() / (pl.col("_ret").abs() + pl.col("_mkt").abs() + 0.1)
-    # weighted = sigma * pl.col("_ret")
-    # avg = weighted.rolling_mean(20).over("code")
-    # std = weighted.rolling_std(20).over("code")
-    # return [[ret_expr], [mkt_expr]], ((avg + std) * 0.5).alias("factor")
-
-    # ── 高质量动量 ──
-    # r_60 = pl.col("close_adj") / pl.col("close_adj").shift(60).over("code") - 1.0
-    # sigma_60 = pl.col("close_adj").pct_change().rolling_std(60).over("code")
-    # return [], (r_60 - 3000 * sigma_60.pow(2)).alias("factor")
-
-    # ── 上影线压力 ──
-    # us = pl.col("high_adj") - pl.max_horizontal(pl.col("close_adj"), pl.col("open_adj"))
-    # rng = pl.col("high_adj") - pl.col("low_adj")
-    # return [], (us / pl.max_horizontal(rng, pl.lit(1e-12))).rolling_mean(20).over("code").alias("factor")
-
-    # ── MA 收敛 PCF ──
-    # ma5  = pl.col("close_adj").rolling_mean(5).over("code")
-    # ma10 = pl.col("close_adj").rolling_mean(10).over("code")
-    # ma20 = pl.col("close_adj").rolling_mean(20).over("code")
-    # ma60 = pl.col("close_adj").rolling_mean(60).over("code")
-    # std_ma = pl.sum_horizontal([(ma5 - ma20).abs(), (ma10 - ma20).abs(), (ma60 - ma20).abs()]) / 3.0
-    # return [], (-std_ma).alias("factor")
-
-    # ── 价格位置 ──
-    # return [], ((pl.col("close_adj") - pl.col("close_adj").rolling_min(20).over("code"))
-    #         / pl.max_horizontal(pl.col("close_adj").rolling_max(20).over("code")
-    #                             - pl.col("close_adj").rolling_min(20).over("code"),
-    #                             pl.lit(0.01))).alias("factor")
+    return None  # 默认走 registry
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -167,26 +123,39 @@ def main() -> None:
     ds = DataSourceSettings(provider="tdx", tdx_db=tdx_db, start_date=START_DATE)
     reader = TdxDailyReader(ds)
 
-    steps, factor_expr = make_factor_expr()
+    factor_col = FACTOR_TAG  # registry factors use their own name
 
     lf = reader.load_daily_full().filter(
         pl.col("date").is_between(
             pl.lit(START_DATE).str.strptime(pl.Date, "%Y-%m-%d"),
             pl.lit(END_DATE).str.strptime(pl.Date, "%Y-%m-%d"),
         )
-    ).sort(["code", "date"])
+    )
 
-    for step in steps:
-        lf = lf.with_columns(step)
+    spec = FACTOR_REGISTRY.get(FACTOR_TAG)
+    if spec:
+        # ── registry 因子：一行搞定 ──
+        lf = compute_required_factors(lf, [FACTOR_TAG])
+        print(f"  [registry] {FACTOR_TAG}: {spec['label']} (status={spec.get('status')})")
+    else:
+        # ── 实验因子：make_factor_expr() → 自定义 pipeline ──
+        result = make_factor_expr()
+        if result is None:
+            print(f"  [skip] FACTOR_TAG={FACTOR_TAG!r} not in registry and make_factor_expr() returned None")
+            return
+        steps, final_expr = result
+        for step in steps:
+            lf = lf.with_columns(step)
+        lf = lf.with_columns(final_expr.alias("factor"))
+        factor_col = "factor"
 
-    lf = lf.with_columns([
-        factor_expr,
+    lf = lf.with_columns(
         (pl.col("close_adj").shift(-FORWARD).over("code")
          / pl.col("close_adj") - 1.0).alias(f"_fwd_{FORWARD}d"),
-    ])
+    )
 
     lf = lf.select(["code", "date", "close_adj", "market_cap_100m", "amount",
-                    "factor", f"_fwd_{FORWARD}d"])
+                    factor_col, f"_fwd_{FORWARD}d"])
 
     df = lf.collect()
     reader.close()
@@ -196,11 +165,11 @@ def main() -> None:
 
     # ── Rank IC ──
     ic = (
-        df.filter(pl.col("factor").is_not_null() & pl.col("factor").is_not_nan(),
+        df.filter(pl.col(factor_col).is_not_null() & pl.col(factor_col).is_not_nan(),
                   pl.col(f"_fwd_{FORWARD}d").is_not_null())
         .group_by("date")
         .agg(
-            pl.corr(pl.col("factor").rank("average"),
+            pl.corr(pl.col(factor_col).rank("average"),
                     pl.col(f"_fwd_{FORWARD}d").rank("average")).alias("rank_ic"),
             pl.len().alias("n"),
         )
@@ -243,7 +212,7 @@ def main() -> None:
 
     # ── 分组收益 ──
     valid = df.filter(
-        pl.col("factor").is_not_null() & pl.col("factor").is_not_nan(),
+        pl.col(factor_col).is_not_null() & pl.col(factor_col).is_not_nan(),
         pl.col(f"_fwd_{FORWARD}d").is_not_null(),
     )
     if valid.height == 0:
@@ -253,7 +222,7 @@ def main() -> None:
     grouped = (
         valid
         .with_columns(
-            (pl.col("factor").rank("average").over("date")
+            (pl.col(factor_col).rank("average").over("date")
              / pl.len().over("date") * 5).ceil().cast(pl.Int32).alias("_q"),
         )
         .group_by("_q")

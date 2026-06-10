@@ -162,7 +162,7 @@ def build_amv_base_factors(frame: pl.LazyFrame, required_factors: list[str] | No
         required_factors: 需要的因子名列表；None 时计算全部（兼容旧流程）
     """
     if required_factors is not None:
-        from strategies.amv.factors.registry import compute_required_factors
+        from factors.registry import compute_required_factors
         return compute_required_factors(frame, required_factors)
 
     return calc_amv_core_factors(frame)

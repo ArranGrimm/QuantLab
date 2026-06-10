@@ -25,7 +25,7 @@ import polars as pl
 from strategies.amv.data import MarketConfig, build_market_lazy, resolve_end_date
 from strategies.amv.export import SignalArtifact, write_signal_artifact
 from strategies.amv.factors import ranker_score_expr, ranker_required_columns, finite_expr
-from strategies.amv.factors.registry import compute_required_factors
+from factors.registry import compute_required_factors
 from strategies.amv.hooks import RuleHook, resolve_hooks
 from strategies.amv.registry import Strategy
 from utils.data_source import DataSourceSettings, resolve_data_source
