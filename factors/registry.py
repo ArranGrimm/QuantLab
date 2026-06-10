@@ -49,6 +49,18 @@ def _ensure_intermediates(frame: pl.LazyFrame, needed: set[str]) -> pl.LazyFrame
         "_cgo_G": {"_cgo_g"},
         "_cgo_w": {"_cgo_G"},
         "_cgo_rp": {"_cgo_w"},
+        "_qm_sigma_60d": {"_ret"},
+        "_terr_mkt": {"_ret"},
+        "_terr_sigma": {"_terr_mkt"},
+        "_terr_weighted": {"_terr_sigma"},
+        "_terr_avg_20d": {"_terr_weighted"},
+        "_terr_std_20d": {"_terr_weighted"},
+        "_stv_f": {"_ret"},
+        "_stv_mkt": {"_stv_f"},
+        "_stv_sigma": {"_stv_mkt"},
+        "_stv_weighted": {"_stv_sigma"},
+        "_stv_avg_20d": {"_stv_weighted"},
+        "_stv_std_20d": {"_stv_weighted"},
     }
     changed = True
     while changed:
@@ -109,6 +121,80 @@ def _ensure_intermediates(frame: pl.LazyFrame, needed: set[str]) -> pl.LazyFrame
     if exprs2b:
         frame = frame.with_columns(exprs2b)
 
+    # ── Terrified Score chain: _terr_mkt → _terr_sigma → _terr_weighted → rolling ──
+    _terr_cols = {"_terr_mkt", "_terr_sigma", "_terr_weighted", "_terr_avg_20d", "_terr_std_20d"}
+    if missing & _terr_cols:
+        frame = _build_terrified_chain(frame, missing)
+
+    # ── STV chain: _stv_f → _stv_mkt → _stv_sigma → _stv_weighted → rolling ──
+    _stv_cols = {"_stv_f", "_stv_mkt", "_stv_sigma", "_stv_weighted", "_stv_avg_20d", "_stv_std_20d"}
+    if missing & _stv_cols:
+        frame = _build_stv_chain(frame, missing)
+
+    return frame
+
+
+def _build_terrified_chain(
+    frame: pl.LazyFrame, missing: set[str]
+) -> pl.LazyFrame:
+    """Terrified Score intermediates, each in its own with_columns."""
+    if "_terr_mkt" in missing:
+        frame = frame.with_columns(
+            pl.col("_ret").mean().over("date").alias("_terr_mkt")
+        )
+    if "_terr_sigma" in missing:
+        frame = frame.with_columns(
+            ((pl.col("_ret") - pl.col("_terr_mkt")).abs()
+             / (pl.col("_ret").abs() + pl.col("_terr_mkt").abs() + 0.1))
+            .alias("_terr_sigma")
+        )
+    if "_terr_weighted" in missing:
+        frame = frame.with_columns(
+            (pl.col("_terr_sigma") * pl.col("_ret")).alias("_terr_weighted")
+        )
+    if "_terr_avg_20d" in missing:
+        frame = frame.with_columns(
+            pl.col("_terr_weighted").rolling_mean(20).over("code").alias("_terr_avg_20d")
+        )
+    if "_terr_std_20d" in missing:
+        frame = frame.with_columns(
+            pl.col("_terr_weighted").rolling_std(20).over("code").alias("_terr_std_20d")
+        )
+    return frame
+
+
+def _build_stv_chain(
+    frame: pl.LazyFrame, missing: set[str]
+) -> pl.LazyFrame:
+    """STV intermediates, each in its own with_columns."""
+    if "_stv_f" in missing:
+        abs_ret = pl.col("_ret").abs()
+        frame = frame.with_columns(
+            pl.when(abs_ret >= 0.1).then(abs_ret * 100.0)
+            .otherwise(pl.col("turnover")).alias("_stv_f")
+        )
+    if "_stv_mkt" in missing:
+        frame = frame.with_columns(
+            pl.col("_stv_f").mean().over("date").alias("_stv_mkt")
+        )
+    if "_stv_sigma" in missing:
+        frame = frame.with_columns(
+            ((pl.col("_stv_f") - pl.col("_stv_mkt")).abs()
+             / (pl.col("_stv_f").abs() + pl.col("_stv_mkt").abs() + 0.1))
+            .alias("_stv_sigma")
+        )
+    if "_stv_weighted" in missing:
+        frame = frame.with_columns(
+            (pl.col("_stv_sigma") * pl.col("_stv_f")).alias("_stv_weighted")
+        )
+    if "_stv_avg_20d" in missing:
+        frame = frame.with_columns(
+            pl.col("_stv_weighted").rolling_mean(20).over("code").alias("_stv_avg_20d")
+        )
+    if "_stv_std_20d" in missing:
+        frame = frame.with_columns(
+            pl.col("_stv_weighted").rolling_std(20).over("code").alias("_stv_std_20d")
+        )
     return frame
 
 
@@ -118,6 +204,7 @@ def _build_tier1a(
     """Tier 1a: derivations from raw market columns only."""
     cols = {
         "_pc", "ret_5d", "ret_20d", "turnover_rate", "_tp_v", "_cgo_g",
+        "_qm_ret_60d",
     }
     exprs: list[pl.Expr] = []
     if not (missing & cols):
@@ -152,24 +239,37 @@ def _build_tier1a(
                 .fill_nan(0.0).alias("turnover_rate")
             )
     if "_cgo_g" in missing:
-        t = (pl.col("turnover") / 100.0).clip(1e-7, 1.0 - 1e-7)  # % → ratio
+        t = (pl.col("turnover") / 100.0).clip(1e-7, 1.0 - 1e-7)
         exprs.append((1.0 - t).alias("_cgo_g"))
+    if "_qm_ret_60d" in missing:
+        exprs.append(
+            (pl.col("close_adj") / pl.col("close_adj").shift(60).over("code") - 1.0)
+            .alias("_qm_ret_60d")
+        )
     return cols, exprs
 
 
 def _build_tier2a(missing: set[str]) -> tuple[set[str], list[pl.Expr]]:
     """Tier 2a: rolling/ewm aggregates."""
     cols = {
-        "_ma20", "_high_20d", "_c_min_20", "_c_max_20",
+        "_ma5", "_ma10", "_ma20", "_ma60",
+        "_high_20d", "_c_min_20", "_c_max_20",
         "_atr14", "_down_vol_sum_20", "_total_vol_sum_20",
         "_ewm_pv_20", "_ewm_v_20", "_cgo_rp",
+        "_qm_sigma_60d",
     }
     exprs: list[pl.Expr] = []
     if not (missing & cols):
         return cols, exprs
 
+    if "_ma5" in missing:
+        exprs.append(pl.col("close_adj").rolling_mean(5).over("code").alias("_ma5"))
+    if "_ma10" in missing:
+        exprs.append(pl.col("close_adj").rolling_mean(10).over("code").alias("_ma10"))
     if "_ma20" in missing:
         exprs.append(pl.col("close_adj").rolling_mean(20).over("code").alias("_ma20"))
+    if "_ma60" in missing:
+        exprs.append(pl.col("close_adj").rolling_mean(60).over("code").alias("_ma60"))
     if "_high_20d" in missing:
         exprs.append(pl.col("high_adj").rolling_max(20).over("code").alias("_high_20d"))
     if "_c_min_20" in missing:
@@ -194,6 +294,10 @@ def _build_tier2a(missing: set[str]) -> tuple[set[str], list[pl.Expr]]:
         exprs.append(
             ((pl.col("_cgo_w") * vwap).rolling_sum(100).over("code")
              / pl.col("_cgo_w").rolling_sum(100).over("code")).alias("_cgo_rp")
+        )
+    if "_qm_sigma_60d" in missing:
+        exprs.append(
+            pl.col("_ret").rolling_std(60).over("code").alias("_qm_sigma_60d")
         )
     return cols, exprs
 
@@ -321,6 +425,43 @@ FACTOR_REGISTRY: dict[str, dict] = {
         "requires": {"_cgo_rp"},
         "expr": pl.col("close_adj") / pl.col("_cgo_rp") - 1.0,
         "note": "IC=-0.052 IR=-0.43, 低CGO反转效应",
+    },
+    "terrified_score": {
+        "label": "Terrified Score (原始版)",
+        "family": "reversal",
+        "status": "experimental",
+        "requires": {"_terr_avg_20d", "_terr_std_20d"},
+        "expr": (pl.col("_terr_avg_20d") + pl.col("_terr_std_20d")) * 0.5,
+        "note": "IC=-0.085 IR=-0.64 ⭐ 最强IC",
+    },
+    "quality_momentum": {
+        "label": "高质量动量 (r_60 - K×σ²)",
+        "family": "momentum",
+        "status": "experimental",
+        "requires": {"_qm_ret_60d", "_qm_sigma_60d"},
+        "expr": pl.col("_qm_ret_60d")
+                - 3000.0 * pl.col("_qm_sigma_60d").pow(2),
+        "note": "IC=0.064 IR=0.33, 风险调整动量，与市值相关仅0.085",
+    },
+    "ma_convergence_pcf": {
+        "label": "MA 收敛 PCF (多周期均线收敛度)",
+        "family": "trend",
+        "status": "experimental",
+        "requires": {"_ma5", "_ma10", "_ma20", "_ma60"},
+        "expr": -(
+            (pl.col("_ma5") - pl.col("_ma20")).abs()
+            + (pl.col("_ma10") - pl.col("_ma20")).abs()
+            + (pl.col("_ma60") - pl.col("_ma20")).abs()
+        ) / 3.0,
+        "note": "IC~0.05, 突破前兆识别，高PCF+上升趋势=蓄力阶段",
+    },
+    "stv_score_20d": {
+        "label": "STV Terrified Score 量价变体",
+        "family": "reversal",
+        "status": "experimental",
+        "requires": {"_stv_avg_20d", "_stv_std_20d"},
+        "expr": (pl.col("_stv_avg_20d") + pl.col("_stv_std_20d")) * 0.5,
+        "note": "IC=-0.067 IR=-0.40, 凸显反转",
     },
 }
 
