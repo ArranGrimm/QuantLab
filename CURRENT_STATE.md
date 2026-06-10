@@ -76,7 +76,8 @@
 - **AMV 活跃市值牛熊识别本身就是 alpha**：牛市中随机买 5 只拿 20 天月均 +2.3%（t=+2.02），比全年无脑买多赚 +1.4%。P3 Top3 选股在此基础上进一步做截面分化（2023 年 AMV 择时亏 -1.5% 但 P3 选股赚 +16.6%）。
 - 经典择时指标（RSRS、Breadth、CSVC）均不如 AMV 适用于全市场选股场景。
 - pullback-pb3 与 trend 家族低相关，是自然互补 sleeve。
-- 中期结构/趋势质量增强（medium penalty）在 Mac TDX 上增量不成立，基线从 medium 降为纯 P3。
+- 中期结构/趋势质量增强（medium penalty）在 Mac TDX 上增量不成立。
+- Terrified Score（IC -0.085 IR -0.64，最强实验因子）作为选股因子接入 trend 后全部跑输 baseline（P1/K0.5/TF0.5 +84% vs P3 +171%）。IC ≠ 可交易收益。
 - 行业顺风（sector-tailwind）从东方财富切换到申万分类后，原有参数不生效，需重新调参。
 
 ## 活跃风险与未决项
@@ -108,8 +109,9 @@
 
 ### 研究工具（2026-06-10）
 
-- `research/explore_factor.py`：因子截面 IC 探索（改 FACTOR_TAG → 跑 → 看 IC/IR），自动记录 `factor_ledger.jsonl`。支持 registry 因子 + make_factor_expr() 自定义双路径
-- `research/explore_regime.py`：择时 gate 探索（B1 alpha proof 方法——随机买 vs 择时买），蒙特卡洛 100 次采样，多持有期扫描。已验证 AMV > RSRS > Breadth > CSVC
+- `research/explore_factor.py`：因子截面 IC 探索（改 FACTOR_TAG → 跑 → 看 IC/IR），自动记录 `factor_ledger.jsonl`
+- `research/explore_regime.py`：择时 gate 探索（B1 alpha proof 方法），蒙特卡洛 100 次采样，多持有期扫描。已验证 AMV > RSRS > Breadth > CSVC
+- `research/scan_weights.py`：权重网格扫描（批量生成策略 → export + Rust backtest → 收集结果），支持自定义 param grid
 - `QuantLab-0.1.0-alpha/`：历史 alpha 版本，保留完整的 B1/B3/Rotation 探索脚本和结论
 
 ### 因子发现管线

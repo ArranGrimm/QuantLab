@@ -1,0 +1,17 @@
+{
+  "name": "reversal-terrified",
+  "family": "reversal",
+  "label": "反转 Terrified Score",
+  "description": "Terrified Score 反转因子（IC=-0.085 IR=-0.64）+ STV 量价变体（S=0 默认只用 Terrified）。",
+  "status": "research",
+  "preset": {
+    "name": "6td-static",
+    "config": "backtest-engine/crates/amv-topn/config_6td_static_strict_top3_no_stop.toml"
+  },
+  "ranker": {
+    "type": "components",
+    "template": "reversal",
+    "params": { "T": 1.0, "S": 0.0 }
+  },
+  "rules": []
+}

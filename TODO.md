@@ -11,7 +11,7 @@
 - [ ] event-firstboard MaxDD 改善（当前 36.1%）
 - [ ] 补 `qlab results --diff` 的年度归因拆解
 - [ ] 探索循环脚本：grid → Rust → 收集结果 → 结构化反馈
-- [ ] Terrified Score (IC -0.085) 接入策略——最强实验因子，值得上 Rust
+- [x] Terrified Score 接入策略验证：36 组合权重扫描全部跑输 trend-p3 baseline（best +84% vs +171%）
 
 ## 探索中/待跟进
 

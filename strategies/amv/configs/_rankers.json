@@ -10,6 +10,18 @@
     ],
     "default_params": { "P": 2.0, "K": 0.5 }
   },
+  "trend-terrified": {
+    "label": "趋势突破 + Terrified 确认",
+    "group": "canonical",
+    "components": [
+      { "factor": "price_pos_20d", "direction": "higher", "weight": "{P}" },
+      { "factor": "close_to_high_20d", "direction": "lower", "weight": "{P}" },
+      { "factor": "KLEN", "direction": "lower", "weight": "{K}" },
+      { "factor": "KMID2", "direction": "higher", "weight": "{K}" },
+      { "factor": "terrified_score", "direction": "lower", "weight": "{TF}" }
+    ],
+    "default_params": { "P": 2.0, "K": 0.5, "TF": 0.5 }
+  },
   "pullback": {
     "label": "回调反弹 PB/CP/RV",
     "group": "pullback",
@@ -20,5 +32,14 @@
       { "factor": "intraday_pos", "direction": "lower", "weight": "{CP}" }
     ],
     "default_params": { "PB": 3.0, "CP": 1.0 }
+  },
+  "reversal": {
+    "label": "反转 Terrified Score",
+    "group": "reversal",
+    "components": [
+      { "factor": "terrified_score", "direction": "lower", "weight": "{T}" },
+      { "factor": "stv_score_20d", "direction": "lower", "weight": "{S}" }
+    ],
+    "default_params": { "T": 1.0, "S": 0.0 }
   }
 }

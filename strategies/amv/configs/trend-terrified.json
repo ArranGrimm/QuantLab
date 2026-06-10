@@ -1,0 +1,17 @@
+{
+  "name": "trend-terrified",
+  "family": "trend",
+  "label": "趋势突破 P3 + Terrified 确认",
+  "description": "趋势突破 P3 + Terrified Score 趋势确认。Terrified 低分=市场共识强=趋势有效，高分=分歧大=降权。",
+  "status": "research",
+  "preset": {
+    "name": "6td-static",
+    "config": "backtest-engine/crates/amv-topn/config_6td_static_strict_top3_no_stop.toml"
+  },
+  "ranker": {
+    "type": "components",
+    "template": "trend-terrified",
+    "params": { "P": 3.0, "K": 0.5, "TF": 0.5 }
+  },
+  "rules": []
+}
