@@ -61,6 +61,25 @@ def _ensure_intermediates(frame: pl.LazyFrame, needed: set[str]) -> pl.LazyFrame
         "_stv_weighted": {"_stv_sigma"},
         "_stv_avg_20d": {"_stv_weighted"},
         "_stv_std_20d": {"_stv_weighted"},
+        "_cu_ma5": {"_cu_shadow"},
+        "_wl_ma5": {"_wl_shadow"},
+        "_cu_norm": {"_cu_ma5"},
+        "_wl_norm": {"_wl_ma5"},
+        "_cu_factor": {"_cu_norm"},
+        "_wl_factor": {"_wl_norm"},
+        "_ct_overnight_ret": {"_pc"},
+        "_ct_ide_rm": {"_ret"}, "_ct_ide_rs": {"_ret"},
+        "_ct_ida_rm": {"_ct_intraday_ret"}, "_ct_ida_rs": {"_ct_intraday_ret"},
+        "_ct_on_rm": {"_ct_overnight_ret"}, "_ct_on_rs": {"_ct_overnight_ret"},
+        "_ct_ide_rv": {"_ct_ide_rm", "_ct_ide_rs"},
+        "_ct_ida_rv": {"_ct_ida_rm", "_ct_ida_rs"},
+        "_ct_on_rv": {"_ct_on_rm", "_ct_on_rs"},
+        "_ct_ide_tr": {"_ct_turnover_diff"},
+        "_ct_ida_tr": {"_ct_turnover_diff", "_ct_intraday_ret"},
+        "_ct_on_tr": {"_ct_turnover_diff", "_ct_overnight_ret"},
+        "_ct_ide_rev": {"_ct_ide_rv", "_ct_ide_tr"},
+        "_ct_ida_rev": {"_ct_ida_rv", "_ct_ida_tr"},
+        "_ct_on_rev": {"_ct_on_rv", "_ct_on_tr"},
     }
     changed = True
     while changed:
@@ -131,6 +150,147 @@ def _ensure_intermediates(frame: pl.LazyFrame, needed: set[str]) -> pl.LazyFrame
     if missing & _stv_cols:
         frame = _build_stv_chain(frame, missing)
 
+    # ── UBL chain: candle_upper norm + williams_lower norm → rolling means ──
+    _ubl_cols = {"_cu_shadow", "_wl_shadow", "_cu_ma5", "_wl_ma5",
+                 "_cu_norm", "_wl_norm", "_cu_factor", "_wl_factor"}
+    if missing & _ubl_cols:
+        frame = _build_ubl_chain(frame, missing)
+
+    # ── CoinTeam chain: 3 return dims × 2 reverse types → 6 sub-factors → 3 revise → sum ──
+    _ct_cols = {
+        "_ct_intraday_ret", "_ct_overnight_ret",
+        "_ct_turnover_diff",
+        "_ct_ide_rv", "_ct_ide_rm", "_ct_ide_rs",  # interday: vol reverse, mean, std
+        "_ct_ida_rv", "_ct_ida_rm", "_ct_ida_rs",  # intraday
+        "_ct_on_rv",  "_ct_on_rm",  "_ct_on_rs",   # overnight
+        "_ct_ide_tr", "_ct_ida_tr", "_ct_on_tr",    # turnover reverse
+        "_ct_ide_rev", "_ct_ida_rev", "_ct_on_rev", # revise = (vol+tr)/2
+    }
+    if missing & _ct_cols:
+        frame = _build_cointeam_chain(frame, missing)
+
+    return frame
+
+
+def _build_cointeam_chain(
+    frame: pl.LazyFrame, missing: set[str]
+) -> pl.LazyFrame:
+    """CoinTeam factor: 3 return dimensions with volatility + turnover reverse.
+
+    coin_team = revise_interday + revise_intraday + revise_overnight
+    revise_TYPE = (vol_rev + turn_rev) / 2
+    """
+    W = 20
+    _ct_interday = pl.col("_ret")  # already exists
+
+    # ── Step 1: return types ──
+    if "_ct_intraday_ret" in missing:
+        frame = frame.with_columns(
+            (pl.col("close_adj") / pl.col("open_adj") - 1.0).alias("_ct_intraday_ret")
+        )
+    if "_ct_overnight_ret" in missing:
+        frame = frame.with_columns(
+            (pl.col("open_adj") / pl.col("_pc") - 1.0).alias("_ct_overnight_ret")
+        )
+
+    # ── Step 2: rolling stats for volatility reverse ──
+    _ct_roll_ret = {"_ct_ide_rm", "_ct_ide_rs", "_ct_ida_rm", "_ct_ida_rs",
+                     "_ct_on_rm", "_ct_on_rs"}
+    if missing & _ct_roll_ret:
+        if "_ct_ide_rm" in missing:
+            frame = frame.with_columns(
+                _ct_interday.rolling_mean(W).over("code").alias("_ct_ide_rm")
+            )
+        if "_ct_ide_rs" in missing:
+            frame = frame.with_columns(
+                _ct_interday.rolling_std(W).over("code").alias("_ct_ide_rs")
+            )
+        if "_ct_ida_rm" in missing:
+            frame = frame.with_columns(
+                pl.col("_ct_intraday_ret").rolling_mean(W).over("code").alias("_ct_ida_rm")
+            )
+        if "_ct_ida_rs" in missing:
+            frame = frame.with_columns(
+                pl.col("_ct_intraday_ret").rolling_std(W).over("code").alias("_ct_ida_rs")
+            )
+        if "_ct_on_rm" in missing:
+            frame = frame.with_columns(
+                pl.col("_ct_overnight_ret").rolling_mean(W).over("code").alias("_ct_on_rm")
+            )
+        if "_ct_on_rs" in missing:
+            frame = frame.with_columns(
+                pl.col("_ct_overnight_ret").rolling_std(W).over("code").alias("_ct_on_rs")
+            )
+
+    # ── Step 3: turnover diff for turnover reverse ──
+    if "_ct_turnover_diff" in missing:
+        frame = frame.with_columns(
+            (pl.col("turnover") - pl.col("turnover").shift(1).over("code"))
+            .alias("_ct_turnover_diff")
+        )
+
+    # ── Step 4: volatility reverse = mean_ret * sign(std < cross_mean(std)) ──
+    _ct_vol_rev = {"_ct_ide_rv", "_ct_ida_rv", "_ct_on_rv"}
+    if missing & _ct_vol_rev:
+        if "_ct_ide_rv" in missing:
+            frame = frame.with_columns(
+                (pl.col("_ct_ide_rm")
+                 * (pl.col("_ct_ide_rs") - pl.col("_ct_ide_rs").mean().over("date")).sign())
+                .alias("_ct_ide_rv")
+            )
+        if "_ct_ida_rv" in missing:
+            frame = frame.with_columns(
+                (pl.col("_ct_ida_rm")
+                 * (pl.col("_ct_ida_rs") - pl.col("_ct_ida_rs").mean().over("date")).sign())
+                .alias("_ct_ida_rv")
+            )
+        if "_ct_on_rv" in missing:
+            frame = frame.with_columns(
+                (pl.col("_ct_on_rm")
+                 * (pl.col("_ct_on_rs") - pl.col("_ct_on_rs").mean().over("date")).sign())
+                .alias("_ct_on_rv")
+            )
+
+    # ── Step 5: turnover reverse = mean(ret * flip, 20) ──
+    _ct_turn_rev = {"_ct_ide_tr", "_ct_ida_tr", "_ct_on_tr"}
+    if missing & _ct_turn_rev:
+        if "_ct_ide_tr" in missing:
+            frame = frame.with_columns(
+                (_ct_interday
+                 * (pl.col("_ct_turnover_diff")
+                    - pl.col("_ct_turnover_diff").mean().over("date")).sign())
+                .rolling_mean(W).over("code").alias("_ct_ide_tr")
+            )
+        if "_ct_ida_tr" in missing:
+            frame = frame.with_columns(
+                (pl.col("_ct_intraday_ret")
+                 * (pl.col("_ct_turnover_diff")
+                    - pl.col("_ct_turnover_diff").mean().over("date")).sign())
+                .rolling_mean(W).over("code").alias("_ct_ida_tr")
+            )
+        if "_ct_on_tr" in missing:
+            frame = frame.with_columns(
+                (pl.col("_ct_overnight_ret")
+                 * (pl.col("_ct_turnover_diff")
+                    - pl.col("_ct_turnover_diff").mean().over("date")).sign())
+                .rolling_mean(W).over("code").alias("_ct_on_tr")
+            )
+
+    # ── Step 6: revise = (vol_rev + turn_rev) / 2 ──
+    _ct_revise = {"_ct_ide_rev", "_ct_ida_rev", "_ct_on_rev"}
+    if missing & _ct_revise:
+        if "_ct_ide_rev" in missing:
+            frame = frame.with_columns(
+                ((pl.col("_ct_ide_rv") + pl.col("_ct_ide_tr")) * 0.5).alias("_ct_ide_rev")
+            )
+        if "_ct_ida_rev" in missing:
+            frame = frame.with_columns(
+                ((pl.col("_ct_ida_rv") + pl.col("_ct_ida_tr")) * 0.5).alias("_ct_ida_rev")
+            )
+        if "_ct_on_rev" in missing:
+            frame = frame.with_columns(
+                ((pl.col("_ct_on_rv") + pl.col("_ct_on_tr")) * 0.5).alias("_ct_on_rev")
+            )
     return frame
 
 
@@ -194,6 +354,53 @@ def _build_stv_chain(
     if "_stv_std_20d" in missing:
         frame = frame.with_columns(
             pl.col("_stv_weighted").rolling_std(20).over("code").alias("_stv_std_20d")
+        )
+    return frame
+
+
+def _build_ubl_chain(
+    frame: pl.LazyFrame, missing: set[str]
+) -> pl.LazyFrame:
+    """UBL: candle_upper_mean rank + williams_lower_mean rank."""
+    if "_cu_shadow" in missing:
+        frame = frame.with_columns(
+            (pl.col("high_adj")
+             - pl.max_horizontal(pl.col("close_adj"), pl.col("open_adj")))
+            .alias("_cu_shadow")
+        )
+    if "_wl_shadow" in missing:
+        frame = frame.with_columns(
+            (pl.col("close_adj") - pl.col("low_adj")).alias("_wl_shadow")
+        )
+    if "_cu_ma5" in missing:
+        frame = frame.with_columns(
+            pl.col("_cu_shadow").rolling_mean(5).over("code").shift(1)
+            .alias("_cu_ma5")
+        )
+    if "_wl_ma5" in missing:
+        frame = frame.with_columns(
+            pl.col("_wl_shadow").rolling_mean(5).over("code").shift(1)
+            .alias("_wl_ma5")
+        )
+    if "_cu_norm" in missing:
+        frame = frame.with_columns(
+            (pl.col("_cu_shadow")
+             / pl.max_horizontal(pl.col("_cu_ma5"), pl.lit(1e-12)))
+            .alias("_cu_norm")
+        )
+    if "_wl_norm" in missing:
+        frame = frame.with_columns(
+            (pl.col("_wl_shadow")
+             / pl.max_horizontal(pl.col("_wl_ma5"), pl.lit(1e-12)))
+            .alias("_wl_norm")
+        )
+    if "_cu_factor" in missing:
+        frame = frame.with_columns(
+            pl.col("_cu_norm").rolling_mean(20).over("code").alias("_cu_factor")
+        )
+    if "_wl_factor" in missing:
+        frame = frame.with_columns(
+            pl.col("_wl_norm").rolling_mean(20).over("code").alias("_wl_factor")
         )
     return frame
 
@@ -462,6 +669,25 @@ FACTOR_REGISTRY: dict[str, dict] = {
         "requires": {"_stv_avg_20d", "_stv_std_20d"},
         "expr": (pl.col("_stv_avg_20d") + pl.col("_stv_std_20d")) * 0.5,
         "note": "IC=-0.067 IR=-0.40, 凸显反转",
+    },
+    "ubl": {
+        "label": "UBL 上下影线综合因子 (蜡烛上_mean+威廉下_mean)",
+        "family": "shadow",
+        "status": "experimental",
+        "requires": {"_cu_factor", "_wl_factor"},
+        "expr": (
+            pl.col("_cu_factor").rank("average").over("date") / pl.len().over("date")
+            + pl.col("_wl_factor").rank("average").over("date") / pl.len().over("date")
+        ),
+        "note": "IC=-0.046 IR=-0.54, 东吴蜡烛图+威廉指标综合, 日频",
+    },
+    "coin_team": {
+        "label": "球队硬币因子 (方正证券动量效应识别)",
+        "family": "behavioral",
+        "status": "experimental",
+        "requires": {"_ct_ide_rev", "_ct_ida_rev", "_ct_on_rev"},
+        "expr": pl.col("_ct_ide_rev") + pl.col("_ct_ida_rev") + pl.col("_ct_on_rev"),
+        "note": "3维收益×波动/换手翻转→识别硬币(反转)vs球队(动量), 方正研报Rank IC=-0.044",
     },
 }
 

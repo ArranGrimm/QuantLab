@@ -1,7 +1,7 @@
 # QuantsPlaybook 审计报告
 
 **日期**: 2026-06-08  
-**仓库**: D:\WorkSpace\Tinkering\QuantsPlaybook  
+**仓库**: 与 QuantLab 同级目录（`../QuantsPlaybook`）  
 **方法**: 6 agent 并行扫描 B-因子构建类 / C-择时类 / D-组合优化 / A-量化基本面 / SignalMaker，结合 QuantLab 当前状态分类
 
 ---

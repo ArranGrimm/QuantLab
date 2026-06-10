@@ -37,10 +37,8 @@ FACTOR_TAG = "cgo_100d"
 # 切换因子只需改 FACTOR_TAG + make_factor_expr() 返回 None
 
 def make_factor_expr() -> tuple[list[list[pl.Expr]], pl.Expr] | None:
-    """返回 (steps, final_factor_expr)。返回 None = 使用 registry。
-    只在注册表没有时写新因子的多步公式。
-    已有公式全部在 factors/registry.py 中。
-    """
+    """返回 (steps, final_factor_expr)。返回 None = 使用 registry。"""
+
     return None
 
 
