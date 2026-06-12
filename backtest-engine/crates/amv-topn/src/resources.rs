@@ -252,6 +252,7 @@ pub struct PriceBar {
     pub rank: u32,
     pub is_signal: bool,
     pub is_bull_regime: bool,
+    pub is_rejected: bool,
 }
 
 #[derive(Resource, Default, Clone)]

@@ -187,6 +187,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             open_gap_blocked_days += 1;
         }
 
+        // --- Hook-level rejection (is_rejected flag) ---
+        raw_candidates.retain(|(code, _score, _open, _pre_close, _rank, _)| {
+            if let Some(prices) = market_data.prices.get(code) {
+                if let Some(bar) = prices.get(date) {
+                    return !bar.is_rejected;
+                }
+            }
+            true
+        });
+
         let candidates: Vec<(String, f64, f64)> = raw_candidates
             .into_iter()
             .map(|(code, score, open, _, _, _)| (code, score, open))
@@ -456,6 +466,11 @@ fn build_market_data(
     let rank = rank_casted.u32()?;
     let is_signal = df.column("is_signal")?.bool()?;
     let is_bull_regime = df.column("is_bull_regime")?.bool()?;
+    let is_rejected = if df.get_column_names().iter().any(|c| c.as_str() == "is_rejected") {
+        Some(df.column("is_rejected")?.bool()?)
+    } else {
+        None
+    };
 
     for i in 0..df.height() {
         let code = codes.get(i).ok_or("Missing code")?;
@@ -495,6 +510,10 @@ fn build_market_data(
             rank: rank.get(i).unwrap_or(9999u32),
             is_signal: is_signal.get(i).unwrap_or(false),
             is_bull_regime: is_bull_regime.get(i).unwrap_or(false),
+            is_rejected: is_rejected
+                .as_ref()
+                .and_then(|col| col.get(i))
+                .unwrap_or(false),
             atr_14: 0.0,
         };
 

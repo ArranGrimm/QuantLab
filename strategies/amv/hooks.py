@@ -195,6 +195,35 @@ class EventWeakgateHook(RuleHook):
         return filter_weakgate(signals, params)
 
 
+class TerrifiedGateHook(RuleHook):
+    """Terrified Score 过热 gate — 截面 top-N 分位以上跳过。
+
+    单独使用：trend 选出 Top-3 后，个股 Terrified 过高则跳过。
+    不补位——被 gate 的信号当天就当没选到。
+    """
+
+    def lazy_features(self, lf: pl.LazyFrame, params: dict) -> pl.LazyFrame:
+        from factors.registry import compute_required_factors
+        return compute_required_factors(lf, ["terrified_score"])
+
+    def gate_columns(self) -> list[str]:
+        return ["terrified_score"]
+
+    def gate(self, signals: pl.DataFrame, params: dict) -> pl.DataFrame:
+        threshold = params.get("terrified_gate_threshold", 0.80)
+        # rank(descending=False): 最高 terrified → rank=N(大) → rank/len≈1 → gt(threshold)
+        # 即 rank/len > 0.95 → top 5% 最惊恐 → 跳过
+        signals = signals.with_columns(
+            pl.col("terrified_score")
+            .rank("average", descending=False)
+            .over("signal_date")
+            .truediv(pl.len().over("signal_date"))
+            .gt(threshold)
+            .alias("is_rejected")
+        )
+        return signals
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Hook registry
 # ═══════════════════════════════════════════════════════════════════════════
@@ -203,6 +232,7 @@ _HOOK_REGISTRY: dict[str, type[RuleHook]] = {
     "medium-trend-quality": MediumTrendQualityHook,
     "amv-regime-gate": AmvRegimeGateHook,
     "event-weakgate": EventWeakgateHook,
+    "terrified-gate": TerrifiedGateHook,
 }
 
 

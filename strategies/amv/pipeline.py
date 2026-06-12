@@ -104,6 +104,7 @@ def export_ranker_strategy(
     final_cols |= set(ranker_cols)
     for hook in hooks:
         final_cols |= set(hook.penalty_columns())
+        final_cols |= set(hook.gate_columns())
     lf = lf.select(list(final_cols))
     market = lf.collect()
     reader.close()
@@ -122,6 +123,10 @@ def export_ranker_strategy(
 
     # _score_and_select enriches market with score/rank columns, then
     # extracts signal_rows. market retains all columns for export join.
+    gate_cols: list[str] = []
+    for hook in hooks:
+        gate_cols.extend(hook.gate_columns())
+
     signal_rows, market = _score_and_select(
         market=market,
         base_score_expr=base_score,
@@ -129,6 +134,7 @@ def export_ranker_strategy(
         candidate_expr=candidate_expr,
         strategy_name=strategy.name,
         top_n=config.top_n,
+        extra_columns=gate_cols,
     )
 
     # ── Phase 4: Gate (ONLY on signal_rows — tiny, ~2000 rows) ──
@@ -191,7 +197,8 @@ def _score_and_select(
     candidate_expr: pl.Expr,
     strategy_name: str,
     top_n: int,
-) -> pl.DataFrame:
+    extra_columns: list[str] | None = None,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Compute scores, apply penalties, rank on FULL cross-section, select TopN.
 
     Returns (signal_rows, market_enriched) — market remains available for
@@ -217,17 +224,20 @@ def _score_and_select(
         .alias("_signal_rank"),
     )
 
+    base_cols = [
+        pl.col("date").alias("signal_date"),
+        pl.col("code"),
+        pl.lit(strategy_name).alias("sleeve_id"),
+        pl.col("_signal_score").alias("score"),
+        pl.col("_signal_rank").cast(pl.UInt32).alias("rank"),
+    ]
+    extra_select = [pl.col(c) for c in (extra_columns or []) if c in market.columns]
+
     signal_rows = (
         market.filter(
             pl.col("_is_signal_candidate") & (pl.col("_signal_rank") <= top_n)
         )
-        .select([
-            pl.col("date").alias("signal_date"),
-            pl.col("code"),
-            pl.lit(strategy_name).alias("sleeve_id"),
-            pl.col("_signal_score").alias("score"),
-            pl.col("_signal_rank").cast(pl.UInt32).alias("rank"),
-        ])
+        .select(base_cols + extra_select)
         .sort(["signal_date", "rank", "code"])
     )
 
@@ -243,10 +253,13 @@ def _shift_to_execution(
         .with_columns(pl.col("date").shift(-1).alias("execution_date"))
         .drop_nulls("execution_date")
     )
+    select_cols = ["execution_date", "code", "signal_date", "sleeve_id", "score", "rank"]
+    if "is_rejected" in signal_rows.columns:
+        select_cols.append("is_rejected")
     return (
         signal_rows
         .join(trading_dates, left_on="signal_date", right_on="date", how="inner")
-        .select(["execution_date", "code", "signal_date", "sleeve_id", "score", "rank"])
+        .select(select_cols)
         .rename({"execution_date": "date"})
     )
 
@@ -256,7 +269,8 @@ def _build_backtest_signal_frame(
 ) -> pl.DataFrame:
     """Build the full daily panel with signal columns for backtesting."""
     execution_signals = _shift_to_execution(market, signal_rows)
-    return (
+    has_rejected = "is_rejected" in execution_signals.columns
+    result = (
         market.join(execution_signals, on=["date", "code"], how="left")
         .with_columns(
             is_signal=pl.col("signal_date").is_not_null(),
@@ -264,5 +278,9 @@ def _build_backtest_signal_frame(
             rank=pl.col("rank").fill_null(9999).cast(pl.UInt32),
             sleeve_id=pl.col("sleeve_id").fill_null(""),
         )
-        .sort(["date", "code"])
     )
+    if has_rejected:
+        result = result.with_columns(pl.col("is_rejected").fill_null(False))
+    else:
+        result = result.with_columns(pl.lit(False).alias("is_rejected"))
+    return result.sort(["date", "code"])

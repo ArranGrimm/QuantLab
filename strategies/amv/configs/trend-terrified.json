@@ -1,8 +1,8 @@
 {
   "name": "trend-terrified",
   "family": "trend",
-  "label": "趋势突破 P3 + Terrified 确认",
-  "description": "趋势突破 P3 + Terrified Score 趋势确认。Terrified 低分=市场共识强=趋势有效，高分=分歧大=降权。",
+  "label": "趋势突破 P3 + Terrified 过热 gate",
+  "description": "趋势突破 P3 纯 ranker + Terrified gate：Top-3 选股后，个股 Terrified 截面百分位 > 阈值则跳过当日信号（不补位）。",
   "status": "research",
   "preset": {
     "name": "6td-static",
@@ -10,8 +10,13 @@
   },
   "ranker": {
     "type": "components",
-    "template": "trend-terrified",
-    "params": { "P": 3.0, "K": 0.5, "TF": 0.5 }
+    "template": "trend",
+    "params": { "P": 3.0 }
   },
-  "rules": []
+  "rules": [
+    {
+      "id": "terrified-gate",
+      "params": { "terrified_gate_threshold": 0.95 }
+    }
+  ]
 }
