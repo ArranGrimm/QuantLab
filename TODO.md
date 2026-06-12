@@ -6,6 +6,7 @@
 
 ## 近期
 
+- [ ] AMV bear trigger 切换为 MA10 跌破（explore_regime 验证通过，4 持有期全优于当前单日 -2.3%）
 - [ ] sector-tailwind 针对申万分类重新调参
 - [ ] pullback-pb3 raw-execution allocation 分析（当前 +42.5% / 15.0%，与 trend 日相关 0.26）
 - [ ] event-firstboard MaxDD 改善（当前 36.1%）
@@ -27,6 +28,7 @@
 - [x] RSRS、Breadth、CSVC 均不如 AMV 适用于全市场选股场景
 - [x] AMV 在趋势年（2022/2024）极其有效，震荡年（2023）反效
 - [x] P3 Top3 选股可以与 AMV 择时互补（2023 择时亏 -1.5% 但选股赚 +16.6%）
+- [x] AMV MA10 bear trigger（滞后版）4 持有期全优于当前单日 -2.3% 规则，待生产切换
 
 ## 已完成
 

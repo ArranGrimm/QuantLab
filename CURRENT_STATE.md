@@ -75,6 +75,7 @@
 - raw execution 没有推翻趋势突破方向，但压低旧 adjusted 口径收益约 25-30pp。
 - **AMV 活跃市值牛熊识别本身就是 alpha**：牛市中随机买 5 只拿 20 天月均 +2.3%（t=+2.02），比全年无脑买多赚 +1.4%。P3 Top3 选股在此基础上进一步做截面分化（2023 年 AMV 择时亏 -1.5% 但 P3 选股赚 +16.6%）。
 - 经典择时指标（RSRS、Breadth、CSVC）均不如 AMV 适用于全市场选股场景。
+- AMV 熊市触发从单日 -2.3% 切换为 MA10 跌破（滞后版），在探索实验中所有持有期均优于当前规则（5d Δ+0.19pp, 10d +0.30pp, 15d +0.49pp, 20d +0.43pp）。待生产环境切换。
 - pullback-pb3 与 trend 家族低相关，是自然互补 sleeve。
 - 中期结构/趋势质量增强（medium penalty）在 Mac TDX 上增量不成立。
 - Terrified Score（IC -0.085 IR -0.64，最强实验因子）作为选股因子接入 trend 后全部跑输 baseline（P1/K0.5/TF0.5 +84% vs P3 +171%）。IC ≠ 可交易收益。

@@ -76,6 +76,45 @@ def build_breadth_gate(market: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def build_amv_ma10_gate() -> pl.DataFrame:
+    """AMV 择时 — MA10 版本：bear = close_lag < MA10_lag（滞后防未来信息）。"""
+    import duckdb
+
+    amv_db = ROOT.parent / "QuantData" / "Ashare" / "active_market_value.duckdb"
+    conn = duckdb.connect(str(amv_db), read_only=True)
+    df = conn.execute(
+        "SELECT trade_date, amv_close FROM active_market_value ORDER BY trade_date"
+    ).pl()
+    conn.close()
+
+    df = df.with_columns(
+        ret1=(pl.col("amv_close") / pl.col("amv_close").shift(1) - 1) * 100,
+        ret2=(pl.col("amv_close") / pl.col("amv_close").shift(2) - 1) * 100,
+        close_lag=pl.col("amv_close").shift(1),
+        ma10_lag=pl.col("amv_close").rolling_mean(10).shift(1),
+    ).drop_nulls().with_columns(
+        bull=pl.max_horizontal("ret1", "ret2").ge(4.0),
+        bear=pl.col("close_lag").lt(pl.col("ma10_lag")),
+    )
+
+    state = "neutral"
+    states = []
+    for bull, bear in zip(df["bull"], df["bear"]):
+        if bear:
+            state = "bear"
+        if bull:
+            state = "bull"
+        states.append(state)
+
+    # effective lag = 1: regime observed at close of day T is tradable on T+1
+    states = ["neutral"] + states[:-1]
+    df = df.with_columns(pl.Series("state", states))
+    return df.select(
+        pl.col("trade_date").alias("date"),
+        (pl.col("state") == "bull").cast(pl.Int8).alias("amv_ma10"),
+    ).with_columns(pl.lit("AMV-MA10").alias("gate_name"))
+
+
 def build_csvc_gate(market: pl.DataFrame) -> pl.DataFrame:
     n = 120
     daily = (market.sort(["code", "date"])
@@ -100,14 +139,16 @@ def evaluate_gates(market: pl.DataFrame) -> None:
     max_fwd = max(FWD_DAYS)
     market = market.with_columns(pl.col("date").dt.year().alias("year"))
 
-    # AMV gate + 其他三个 gate
-    amv     = market.group_by("date").agg(pl.col("is_bull_regime").first().alias("amv")).sort("date")
-    rsrs    = build_rsrs_gate()
-    breadth = build_breadth_gate(market)
-    csvc    = build_csvc_gate(market)
+    # AMV gate (原版) + AMV-MA10 + 其他三个 gate
+    amv      = market.group_by("date").agg(pl.col("is_bull_regime").first().alias("amv")).sort("date")
+    amv_ma10 = build_amv_ma10_gate()
+    rsrs     = build_rsrs_gate()
+    breadth  = build_breadth_gate(market)
+    csvc     = build_csvc_gate(market)
 
     gates = [
-        ("amv", "AMV 活跃市值"),
+        ("amv", "AMV(-2.3%)"),
+        ("g_amv_ma10", "AMV-MA10"),
         ("g_rsrs", "RSRS"),
         ("g_breadth", "Breadth"),
         ("g_csvc", "CSVC"),
@@ -133,6 +174,7 @@ def evaluate_gates(market: pl.DataFrame) -> None:
                 pl.col(col_fwd).sample(n=TOP_K, with_replacement=False, shuffle=True).mean().alias("mc_ret")
             ).sort("date")
             joined = daily_mc.join(amv, on="date", how="inner")
+            joined = joined.join(amv_ma10.select(["date", pl.col("amv_ma10").alias("g_amv_ma10")]), on="date", how="left")
             joined = joined.join(rsrs.select(["date", pl.col("rsrs").alias("g_rsrs")]), on="date", how="left")
             joined = joined.join(breadth.select(["date", pl.col("breadth").alias("g_breadth")]), on="date", how="left")
             joined = joined.join(csvc.select(["date", pl.col("csvc").alias("g_csvc")]), on="date", how="left")
@@ -176,6 +218,26 @@ def evaluate_gates(market: pl.DataFrame) -> None:
             rf = float(np.mean(yr_off_vals))
             no = yv.filter(pl.col("is_bull_regime")).select("date").unique().height
             nf = yv.filter(~pl.col("is_bull_regime")).select("date").unique().height
+            print(f"  {yr:>6}  {no:>5} {ro:>+8.4%} {nf:>5} {rf:>+8.4%}  {ro-rf:>+8.4%}")
+
+        # ── AMV-MA10 分年 ──
+        print(f"\n  AMV-MA10 分年 (持有 {fwd} 天):")
+        print(f"  {'Year':>6}  {'开':>5} {'开仓ret':>9} {'关':>5} {'关仓ret':>9}  {'Δ':>9}")
+        print(f"  {'-'*46}")
+        for yr in sorted(valid["year"].unique().drop_nulls().cast(int).to_list()):
+            yv = valid.filter(pl.col("year") == yr)
+            yr_on_vals = []
+            yr_off_vals = []
+            for _ in range(MC_DRAWS):
+                d = yv.group_by("date").agg(
+                    pl.col(col_fwd).sample(n=TOP_K, with_replacement=False, shuffle=True).mean().alias("r")
+                ).join(amv_ma10.select(["date", pl.col("amv_ma10")]), on="date", how="left")
+                yr_on_vals.append(d.filter(pl.col("amv_ma10") == 1)["r"].mean() or 0.0)
+                yr_off_vals.append(d.filter(pl.col("amv_ma10") != 1)["r"].mean() or 0.0)
+            ro = float(np.mean(yr_on_vals))
+            rf = float(np.mean(yr_off_vals))
+            no = yv.filter(pl.col("date").is_in(amv_ma10.filter(pl.col("amv_ma10")==1)["date"])).select("date").unique().height
+            nf = yv.filter(pl.col("date").is_in(amv_ma10.filter(pl.col("amv_ma10")!=1)["date"])).select("date").unique().height
             print(f"  {yr:>6}  {no:>5} {ro:>+8.4%} {nf:>5} {rf:>+8.4%}  {ro-rf:>+8.4%}")
 
 
